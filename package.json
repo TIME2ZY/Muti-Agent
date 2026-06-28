@@ -1,0 +1,11 @@
+{
+  "name": "multi-agent-invoke-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "check": "node --check server.js && node --check invoke-cli.js && node --check a2a-routing.js"
+  }
+}
