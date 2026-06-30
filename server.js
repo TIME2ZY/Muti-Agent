@@ -15,6 +15,7 @@ const ROOT = __dirname;
 const SKILLS_DIR = path.join(ROOT, "skills");
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
 const DEFAULT_SESSIONS_FILE = path.join(ROOT, ".invoke-chat-sessions.json");
+const DEFAULT_INVOCATIONS_FILE = path.join(ROOT, ".invoke-chat-invocations.json");
 const DEFAULT_KILL_GRACE_MS = 5000;
 const DEFAULT_SERVER_TIMEOUT_MS = 30 * 60 * 1000; // 30 min, mirrors invoke-cli default
 
@@ -339,6 +340,114 @@ function appendToSession(sessionsFile, sessionId, message) {
   return session;
 }
 
+// ── Invocation event store ────────────────────────────────────
+//
+// Each agent run inside /api chat is recorded as an "invocation" with a
+// chronological list of events (invocation-start, stdout, stderr,
+// invocation-end). This is the data source for the "memory/回忆" panel:
+// the frontend (and agents, mid-run) can list, search and replay the
+// execution trace of any invocation in the session.
+//
+// Records live in an in-memory Map per server instance (loaded from disk at
+// startup, flushed to disk when an invocation finalises). Event records are
+// kept lightweight so they can be streamed back in bulk.
+
+function readInvocationsFile(file) {
+  if (!fs.existsSync(file)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return parsed && parsed.invocations && typeof parsed.invocations === "object"
+      ? parsed.invocations
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeInvocationsFile(file, invocations) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tempFile = `${file}.tmp`;
+  fs.writeFileSync(tempFile, `${JSON.stringify({ invocations }, null, 2)}\n`, "utf8");
+  fs.renameSync(tempFile, file);
+}
+
+function recordInvocationEvent(map, invocationId, kind, payload) {
+  const record = map.get(invocationId);
+  if (!record) return;
+  record.events.push({ ts: new Date().toISOString(), kind, payload: payload || {} });
+}
+
+function finalizeInvocationEvent(map, invocationId, code, signal) {
+  const record = map.get(invocationId);
+  if (!record) return null;
+  record.endedAt = new Date().toISOString();
+  record.state = code === 0 ? "completed" : signal ? "aborted" : "failed";
+  record.events.push({
+    ts: record.endedAt,
+    kind: "invocation-end",
+    payload: { code, signal },
+  });
+  return record;
+}
+
+function listInvocationsFromMap(map, sessionId) {
+  const result = [];
+  for (const record of map.values()) {
+    if (record.sessionId !== sessionId) continue;
+    result.push({
+      invocationId: record.invocationId,
+      agent: record.agent,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt,
+      state: record.state,
+      eventCount: record.events.length,
+    });
+  }
+  result.sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt));
+  return result;
+}
+
+function searchInvocationsInMap(map, sessionId, query, limit) {
+  const q = String(query || "").toLowerCase();
+  const max = Math.max(1, Math.min(Number(limit) || 50, 200));
+  const hits = [];
+  for (const record of map.values()) {
+    if (record.sessionId !== sessionId) continue;
+    record.events.forEach((evt, idx) => {
+      const hay = `${evt.kind} ${JSON.stringify(evt.payload || {})}`.toLowerCase();
+      if (q && hay.includes(q)) {
+        hits.push({
+          invocationId: record.invocationId,
+          eventNo: idx,
+          kind: evt.kind,
+          ts: evt.ts,
+          snippet: JSON.stringify(evt.payload || {}).slice(0, 200),
+        });
+      }
+    });
+  }
+  hits.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  return hits.slice(0, max);
+}
+
+function readInvocationFromMap(map, sessionId, invocationId, from, limit) {
+  const record = map.get(invocationId);
+  if (!record || record.sessionId !== sessionId) return null;
+  const start = Math.max(0, Number(from) || 0);
+  const lim = Math.max(1, Math.min(Number(limit) || 200, 1000));
+  return {
+    invocationId: record.invocationId,
+    agent: record.agent,
+    startedAt: record.startedAt,
+    endedAt: record.endedAt,
+    state: record.state,
+    events: record.events.slice(start, start + lim),
+    total: record.events.length,
+    from: start,
+    limit: lim,
+  };
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -553,7 +662,28 @@ function createServer(options = {}) {
   const spawnRunner = options.spawnRunner || spawn;
   const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
   const worktreeManager = options.worktreeManager || worktreeManagerModule.createWorktreeManager({ rootDir: ROOT });
+  const invocationsFile = options.invocationsFile || DEFAULT_INVOCATIONS_FILE;
   let projectDir = ROOT;
+
+  // Per-instance invocation event registry. Loaded from disk at startup so
+  // that recall works across server restarts; updated as agents run and
+  // flushed to disk whenever an invocation finalises.
+  const invocationEvents = new Map();
+  for (const [id, record] of Object.entries(readInvocationsFile(invocationsFile))) {
+    if (record && record.invocationId && record.sessionId) {
+      invocationEvents.set(id, record);
+    }
+  }
+
+  function persistInvocations() {
+    try {
+      const obj = {};
+      for (const [id, record] of invocationEvents) obj[id] = record;
+      writeInvocationsFile(invocationsFile, obj);
+    } catch (error) {
+      console.error("Failed to persist invocations:", error.message);
+    }
+  }
 
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
@@ -763,19 +893,33 @@ function createServer(options = {}) {
       return;
     }
 
+    // ── Recall routes (memory/回忆) ───────────────────────────
+    // Read-only invocation history. Usable by the frontend (no token) and by
+    // agents mid-run (token validated when present). This is the data source
+    // for the expandable memory panel: list who ran what, search across all
+    // invocations, and replay a single invocation's event stream.
+
     if (req.method === "GET" && url.pathname === "/api/callbacks/list-invocations") {
       const sessionId = url.searchParams.get("sessionId") || "";
       const invocationId = url.searchParams.get("invocationId") || "";
       const callbackToken = req.headers["x-callback-token"] || "";
 
-      if (!sessionId || !invocationId || !callbackToken) {
-        sendJson(res, 400, { error: "sessionId, invocationId, and X-Callback-Token are required." });
+      if (!sessionId) {
+        sendJson(res, 400, { error: "sessionId is required." });
         return;
       }
 
-      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
-        sendJson(res, 401, { error: "Invalid callback token." });
-        return;
+      // If an agent supplies credentials, validate them; the frontend calls
+      // without credentials and is allowed because these reads are read-only.
+      if (invocationId || callbackToken) {
+        if (!invocationId || !callbackToken) {
+          sendJson(res, 400, { error: "invocationId and X-Callback-Token must be provided together." });
+          return;
+        }
+        if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+          sendJson(res, 401, { error: "Invalid callback token." });
+          return;
+        }
       }
 
       const invocations = await transcript.listInvocationsWithMeta(sessionId);
@@ -791,8 +935,8 @@ function createServer(options = {}) {
       const limitRaw = url.searchParams.get("limit");
       const limit = limitRaw ? Math.max(1, Math.min(200, parseInt(limitRaw, 10) || 20)) : 20;
 
-      if (!sessionId || !invocationId || !callbackToken) {
-        sendJson(res, 400, { error: "sessionId, invocationId, and X-Callback-Token are required." });
+      if (!sessionId) {
+        sendJson(res, 400, { error: "sessionId is required." });
         return;
       }
       if (!query) {
@@ -800,9 +944,15 @@ function createServer(options = {}) {
         return;
       }
 
-      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
-        sendJson(res, 401, { error: "Invalid callback token." });
-        return;
+      if (invocationId || callbackToken) {
+        if (!invocationId || !callbackToken) {
+          sendJson(res, 400, { error: "invocationId and X-Callback-Token must be provided together." });
+          return;
+        }
+        if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+          sendJson(res, 401, { error: "Invalid callback token." });
+          return;
+        }
       }
 
       const hits = await transcript.searchTranscript(sessionId, query, { limit });
@@ -820,8 +970,8 @@ function createServer(options = {}) {
       const from = fromRaw ? Math.max(0, parseInt(fromRaw, 10) || 0) : 0;
       const limit = limitRaw ? Math.max(1, Math.min(2000, parseInt(limitRaw, 10) || 200)) : 200;
 
-      if (!sessionId || !invocationId || !callbackToken) {
-        sendJson(res, 400, { error: "sessionId, invocationId, and X-Callback-Token are required." });
+      if (!sessionId) {
+        sendJson(res, 400, { error: "sessionId is required." });
         return;
       }
       if (!targetInvocationId) {
@@ -829,12 +979,22 @@ function createServer(options = {}) {
         return;
       }
 
-      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
-        sendJson(res, 401, { error: "Invalid callback token." });
-        return;
+      if (invocationId || callbackToken) {
+        if (!invocationId || !callbackToken) {
+          sendJson(res, 400, { error: "invocationId and X-Callback-Token must be provided together." });
+          return;
+        }
+        if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+          sendJson(res, 401, { error: "Invalid callback token." });
+          return;
+        }
       }
 
       const result = await transcript.readInvocationPage(sessionId, targetInvocationId, { from, limit });
+      if (result.total === 0) {
+        sendJson(res, 404, { error: "Invocation not found." });
+        return;
+      }
       sendJson(res, 200, { invocationId: targetInvocationId, ...result });
       return;
     }
@@ -990,7 +1150,7 @@ function createServer(options = {}) {
       // back to the chat room while they are still executing.
       const protocol = req.headers["x-forwarded-proto"] || "http";
       const apiUrl = process.env.CAT_CAFE_API_URL || `${protocol}://${req.headers.host}`;
-      const callbackInstructions = callbacks.buildCallbackInstructions(apiUrl);
+      const callbackInstructions = callbacks.buildCallbackInstructions(apiUrl, sessionId);
 
       const worklist = [requestedAgent];
       const maxDepth = getMaxA2ADepth();
@@ -1083,7 +1243,28 @@ function createServer(options = {}) {
           let assistantContent = "";
           let contextWarned = false;
           let contextSealedSseSent = false;
-          sendSse(res, "agent-start", { agent });
+
+          // Create per-invocation credentials for MCP-style HTTP callbacks.
+          const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
+
+          // Register the invocation event record so the recall panel can
+          // list/search/replay this run. invocation-start is the first event.
+          invocationEvents.set(invocationId, {
+            invocationId,
+            sessionId,
+            agent,
+            startedAt: new Date().toISOString(),
+            endedAt: null,
+            state: "active",
+            events: [
+              {
+                ts: new Date().toISOString(),
+                kind: "invocation-start",
+                payload: { agent, shouldResume },
+              },
+            ],
+          });
+          sendSse(res, "agent-start", { agent, invocationId });
 
           // Build prompt: A2A-routed agents get prior context
           let agentPrompt;
@@ -1115,9 +1296,6 @@ function createServer(options = {}) {
           // cumulative tracker before the CLI process starts. This includes
           // skills body, callback instructions, and any A2A handoff block.
           healthTracker.addInput(promptForAgent.length);
-
-          // Create per-invocation credentials for MCP-style HTTP callbacks.
-          const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
           threadCtx.currentInvocationId = invocationId;
           const invocationEnv = {
             CAT_CAFE_API_URL: apiUrl,
@@ -1153,10 +1331,12 @@ function createServer(options = {}) {
             onStdout(text) {
               assistantContent += text;
               transcript.appendEvent(sessionId, invocationId, "stdout", { agent, text });
+              recordInvocationEvent(invocationEvents, invocationId, "stdout", { text });
               sendSse(res, "message", { agent, role: "assistant", text });
             },
             onStderr(text) {
               transcript.appendEvent(sessionId, invocationId, "stderr", { agent, text });
+              recordInvocationEvent(invocationEvents, invocationId, "stderr", { text });
               const visible = filterBenignStderr(text);
               if (visible) sendSse(res, "stderr", { agent, text: visible });
             },
@@ -1175,6 +1355,11 @@ function createServer(options = {}) {
             shouldStop: () => sealer.isSealed(),
           });
 
+          // Finalise the invocation event record regardless of outcome, so the
+          // recall panel can show completed/aborted state and persist to disk.
+          finalizeInvocationEvent(invocationEvents, invocationId, code, signal);
+          persistInvocations();
+
           // Client disconnected or session was aborted while this agent ran.
           if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
             aborted = true;
@@ -1187,6 +1372,7 @@ function createServer(options = {}) {
             content: assistantContent,
             exitCode: code,
             signal,
+            invocationId,
           });
           transcript.appendEvent(sessionId, invocationId, "invocation-end", {
             agent,
@@ -1196,7 +1382,7 @@ function createServer(options = {}) {
             fillRatioAtEnd: healthTracker.getFillRatio(),
             sealerState: sealer.getState(),
           });
-          sendSse(res, "agent-exit", { agent, code, signal });
+          sendSse(res, "agent-exit", { agent, code, signal, invocationId });
 
           // Record for A2A context
           a2aHistory.push({ agent, content: assistantContent });
@@ -1235,14 +1421,14 @@ function createServer(options = {}) {
         }
       }
 
-      if (!aborted) {
-        sendSse(res, "done", {});
-      }
-      res.end();
       // Wait for any pending transcript writes to flush before returning so
       // subsequent GET /api/callbacks/session-search calls see the full record.
       await transcript.flush();
       threadCtx.currentInvocationId = null;
+      if (!aborted) {
+        sendSse(res, "done", {});
+      }
+      res.end();
       return;
     }
 
@@ -1276,4 +1462,12 @@ module.exports = {
   setSessionWorktree,
   deleteSession,
   appendToSession,
+  // Invocation event store
+  readInvocationsFile,
+  writeInvocationsFile,
+  recordInvocationEvent,
+  finalizeInvocationEvent,
+  listInvocationsFromMap,
+  searchInvocationsInMap,
+  readInvocationFromMap,
 };

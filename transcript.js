@@ -115,19 +115,21 @@ async function listInvocations(sessionId) {
     .map((f) => f.replace(/\.jsonl$/, ""));
 }
 
-// Read a single invocation's metadata (agent, timing, sealer state) by scanning
+// Read a single invocation's metadata (agent, timing, lifecycle state) by scanning
 // its first/last events. Returns null if the invocation doesn't exist.
 async function readInvocationMeta(sessionId, invocationId) {
   const events = await readInvocation(sessionId, invocationId);
   if (events.length === 0) return null;
   const start = events.find((e) => e.kind === "invocation-start");
   const end = events.find((e) => e.kind === "invocation-end");
+  const code = end && end.payload ? end.payload.code : null;
+  const signal = end && end.payload ? end.payload.signal : null;
   return {
     invocationId,
     agent: (start && start.payload && start.payload.agent) || "unknown",
     startedAt: (start && start.ts) || null,
     endedAt: (end && end.ts) || null,
-    state: (end && end.payload && end.payload.sealerState) || null,
+    state: end ? (code === 0 ? "completed" : signal ? "aborted" : "failed") : null,
     eventCount: events.length,
   };
 }

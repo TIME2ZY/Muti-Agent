@@ -137,6 +137,7 @@ function postMessage(threadId, invocationId, content, { appendToSession, readSes
       agent,
       content,
       source: "callback",
+      invocationId,
     });
   }
 
@@ -179,8 +180,13 @@ function postMessage(threadId, invocationId, content, { appendToSession, readSes
  * Build the HTTP callback instruction block that gets injected into agent prompts.
  * This teaches agents without native dynamic MCP support (Codex, opencode, etc.)
  * how to call back into the Cat Café server via curl.
+ *
+ * sessionId is the active chat thread id. It is injected both into the curl
+ * examples and (by the server) as the CAT_CAFE_THREAD_ID env var, so agents can
+ * quote $CAT_CAFE_THREAD_ID instead of hard-coding it.
  */
-function buildCallbackInstructions(apiUrl) {
+function buildCallbackInstructions(apiUrl, sessionId) {
+  const sid = sessionId || "$CAT_CAFE_THREAD_ID";
   return `<!-- ═══════════════════════════════════════════════════════════ -->
 <!-- MCP 回调工具说明（通过 HTTP 调用）                            -->
 <!-- 你可以在执行过程中主动发消息、查阅历史，不需要等执行结束      -->

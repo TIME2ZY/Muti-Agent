@@ -72,7 +72,7 @@ test("buildDigest lists existing invocations with metadata", withTempDir(async (
   assert.match(digest, /1 invocations in this session/);
   assert.match(digest, /i1/);
   assert.match(digest, /architect/);
-  assert.match(digest, /state=active/);
+  assert.match(digest, /state=completed/);
   assert.match(digest, /events=3/);
   assert.match(digest, /duration=\d+ms/);
 }));

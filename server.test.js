@@ -46,6 +46,7 @@ async function withServer(options, fn) {
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
+    invocationsFile: path.join(tmpDir, "invocations.json"),
     ...options,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -649,7 +650,7 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       assert.equal(second.status, 200);
 
       const text = await second.text();
-      assert.match(text, /event: agent-start\ndata: \{"agent":"sage"\}/);
+      assert.match(text, /event: agent-start\ndata: \{"agent":"sage","invocationId":"[^"]+"\}/);
       assert.equal(callCount, 2);
     }
   );
@@ -1427,7 +1428,7 @@ test("GET /api/sessions/:id/transcript/invocations returns invocation metadata",
       assert.equal(body.invocations[0].agent, "forge");
       assert.equal(body.invocations[1].invocationId, "i-1");
       assert.equal(body.invocations[1].agent, "sage");
-      assert.equal(body.invocations[1].state, "active");
+      assert.equal(body.invocations[1].state, "completed");
     });
   } finally {
     if (prevDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
@@ -1679,10 +1680,8 @@ test("A2A-routed agents do NOT get bootstrap packet (handoff block instead)", as
   );
 
   assert.equal(prompts.length, 2);
-  // First agent (architect) has bootstrap
   assert.match(prompts[0], /<!-- Session Identity -->/);
   assert.match(prompts[0], /<!-- 回忆铁律/);
-  // Second agent (sage, A2A-routed) does NOT have bootstrap, but does have handoff
   assert.doesNotMatch(prompts[1], /<!-- Session Identity -->/);
   assert.doesNotMatch(prompts[1], /<!-- 回忆铁律/);
   assert.match(prompts[1], /任务交接/);
@@ -1690,7 +1689,6 @@ test("A2A-routed agents do NOT get bootstrap packet (handoff block instead)", as
 });
 
 test("bootstrap digest lists prior invocations when chat is re-entered with same sessionId", async () => {
-  // Use a fresh transcript dir so prior test runs don't pollute the digest.
   const transcript = require("./transcript");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bootstrap-resume-"));
   const prevDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
@@ -1701,7 +1699,6 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
   let secondPrompt = null;
 
   try {
-    // First chat — completes normally
     await withServer(
       {
         spawnRunner(command, args) {
@@ -1723,11 +1720,9 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
       }
     );
 
-    // Wait for transcript to flush
     await transcript.flush();
     await new Promise((r) => setTimeout(r, 200));
 
-    // Second chat — same sessionId
     await withServer(
       {
         spawnRunner(command, args) {
@@ -1751,9 +1746,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
 
     assert.ok(firstPrompts && firstPrompts.length >= 1, "first chat should have run");
     assert.ok(secondPrompt, "second chat should have run");
-    // First chat had no prior history (empty digest)
     assert.match(firstPrompts[0], /第一个 invocation/);
-    // Second chat's digest should list the first chat's invocation
     assert.match(secondPrompt, /<!-- Digest/);
     assert.doesNotMatch(secondPrompt, /第一个 invocation/);
   } finally {
@@ -1761,4 +1754,149 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
     else process.env.CAT_CAFE_TRANSCRIPT_DIR = prevDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+// ── Recall (memory/回忆) tests ────────────────────────────────
+
+test("buildCallbackInstructions includes sessionId, CAT_CAFE_THREAD_ID and recall routes", () => {
+  const instructions = callbacks.buildCallbackInstructions("http://example.test", "session-xyz");
+  assert.match(instructions, /\$CAT_CAFE_THREAD_ID/);
+  assert.ok(instructions.includes("sessionId=$CAT_CAFE_THREAD_ID"), "should reference sessionId=$CAT_CAFE_THREAD_ID");
+  assert.ok(instructions.includes('\\"sessionId\\": \\"$CAT_CAFE_THREAD_ID\\"'), "post-message body should include sessionId");
+  assert.match(instructions, /\/api\/callbacks\/list-invocations/);
+  assert.match(instructions, /\/api\/callbacks\/session-search/);
+  assert.match(instructions, /\/api\/callbacks\/read-invocation/);
+});
+
+test("chat records invocation events and recall routes expose them (no token = frontend path)", async () => {
+  await withServer(
+    {
+      spawnRunner() {
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write("hello recall");
+          child.stderr.write("a stderr line\n");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const chat = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "sage", prompt: "remember this" }),
+      });
+      const chatText = await chat.text();
+      const sidMatch = chatText.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
+      assert.ok(sidMatch, "expected session event");
+      const sid = sidMatch[1];
+      const invMatch = chatText.match(/event: agent-start\ndata: \{"agent":"sage","invocationId":"([^"]+)"\}/);
+      assert.ok(invMatch, "expected agent-start with invocationId");
+      const invId = invMatch[1];
+
+      const listRes = await fetch(`${baseUrl}/api/callbacks/list-invocations?sessionId=${sid}`);
+      const list = await listRes.json();
+      assert.equal(listRes.status, 200);
+      assert.equal(list.invocations.length, 1);
+      assert.equal(list.invocations[0].invocationId, invId);
+      assert.equal(list.invocations[0].agent, "sage");
+      assert.equal(list.invocations[0].state, "completed");
+      assert.ok(list.invocations[0].eventCount >= 3, "should have start + stdout + stderr + end events");
+
+      const readRes = await fetch(`${baseUrl}/api/callbacks/read-invocation?sessionId=${sid}&targetInvocationId=${invId}`);
+      const read = await readRes.json();
+      assert.equal(readRes.status, 200);
+      assert.equal(read.invocationId, invId);
+      assert.equal(read.total, read.events.length);
+      const kinds = read.events.map((e) => e.kind);
+      assert.ok(kinds.includes("invocation-start"));
+      assert.ok(kinds.includes("stdout"));
+      assert.ok(kinds.includes("stderr"));
+      assert.ok(kinds.includes("invocation-end"));
+
+      const searchRes = await fetch(`${baseUrl}/api/callbacks/session-search?sessionId=${sid}&query=hello%20recall`);
+      const search = await searchRes.json();
+      assert.equal(searchRes.status, 200);
+      assert.ok(search.hits.length >= 1);
+      assert.equal(search.hits[0].invocationId, invId);
+
+      const histRes = await fetch(`${baseUrl}/api/messages?sessionId=${sid}`);
+      const hist = await histRes.json();
+      const assistant = hist.messages.find((m) => m.role === "assistant");
+      assert.ok(assistant, "should have an assistant message");
+      assert.equal(assistant.invocationId, invId);
+    }
+  );
+});
+
+test("read-invocation returns 404 for unknown invocation", async () => {
+  await withServer({}, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/callbacks/read-invocation?sessionId=any&targetInvocationId=missing`);
+    assert.equal(res.status, 404);
+  });
+});
+
+test("list-invocations requires sessionId", async () => {
+  await withServer({}, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/callbacks/list-invocations`);
+    assert.equal(res.status, 400);
+  });
+});
+
+test("read-invocation requires targetInvocationId", async () => {
+  await withServer({}, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/callbacks/read-invocation?sessionId=any`);
+    assert.equal(res.status, 400);
+  });
+});
+
+test("recall routes reject invalid agent token when one is provided", async () => {
+  await withServer({}, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/callbacks/list-invocations?sessionId=s&invocationId=i`, {
+      headers: { "x-callback-token": "bad" },
+    });
+    assert.equal(res.status, 401);
+  });
+});
+
+test("invocation event helpers are pure and session-scoped", () => {
+  const {
+    recordInvocationEvent,
+    finalizeInvocationEvent,
+    listInvocationsFromMap,
+    searchInvocationsInMap,
+    readInvocationFromMap,
+  } = require("./server");
+  const map = new Map();
+  map.set("inv-1", {
+    invocationId: "inv-1",
+    sessionId: "s-1",
+    agent: "sage",
+    startedAt: "2026-06-30T10:00:00Z",
+    endedAt: null,
+    state: "active",
+    events: [],
+  });
+  recordInvocationEvent(map, "inv-1", "stdout", { text: "redis port 6379" });
+  recordInvocationEvent(map, "inv-1", "stdout", { text: "done" });
+  finalizeInvocationEvent(map, "inv-1", 0, null);
+
+  const list = listInvocationsFromMap(map, "s-1");
+  assert.equal(list.length, 1);
+  assert.equal(list[0].state, "completed");
+  assert.equal(list[0].eventCount, 3);
+
+  const hits = searchInvocationsInMap(map, "s-1", "redis", 10);
+  assert.equal(hits.length, 1);
+  assert.match(hits[0].snippet, /redis/);
+
+  const read = readInvocationFromMap(map, "s-1", "inv-1", 0, 10);
+  assert.equal(read.total, 3);
+  assert.equal(read.events.length, 3);
+  assert.equal(read.from, 0);
+  assert.equal(read.limit, 10);
+
+  assert.equal(listInvocationsFromMap(map, "other").length, 0);
+  assert.equal(readInvocationFromMap(map, "other", "inv-1", 0, 10), null);
 });

@@ -226,7 +226,7 @@ test("readInvocationPage returns empty result for unknown invocation", withTempD
   assert.equal(page.events.length, 0);
 }));
 
-test("readInvocationMeta extracts agent, timing, and sealer state", withTempDir(async () => {
+test("readInvocationMeta extracts agent, timing, and lifecycle state", withTempDir(async () => {
   transcript.appendEvent("s1", "i1", "invocation-start", { agent: "sage" });
   await new Promise((r) => setTimeout(r, 5));
   transcript.appendEvent("s1", "i1", "stdout", { text: "hello" });
@@ -240,7 +240,7 @@ test("readInvocationMeta extracts agent, timing, and sealer state", withTempDir(
   assert.ok(typeof meta.startedAt === "string" && meta.startedAt.length > 0);
   assert.ok(typeof meta.endedAt === "string" && meta.endedAt.length > 0);
   assert.ok(meta.startedAt <= meta.endedAt);
-  assert.equal(meta.state, "sealing");
+  assert.equal(meta.state, "completed");
   assert.equal(meta.eventCount, 3);
 }));
 
@@ -276,7 +276,7 @@ test("listInvocationsWithMeta returns invocations sorted newest first", withTemp
   assert.equal(list[0].agent, "sage");
   assert.equal(list[1].invocationId, "i1");
   assert.equal(list[1].agent, "architect");
-  assert.equal(list[1].state, "active");
+  assert.equal(list[1].state, "completed");
 }));
 
 test("listInvocationsWithMeta returns [] for unknown session", withTempDir(async () => {
