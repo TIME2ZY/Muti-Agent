@@ -26,6 +26,12 @@
     const projectDirEl = $("#project-dir");
     const projectDirPath = $("#project-dir-path");
     const mentionMenuEl = $("#mention-menu");
+    const recallToggleEl = $("#recall-toggle");
+    const recallPanelEl = $("#recall-panel");
+    const recallCloseEl = $("#recall-close");
+    const recallOverlayEl = $("#recall-overlay");
+    const recallBodyEl = $("#recall-body");
+    const recallSearchInputEl = $("#recall-search-input");
 
     /* ═══════════════════════════════════════════════════════════
        THEME
@@ -127,6 +133,9 @@
       mentionIndex: 0,
       mentionMatches: [],
       mentionRange: null,
+      liveInvocations: new Map(), // agent → invocationId (captured from agent-start)
+      recallOpen: false,
+      recallSearchDebounce: null,
     };
 
     /* ═══════════════════════════════════════════════════════════
@@ -511,6 +520,7 @@
       if (id === state.currentSessionId) return;
       state.currentSessionId = id;
       state.liveMessages.clear();
+      state.liveInvocations.clear();
       messagesEl.replaceChildren();
       try {
         const res = await fetch(`/api/messages?sessionId=${id}`);
@@ -525,6 +535,7 @@
               agent: msg.agent,
               content: msg.content || "",
               variant: msg.exitCode && msg.exitCode !== 0 ? "error" : "",
+              invocationId: msg.invocationId || null,
             });
           }
           ensureSpacer();
@@ -578,7 +589,7 @@
        MESSAGES
        ═══════════════════════════════════════════════════════════ */
 
-    function createMessage({ role, agent, content = "", variant = "" }) {
+    function createMessage({ role, agent, content = "", variant = "", invocationId = null }) {
       hideEmpty();
       ensureSpacer();
 
@@ -615,6 +626,13 @@
       wrapper.append(meta, bubble);
       messagesEl.insertBefore(wrapper, spacerEl);
       scrollDown();
+
+      // Recall toggle: let the user expand this invocation's event trace.
+      // Attached after the bubble is in the DOM so live messages can also
+      // get it retroactively via attachRecallToggle in the done handler.
+      if (role === "assistant" && invocationId) {
+        attachRecallToggle(wrapper, invocationId);
+      }
 
       return { wrapper, bubble };
     }
@@ -671,6 +689,7 @@
         stopThinking(agent);
         const item = createMessage({ role: "assistant", agent });
         item.rawText = "";
+        item.invocationId = state.liveInvocations.get(agent) || null;
         state.liveMessages.set(agent, item);
       }
       const item = state.liveMessages.get(agent);
@@ -847,6 +866,257 @@
     }
 
     /* ═══════════════════════════════════════════════════════════
+       RECALL (memory/回忆)
+       Each assistant message is produced by an invocation. Invocations record
+       an event stream (invocation-start / stdout / stderr / invocation-end)
+       on the server, exposed via /api/callbacks/{list-invocations,
+       session-search, read-invocation}. The recall panel lists & searches
+       them; each assistant message also gets an inline "回忆" toggle that
+       expands its own execution trace — this is the "点了会展开" the
+       original design was missing.
+       ═══════════════════════════════════════════════════════════ */
+
+    function fmtEventTime(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function eventBodyText(evt) {
+      const p = evt.payload || {};
+      if (evt.kind === "stdout" || evt.kind === "stderr") return p.text || "";
+      if (evt.kind === "invocation-start") return `agent: ${p.agent || "?"}${p.shouldResume ? " · resume" : ""}`;
+      if (evt.kind === "invocation-end") return `code: ${p.code ?? "?"}${p.signal ? ` · signal: ${p.signal}` : ""}`;
+      return JSON.stringify(p, null, 2);
+    }
+
+    function renderEventList(events) {
+      const container = document.createElement("div");
+      container.className = "recall-events";
+      if (!events || events.length === 0) {
+        container.innerHTML = '<div class="recall-empty">无事件记录</div>';
+        return container;
+      }
+      for (const evt of events) {
+        const row = document.createElement("div");
+        row.className = `recall-event kind-${evt.kind}`;
+        const head = document.createElement("div");
+        head.className = "recall-event-head";
+        const tag = document.createElement("span");
+        tag.className = "recall-event-tag";
+        tag.textContent = evt.kind;
+        const time = document.createElement("span");
+        time.className = "recall-event-time";
+        time.textContent = fmtEventTime(evt.ts);
+        head.append(tag, time);
+        const body = document.createElement("div");
+        body.className = "recall-event-body";
+        body.textContent = eventBodyText(evt);
+        row.append(head, body);
+        container.append(row);
+      }
+      return container;
+    }
+
+    async function fetchInvocationEvents(invocationId) {
+      const sid = state.currentSessionId;
+      if (!sid || !invocationId) return [];
+      const url = `/api/callbacks/read-invocation?sessionId=${encodeURIComponent(sid)}`
+        + `&targetInvocationId=${encodeURIComponent(invocationId)}&from=0&limit=500`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`read-invocation ${res.status}`);
+      const data = await res.json();
+      return data.events || [];
+    }
+
+    // ── Per-message inline expand ────────────────────────────
+
+    function attachRecallToggle(wrapper, invocationId) {
+      if (!invocationId) return;
+      const meta = wrapper.querySelector(".msg-meta");
+      if (!meta || meta.querySelector(".msg-recall")) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "msg-recall";
+      btn.textContent = "回忆";
+      btn.title = "展开本次调用的执行记录";
+      btn.addEventListener("click", () => toggleMessageRecall(wrapper, invocationId, btn));
+      meta.appendChild(btn);
+    }
+
+    async function toggleMessageRecall(wrapper, invocationId, btn) {
+      let panel = wrapper.querySelector(".msg-recall-panel");
+      if (panel) {
+        panel.remove();
+        btn.classList.remove("open");
+        return;
+      }
+      panel = document.createElement("div");
+      panel.className = "msg-recall-panel";
+      panel.innerHTML = '<div class="recall-empty">加载中…</div>';
+      wrapper.appendChild(panel);
+      btn.classList.add("open");
+      try {
+        const events = await fetchInvocationEvents(invocationId);
+        panel.replaceChildren(renderEventList(events));
+      } catch (e) {
+        panel.innerHTML = `<div class="recall-empty">加载失败: ${escHtml(e.message)}</div>`;
+      }
+    }
+
+    // ── Session-level recall panel ───────────────────────────
+
+    function openRecall() {
+      recallPanelEl.hidden = false;
+      recallOverlayEl.classList.add("show");
+      state.recallOpen = true;
+      loadRecallList();
+    }
+
+    function closeRecall() {
+      recallPanelEl.hidden = true;
+      recallOverlayEl.classList.remove("show");
+      state.recallOpen = false;
+    }
+
+    recallToggleEl.addEventListener("click", () => {
+      if (state.recallOpen) closeRecall(); else openRecall();
+    });
+    recallCloseEl.addEventListener("click", closeRecall);
+    recallOverlayEl.addEventListener("click", closeRecall);
+
+    async function loadRecallList() {
+      recallSearchInputEl.value = "";
+      recallBodyEl.innerHTML = '<div class="recall-empty">加载中…</div>';
+      const sid = state.currentSessionId;
+      if (!sid) { recallBodyEl.innerHTML = '<div class="recall-empty">暂无会话</div>'; return; }
+      try {
+        const res = await fetch(`/api/callbacks/list-invocations?sessionId=${encodeURIComponent(sid)}`);
+        const data = await res.json();
+        renderRecallList(data.invocations || []);
+      } catch (e) {
+        recallBodyEl.innerHTML = `<div class="recall-empty">加载失败: ${escHtml(e.message)}</div>`;
+      }
+    }
+
+    function renderRecallList(invocations) {
+      if (invocations.length === 0) {
+        recallBodyEl.innerHTML = '<div class="recall-empty">本会话暂无调用记录</div>';
+        return;
+      }
+      recallBodyEl.replaceChildren(...invocations.map((inv) => {
+        const row = document.createElement("div");
+        row.className = "recall-item";
+        row.dataset.invocationId = inv.invocationId;
+        const head = document.createElement("div");
+        head.className = "recall-item-head";
+        const agent = document.createElement("span");
+        agent.className = "recall-item-agent";
+        agent.textContent = agentLabel(inv.agent);
+        const st = document.createElement("span");
+        st.className = `recall-item-state state-${inv.state}`;
+        st.textContent = inv.state;
+        const meta = document.createElement("span");
+        meta.className = "recall-item-meta";
+        meta.textContent = `${inv.eventCount} 事件 · ${fmtTime(inv.startedAt)}`;
+        const caret = document.createElement("span");
+        caret.className = "recall-item-caret";
+        caret.textContent = "▸";
+        head.append(agent, st, meta, caret);
+        row.append(head);
+        row.addEventListener("click", () => toggleRecallItem(row, inv.invocationId));
+        return row;
+      }));
+    }
+
+    async function toggleRecallItem(row, invocationId) {
+      let body = row.querySelector(".recall-item-body");
+      if (body) {
+        body.remove();
+        row.classList.remove("expanded");
+        return;
+      }
+      row.classList.add("expanded");
+      body = document.createElement("div");
+      body.className = "recall-item-body";
+      body.innerHTML = '<div class="recall-empty">加载中…</div>';
+      row.append(body);
+      try {
+        const events = await fetchInvocationEvents(invocationId);
+        body.replaceChildren(renderEventList(events));
+      } catch (e) {
+        body.innerHTML = `<div class="recall-empty">加载失败: ${escHtml(e.message)}</div>`;
+      }
+    }
+
+    recallSearchInputEl.addEventListener("input", () => {
+      clearTimeout(state.recallSearchDebounce);
+      const q = recallSearchInputEl.value.trim();
+      if (!q) { loadRecallList(); return; }
+      state.recallSearchDebounce = setTimeout(() => runRecallSearch(q), 250);
+    });
+
+    async function runRecallSearch(query) {
+      recallBodyEl.innerHTML = '<div class="recall-empty">搜索中…</div>';
+      const sid = state.currentSessionId;
+      if (!sid) { recallBodyEl.innerHTML = '<div class="recall-empty">暂无会话</div>'; return; }
+      try {
+        const res = await fetch(`/api/callbacks/session-search?sessionId=${encodeURIComponent(sid)}`
+          + `&query=${encodeURIComponent(query)}&limit=30`);
+        const data = await res.json();
+        renderRecallHits(data.hits || []);
+      } catch (e) {
+        recallBodyEl.innerHTML = `<div class="recall-empty">搜索失败: ${escHtml(e.message)}</div>`;
+      }
+    }
+
+    function renderRecallHits(hits) {
+      if (hits.length === 0) {
+        recallBodyEl.innerHTML = '<div class="recall-empty">无匹配结果</div>';
+        return;
+      }
+      recallBodyEl.replaceChildren(...hits.map((hit) => {
+        const row = document.createElement("div");
+        row.className = "recall-hit";
+        row.dataset.invocationId = hit.invocationId;
+        const head = document.createElement("div");
+        head.className = "recall-hit-head";
+        const kind = document.createElement("span");
+        kind.className = "recall-hit-kind";
+        kind.textContent = `${hit.kind} · #${hit.eventNo}`;
+        const time = document.createElement("span");
+        time.className = "recall-hit-time";
+        time.textContent = fmtTime(hit.ts);
+        head.append(kind, time);
+        const snip = document.createElement("div");
+        snip.className = "recall-hit-snippet";
+        snip.textContent = hit.snippet;
+        row.append(head, snip);
+        row.addEventListener("click", () => toggleRecallHit(row, hit.invocationId));
+        return row;
+      }));
+    }
+
+    async function toggleRecallHit(row, invocationId) {
+      let body = row.querySelector(".recall-item-body");
+      if (body) {
+        body.remove();
+        return;
+      }
+      body = document.createElement("div");
+      body.className = "recall-item-body";
+      body.innerHTML = '<div class="recall-empty">加载中…</div>';
+      row.append(body);
+      try {
+        const events = await fetchInvocationEvents(invocationId);
+        body.replaceChildren(renderEventList(events));
+      } catch (e) {
+        body.innerHTML = `<div class="recall-empty">加载失败: ${escHtml(e.message)}</div>`;
+      }
+    }
+
+    /* ═══════════════════════════════════════════════════════════
        SSE PARSER
        ═══════════════════════════════════════════════════════════ */
 
@@ -874,6 +1144,7 @@
           renderSkillTags(data.skills);
           break;
         case "agent-start":
+          if (data.invocationId) state.liveInvocations.set(data.agent, data.invocationId);
           showThinking(data.agent);
           break;
         case "message":
@@ -917,6 +1188,9 @@
               const meta = item.wrapper.querySelector(".msg-meta");
               if (meta) meta.appendChild(copy);
             }
+            // Attach the recall toggle so the user can expand this message's
+            // invocation trace (the "memory 点了会展开" behaviour).
+            if (item.invocationId) attachRecallToggle(item.wrapper, item.invocationId);
           }
           break;
       }
@@ -956,6 +1230,7 @@
       state.selectedAgent = targetAgent.id;
       state.doneReceived = false;
       state.liveMessages.clear();
+      state.liveInvocations.clear();
 
       createMessage({ role: "user", agent: targetAgent.id, content: prompt });
       promptEl.value = "";

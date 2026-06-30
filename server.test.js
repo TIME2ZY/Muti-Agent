@@ -21,6 +21,7 @@ async function withServer(options, fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoke-server-test-"));
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
+    invocationsFile: path.join(tmpDir, "invocations.json"),
     ...options,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -478,7 +479,7 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       assert.equal(second.status, 200);
 
       const text = await second.text();
-      assert.match(text, /event: agent-start\ndata: \{"agent":"sage"\}/);
+      assert.match(text, /event: agent-start\ndata: \{"agent":"sage","invocationId":"[^"]+"\}/);
       assert.equal(callCount, 2);
     }
   );
@@ -567,4 +568,156 @@ test("callbacks.validateToken accepts only exact matches", () => {
   assert.equal(callbacks.validateToken("missing", invocationId, callbackToken), false);
 
   callbacks.unregisterThread(sessionId);
+});
+
+// ── Recall (memory/回忆) tests ────────────────────────────────
+
+test("buildCallbackInstructions includes sessionId, CAT_CAFE_THREAD_ID and recall routes", () => {
+  const instructions = callbacks.buildCallbackInstructions("http://example.test", "session-xyz");
+  assert.match(instructions, /\$CAT_CAFE_THREAD_ID/);
+  // The thread-context / recall curl examples pass sessionId via --data-urlencode
+  assert.ok(instructions.includes("sessionId=$CAT_CAFE_THREAD_ID"), "should reference sessionId=$CAT_CAFE_THREAD_ID");
+  // The post-message JSON body must include sessionId (escaped quotes in the curl -d)
+  assert.ok(instructions.includes('\\"sessionId\\": \\"$CAT_CAFE_THREAD_ID\\"'), "post-message body should include sessionId");
+  assert.match(instructions, /\/api\/callbacks\/list-invocations/);
+  assert.match(instructions, /\/api\/callbacks\/session-search/);
+  assert.match(instructions, /\/api\/callbacks\/read-invocation/);
+});
+
+test("chat records invocation events and recall routes expose them (no token = frontend path)", async () => {
+  await withServer(
+    {
+      spawnRunner() {
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write("hello recall");
+          child.stderr.write("a stderr line\n");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const chat = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "sage", prompt: "remember this" }),
+      });
+      const chatText = await chat.text();
+      const sidMatch = chatText.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
+      assert.ok(sidMatch, "expected session event");
+      const sid = sidMatch[1];
+      const invMatch = chatText.match(/event: agent-start\ndata: \{"agent":"sage","invocationId":"([^"]+)"\}/);
+      assert.ok(invMatch, "expected agent-start with invocationId");
+      const invId = invMatch[1];
+
+      // list-invocations (frontend path: no token)
+      const listRes = await fetch(`${baseUrl}/api/callbacks/list-invocations?sessionId=${sid}`);
+      const list = await listRes.json();
+      assert.equal(listRes.status, 200);
+      assert.equal(list.invocations.length, 1);
+      assert.equal(list.invocations[0].invocationId, invId);
+      assert.equal(list.invocations[0].agent, "sage");
+      assert.equal(list.invocations[0].state, "completed");
+      assert.ok(list.invocations[0].eventCount >= 3, "should have start + stdout + stderr + end events");
+
+      // read-invocation
+      const readRes = await fetch(`${baseUrl}/api/callbacks/read-invocation?sessionId=${sid}&targetInvocationId=${invId}`);
+      const read = await readRes.json();
+      assert.equal(readRes.status, 200);
+      assert.equal(read.invocationId, invId);
+      assert.equal(read.total, read.events.length);
+      const kinds = read.events.map((e) => e.kind);
+      assert.ok(kinds.includes("invocation-start"));
+      assert.ok(kinds.includes("stdout"));
+      assert.ok(kinds.includes("stderr"));
+      assert.ok(kinds.includes("invocation-end"));
+
+      // session-search
+      const searchRes = await fetch(`${baseUrl}/api/callbacks/session-search?sessionId=${sid}&query=hello%20recall`);
+      const search = await searchRes.json();
+      assert.equal(searchRes.status, 200);
+      assert.ok(search.hits.length >= 1);
+      assert.equal(search.hits[0].invocationId, invId);
+
+      // assistant message persisted with invocationId
+      const histRes = await fetch(`${baseUrl}/api/messages?sessionId=${sid}`);
+      const hist = await histRes.json();
+      const assistant = hist.messages.find((m) => m.role === "assistant");
+      assert.ok(assistant, "should have an assistant message");
+      assert.equal(assistant.invocationId, invId);
+    }
+  );
+});
+
+test("read-invocation returns 404 for unknown invocation", async () => {
+  await withServer({}, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/callbacks/read-invocation?sessionId=any&targetInvocationId=missing`);
+    assert.equal(res.status, 404);
+  });
+});
+
+test("list-invocations requires sessionId", async () => {
+  await withServer({}, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/callbacks/list-invocations`);
+    assert.equal(res.status, 400);
+  });
+});
+
+test("read-invocation requires targetInvocationId", async () => {
+  await withServer({}, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/callbacks/read-invocation?sessionId=any`);
+    assert.equal(res.status, 400);
+  });
+});
+
+test("recall routes reject invalid agent token when one is provided", async () => {
+  await withServer({}, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/callbacks/list-invocations?sessionId=s&invocationId=i`, {
+      headers: { "x-callback-token": "bad" },
+    });
+    assert.equal(res.status, 401);
+  });
+});
+
+test("invocation event helpers are pure and session-scoped", () => {
+  const {
+    recordInvocationEvent,
+    finalizeInvocationEvent,
+    listInvocationsFromMap,
+    searchInvocationsInMap,
+    readInvocationFromMap,
+  } = require("./server");
+  const map = new Map();
+  map.set("inv-1", {
+    invocationId: "inv-1",
+    sessionId: "s-1",
+    agent: "sage",
+    startedAt: "2026-06-30T10:00:00Z",
+    endedAt: null,
+    state: "active",
+    events: [],
+  });
+  recordInvocationEvent(map, "inv-1", "stdout", { text: "redis port 6379" });
+  recordInvocationEvent(map, "inv-1", "stdout", { text: "done" });
+  finalizeInvocationEvent(map, "inv-1", 0, null);
+
+  const list = listInvocationsFromMap(map, "s-1");
+  assert.equal(list.length, 1);
+  assert.equal(list[0].state, "completed");
+  assert.equal(list[0].eventCount, 3); // 2 stdout + 1 invocation-end
+
+  const hits = searchInvocationsInMap(map, "s-1", "redis", 10);
+  assert.equal(hits.length, 1);
+  assert.match(hits[0].snippet, /redis/);
+
+  const read = readInvocationFromMap(map, "s-1", "inv-1", 0, 10);
+  assert.equal(read.total, 3);
+  assert.equal(read.events.length, 3);
+  assert.equal(read.from, 0);
+  assert.equal(read.limit, 10);
+
+  // session scoping: wrong session sees nothing
+  assert.equal(listInvocationsFromMap(map, "other").length, 0);
+  assert.equal(readInvocationFromMap(map, "other", "inv-1", 0, 10), null);
 });
