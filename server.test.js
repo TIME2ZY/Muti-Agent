@@ -438,6 +438,46 @@ test("POST /api/chat rejects invalid projectDir", async () => {
   );
 });
 
+test("chat endpoint does not create a worktree by default", async () => {
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-no-worktree-base-"));
+  const calls = [];
+
+  await withServer(
+    {
+      worktreeManager: {
+        ensureWorktree() {
+          throw new Error("ensureWorktree should not be called for default chat runs");
+        },
+      },
+      spawnRunner(command, args, options) {
+        calls.push({ command, args, cwd: options.cwd, env: options.env });
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write("answer");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "sage", prompt: "@小智 hello", projectDir: baseDir }),
+      });
+      await response.text();
+
+      assert.equal(response.status, 200);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].cwd, baseDir);
+      assert.equal(calls[0].env.CAT_CAFE_WORKTREE, "0");
+      assert.equal(calls[0].env.CAT_CAFE_BASE_DIR, baseDir);
+      assert.equal(calls[0].env.CAT_CAFE_WORKTREE_DIR, baseDir);
+      assert.equal(calls[0].env.CAT_CAFE_BRANCH, "");
+    }
+  );
+});
+
 test("chat endpoint creates and uses a session worktree as child cwd", async () => {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-base-"));
   const worktreeDir = path.join(os.tmpdir(), "server-worktree-session");
@@ -473,7 +513,7 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "sage", prompt: "@小智 hello", projectDir: baseDir }),
+        body: JSON.stringify({ agent: "sage", prompt: "@小智 hello", projectDir: baseDir, useWorktree: true }),
       });
       const text = await response.text();
 
@@ -528,7 +568,7 @@ test("chat endpoint reuses the session worktree on later turns", async () => {
         const response = await fetch(`${baseUrl}/api/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "sage", prompt, sessionId: session.id, projectDir: baseDir }),
+          body: JSON.stringify({ agent: "sage", prompt, sessionId: session.id, projectDir: baseDir, useWorktree: true }),
         });
         assert.equal(response.status, 200);
         await response.text();
@@ -1554,6 +1594,18 @@ test("frontend index.html exposes memory-toggle button + panel markup", () => {
   assert.match(html, /id="memory-search-input"/);
   assert.match(html, /id="memory-list"/);
   assert.match(html, /id="memory-refresh"/);
+});
+
+test("frontend index.html exposes explicit worktree mode toggle", () => {
+  const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+  assert.match(html, /id="use-worktree"/);
+  assert.match(html, /title="为本次对话创建或复用隔离 worktree"/);
+});
+
+test("frontend app.js sends useWorktree from the explicit toggle", () => {
+  const js = fs.readFileSync(path.join(__dirname, "public", "app.js"), "utf8");
+  assert.match(js, /const useWorktreeInput\s*=\s*\$\("#use-worktree"\)/);
+  assert.match(js, /useWorktree:\s*useWorktreeInput\.checked/);
 });
 
 test("frontend app.js wires up open/close + refresh for memory panel", () => {

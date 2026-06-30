@@ -11,6 +11,7 @@
     const promptEl     = $("#prompt");
     const btnSend      = $("#btn-send");
     const btnClear     = $("#btn-clear");
+    const useWorktreeInput = $("#use-worktree");
     const skillsBarEl  = $("#skills-bar");
     const statusEl     = $("#status");
     const sidebarEl    = $("#sidebar");
@@ -1633,6 +1634,7 @@
             prompt,
             sessionId: state.currentSessionId,
             projectDir: state.projectDir || undefined,
+            useWorktree: useWorktreeInput.checked,
           }),
           signal: state.controller.signal,
         });

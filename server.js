@@ -1089,6 +1089,7 @@ function createServer(options = {}) {
       const requestedAgent = typeof body.agent === "string" ? body.agent : "architect";
       const rawPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
       const resume = body.resume === true;
+      const useWorktree = body.useWorktree === true;
       let sessionId = typeof body.sessionId === "string" ? body.sessionId : null;
 
       // Update project directory if provided
@@ -1124,7 +1125,7 @@ function createServer(options = {}) {
       let session = ensureSession(sessionsFile, sessionId);
 
       let sessionWorktree = session.worktree;
-      if (!sessionWorktree) {
+      if (useWorktree && !sessionWorktree) {
         try {
           sessionWorktree = worktreeManager.ensureWorktree({ baseDir: projectDir, sessionId });
           session = setSessionWorktree(sessionsFile, sessionId, sessionWorktree);
@@ -1133,6 +1134,12 @@ function createServer(options = {}) {
           return;
         }
       }
+      const runWorkspace = sessionWorktree || {
+        sessionId,
+        baseDir: projectDir,
+        worktreeDir: projectDir,
+        branch: "",
+      };
 
       // Per-session concurrency guard: abort any previous invocation on this
       // session before starting a new one.
@@ -1302,11 +1309,13 @@ function createServer(options = {}) {
             CAT_CAFE_THREAD_ID: sessionId,
             CAT_CAFE_INVOCATION_ID: invocationId,
             CAT_CAFE_CALLBACK_TOKEN: callbackToken,
-            CAT_CAFE_WORKTREE: "1",
-            CAT_CAFE_BASE_DIR: sessionWorktree.baseDir,
-            CAT_CAFE_WORKTREE_DIR: sessionWorktree.worktreeDir,
-            CAT_CAFE_BRANCH: sessionWorktree.branch,
-            INVOKE_CLI_SESSION_FILE: path.join(sessionWorktree.worktreeDir, ".cat-cafe", "invoke-cli-session.json"),
+            CAT_CAFE_WORKTREE: sessionWorktree ? "1" : "0",
+            CAT_CAFE_BASE_DIR: runWorkspace.baseDir,
+            CAT_CAFE_WORKTREE_DIR: runWorkspace.worktreeDir,
+            CAT_CAFE_BRANCH: runWorkspace.branch || "",
+            ...(sessionWorktree
+              ? { INVOKE_CLI_SESSION_FILE: path.join(sessionWorktree.worktreeDir, ".cat-cafe", "invoke-cli-session.json") }
+              : {}),
           };
 
           transcript.appendEvent(sessionId, invocationId, "invocation-start", {
@@ -1323,7 +1332,7 @@ function createServer(options = {}) {
             spawnRunner,
             args,
             res,
-            cwd: sessionWorktree.worktreeDir,
+            cwd: runWorkspace.worktreeDir,
             killGraceMs,
             timeoutMs,
             signal: invocationController.signal,

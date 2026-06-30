@@ -1033,6 +1033,28 @@
       gap: var(--space-4);
     }
 
+    .worktree-mode {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-1);
+      min-height: 28px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--text-tertiary);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .worktree-mode input {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--accent);
+    }
+
+    .worktree-mode:hover {
+      color: var(--text-secondary);
+    }
+
     .composer-actions-right {
       display: flex;
       align-items: center;
