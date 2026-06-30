@@ -5,6 +5,11 @@ const path = require("node:path");
 const { AGENTS } = require("./invoke-cli");
 const { parseA2AMentions, getMaxA2ADepth } = require("./a2a-routing");
 const callbacks = require("./callbacks");
+const transcript = require("./transcript");
+const contextHealth = require("./context-health");
+const sessionSealer = require("./session-sealer");
+const sessionBootstrap = require("./session-bootstrap");
+const worktreeManagerModule = require("./worktree-manager");
 
 const ROOT = __dirname;
 const SKILLS_DIR = path.join(ROOT, "skills");
@@ -249,7 +254,7 @@ function writeSessions(sessionsFile, data) {
 function createSession(sessionsFile) {
   const data = readSessions(sessionsFile);
   const id = generateId();
-  const session = { id, title: "", createdAt: new Date().toISOString(), messages: [] };
+  const session = { id, title: "", createdAt: new Date().toISOString(), messages: [], worktree: null };
   data.sessions[id] = session;
   data.lastSessionId = id;
   writeSessions(sessionsFile, data);
@@ -271,6 +276,28 @@ function listSessions(sessionsFile) {
 function getSession(sessionsFile, sessionId) {
   const data = readSessions(sessionsFile);
   return data.sessions[sessionId] || null;
+}
+
+function ensureSession(sessionsFile, sessionId) {
+  const data = readSessions(sessionsFile);
+  let session = data.sessions[sessionId];
+  if (!session) {
+    session = { id: sessionId, title: "", createdAt: new Date().toISOString(), messages: [], worktree: null };
+    data.sessions[sessionId] = session;
+    data.lastSessionId = sessionId;
+    writeSessions(sessionsFile, data);
+  }
+  return session;
+}
+
+function setSessionWorktree(sessionsFile, sessionId, worktree) {
+  const data = readSessions(sessionsFile);
+  const session = data.sessions[sessionId];
+  if (!session) return null;
+  session.worktree = worktree || null;
+  data.lastSessionId = sessionId;
+  writeSessions(sessionsFile, data);
+  return session;
 }
 
 function deleteSession(sessionsFile, sessionId) {
@@ -412,7 +439,7 @@ function buildChatArgs(agent, prompt, resume, augmentedPrompt) {
   return buildInvokeArgs({ agent, prompt, resume }, augmentedPrompt);
 }
 
-function runChildStream({ spawnRunner, args, res, cwd, onStdout, onStderr, killGraceMs, signal, timeoutMs, env }) {
+function runChildStream({ spawnRunner, args, res, cwd, onStdout, onStderr, onHealth, shouldStop, killGraceMs, signal, timeoutMs, env }) {
   const graceMs = killGraceMs || DEFAULT_KILL_GRACE_MS;
   const workDir = cwd || ROOT;
   const serverTimeoutMs = timeoutMs || DEFAULT_SERVER_TIMEOUT_MS;
@@ -472,11 +499,21 @@ function runChildStream({ spawnRunner, args, res, cwd, onStdout, onStderr, killG
 
     child.stdout.on("data", (chunk) => {
       markActivity();
-      onStdout(chunk.toString());
+      if (shouldStop && shouldStop()) {
+        stopChild("Stop requested by caller (context sealed).");
+        return;
+      }
+      const text = chunk.toString();
+      onStdout(text);
+      if (onHealth) onHealth(text.length);
     });
 
     child.stderr.on("data", (chunk) => {
       markActivity();
+      if (shouldStop && shouldStop()) {
+        stopChild("Stop requested by caller (context sealed).");
+        return;
+      }
       onStderr(chunk.toString());
     });
 
@@ -515,6 +552,7 @@ function filterBenignStderr(text) {
 function createServer(options = {}) {
   const spawnRunner = options.spawnRunner || spawn;
   const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
+  const worktreeManager = options.worktreeManager || worktreeManagerModule.createWorktreeManager({ rootDir: ROOT });
   let projectDir = ROOT;
 
   return http.createServer(async (req, res) => {
@@ -580,6 +618,72 @@ function createServer(options = {}) {
         const deleted = deleteSession(sessionsFile, sessionId);
         if (!deleted) { sendJson(res, 404, { error: "Session not found." }); return; }
         sendJson(res, 200, { ok: true });
+        return;
+      }
+    }
+
+    // ── Transcript access for the frontend (no callback token needed) ──
+    const transcriptListMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/transcript\/invocations$/);
+    if (req.method === "GET" && transcriptListMatch) {
+      const sessionId = transcriptListMatch[1];
+      const session = getSession(sessionsFile, sessionId);
+      if (!session) { sendJson(res, 404, { error: "Session not found." }); return; }
+      const invocations = await transcript.listInvocationsWithMeta(sessionId);
+      sendJson(res, 200, { invocations });
+      return;
+    }
+
+    const transcriptReadMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/transcript\/invocations\/([a-zA-Z0-9_.\-]+)$/);
+    if (req.method === "GET" && transcriptReadMatch) {
+      const sessionId = transcriptReadMatch[1];
+      const invId = transcriptReadMatch[2];
+      const session = getSession(sessionsFile, sessionId);
+      if (!session) { sendJson(res, 404, { error: "Session not found." }); return; }
+      const from = Math.max(0, parseInt(url.searchParams.get("from") || "0", 10) || 0);
+      const limitRaw = url.searchParams.get("limit");
+      const limit = limitRaw ? Math.max(1, Math.min(2000, parseInt(limitRaw, 10) || 200)) : 200;
+      const result = await transcript.readInvocationPage(sessionId, invId, { from, limit });
+      sendJson(res, 200, { invocationId: invId, ...result });
+      return;
+    }
+
+    const transcriptSearchMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/transcript\/search$/);
+    if (req.method === "GET" && transcriptSearchMatch) {
+      const sessionId = transcriptSearchMatch[1];
+      const session = getSession(sessionsFile, sessionId);
+      if (!session) { sendJson(res, 404, { error: "Session not found." }); return; }
+      const q = url.searchParams.get("q") || "";
+      if (!q) { sendJson(res, 400, { error: "q is required." }); return; }
+      const limit = Math.max(1, Math.min(200, parseInt(url.searchParams.get("limit") || "20", 10) || 20));
+      const hits = await transcript.searchTranscript(sessionId, q, { limit });
+      sendJson(res, 200, { hits, query: q, limit });
+      return;
+    }
+
+    const worktreeMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/worktree\/(status|diff|discard)$/);
+    if (worktreeMatch) {
+      const sessionId = worktreeMatch[1];
+      const action = worktreeMatch[2];
+      const session = getSession(sessionsFile, sessionId);
+      if (!session) { sendJson(res, 404, { error: "Session not found." }); return; }
+
+      try {
+        if (req.method === "GET" && action === "status") {
+          sendJson(res, 200, worktreeManager.getStatus(sessionId));
+          return;
+        }
+        if (req.method === "GET" && action === "diff") {
+          sendJson(res, 200, { sessionId, diff: worktreeManager.getDiff(sessionId) });
+          return;
+        }
+        if (req.method === "POST" && action === "discard") {
+          const result = worktreeManager.discardWorktree(sessionId);
+          setSessionWorktree(sessionsFile, sessionId, null);
+          sendJson(res, 200, result);
+          return;
+        }
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
         return;
       }
     }
@@ -656,6 +760,82 @@ function createServer(options = {}) {
       }
 
       sendJson(res, 200, { messages: session.messages || [] });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/callbacks/list-invocations") {
+      const sessionId = url.searchParams.get("sessionId") || "";
+      const invocationId = url.searchParams.get("invocationId") || "";
+      const callbackToken = req.headers["x-callback-token"] || "";
+
+      if (!sessionId || !invocationId || !callbackToken) {
+        sendJson(res, 400, { error: "sessionId, invocationId, and X-Callback-Token are required." });
+        return;
+      }
+
+      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+        sendJson(res, 401, { error: "Invalid callback token." });
+        return;
+      }
+
+      const invocations = await transcript.listInvocationsWithMeta(sessionId);
+      sendJson(res, 200, { invocations });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/callbacks/session-search") {
+      const sessionId = url.searchParams.get("sessionId") || "";
+      const invocationId = url.searchParams.get("invocationId") || "";
+      const callbackToken = req.headers["x-callback-token"] || "";
+      const query = url.searchParams.get("query") || "";
+      const limitRaw = url.searchParams.get("limit");
+      const limit = limitRaw ? Math.max(1, Math.min(200, parseInt(limitRaw, 10) || 20)) : 20;
+
+      if (!sessionId || !invocationId || !callbackToken) {
+        sendJson(res, 400, { error: "sessionId, invocationId, and X-Callback-Token are required." });
+        return;
+      }
+      if (!query) {
+        sendJson(res, 400, { error: "query is required." });
+        return;
+      }
+
+      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+        sendJson(res, 401, { error: "Invalid callback token." });
+        return;
+      }
+
+      const hits = await transcript.searchTranscript(sessionId, query, { limit });
+      sendJson(res, 200, { hits, query, limit });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/callbacks/read-invocation") {
+      const sessionId = url.searchParams.get("sessionId") || "";
+      const invocationId = url.searchParams.get("invocationId") || "";
+      const targetInvocationId = url.searchParams.get("targetInvocationId") || "";
+      const callbackToken = req.headers["x-callback-token"] || "";
+      const fromRaw = url.searchParams.get("from");
+      const limitRaw = url.searchParams.get("limit");
+      const from = fromRaw ? Math.max(0, parseInt(fromRaw, 10) || 0) : 0;
+      const limit = limitRaw ? Math.max(1, Math.min(2000, parseInt(limitRaw, 10) || 200)) : 200;
+
+      if (!sessionId || !invocationId || !callbackToken) {
+        sendJson(res, 400, { error: "sessionId, invocationId, and X-Callback-Token are required." });
+        return;
+      }
+      if (!targetInvocationId) {
+        sendJson(res, 400, { error: "targetInvocationId is required." });
+        return;
+      }
+
+      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+        sendJson(res, 401, { error: "Invalid callback token." });
+        return;
+      }
+
+      const result = await transcript.readInvocationPage(sessionId, targetInvocationId, { from, limit });
+      sendJson(res, 200, { invocationId: targetInvocationId, ...result });
       return;
     }
 
@@ -781,6 +961,19 @@ function createServer(options = {}) {
         sessionId = session.id;
       }
 
+      let session = ensureSession(sessionsFile, sessionId);
+
+      let sessionWorktree = session.worktree;
+      if (!sessionWorktree) {
+        try {
+          sessionWorktree = worktreeManager.ensureWorktree({ baseDir: projectDir, sessionId });
+          session = setSessionWorktree(sessionsFile, sessionId, sessionWorktree);
+        } catch (error) {
+          sendJson(res, 400, { error: error.message });
+          return;
+        }
+      }
+
       // Per-session concurrency guard: abort any previous invocation on this
       // session before starting a new one.
       const existing = activeInvocations.get(sessionId);
@@ -809,6 +1002,25 @@ function createServer(options = {}) {
         augmentedPrompt,
         activeSkills: skillNames,
       });
+      // User prompt transcript is recorded against a synthetic "user" invocation
+      // so it's searchable as part of the session's permanent record.
+      transcript.appendEvent(sessionId, "_user_prompt", "user-prompt", {
+        agent: requestedAgent,
+        content: rawPrompt,
+        activeSkills: skillNames,
+      });
+
+      // Build the bootstrap packet: identity + digest + recall rule. This is
+      // prepended to the skills-augmented prompt so the first agent in this
+      // session starts with full context (who it is, what's been done, how to
+      // look things up). A2A-routed agents (i > 0) get the handoff block
+      // instead, so the bootstrap is only injected once per chat.
+      const bootstrapPacket = await sessionBootstrap.buildBootstrapPacket({
+        threadId: sessionId,
+        sessionId,
+        agent: AGENTS[requestedAgent],
+      });
+      const augmentedPromptWithBootstrap = bootstrapPacket + "\n" + augmentedPrompt;
 
       res.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
@@ -831,13 +1043,24 @@ function createServer(options = {}) {
       // post a message mid-execution and enqueue new agents into the worklist.
       const a2aHistory = []; // [{ agent, content }]
       let aborted = false;
+      // Context health tracking — per-chat, cumulative across A2A invocations.
+      // Single tracker so the sealer sees the running total of input + output.
+      const healthTracker = contextHealth.makeTracker(requestedAgent);
+      const sealer = sessionSealer.makeSealer();
       const threadCtx = {
+        // threadId is stamped by registerThread; include sessionId explicitly
+        // so postMessage persists to the right session file.
+        sessionId,
         res,
         worklist,
         controller: invocationController,
         a2aCount: 0,
         sessionsFile,
         tokens: new Map(),
+        // Stamped per-iteration so callbacks can attribute their transcript
+        // events to the invocation that triggered them.
+        currentInvocationId: null,
+        sealer,
       };
       callbacks.registerThread(sessionId, threadCtx);
 
@@ -847,11 +1070,19 @@ function createServer(options = {}) {
             aborted = true;
             break;
           }
+          if (sealer.isSealed()) {
+            // A previous invocation triggered the action threshold; stop the chain.
+            sendSse(res, "sealed", { reason: "context overflow", ratio: healthTracker.getFillRatio() });
+            aborted = true;
+            break;
+          }
 
           const agent = worklist[i];
           // Only the first agent (explicitly requested) gets --resume
           const shouldResume = i === 0 && resume;
           let assistantContent = "";
+          let contextWarned = false;
+          let contextSealedSseSent = false;
           sendSse(res, "agent-start", { agent });
 
           // Build prompt: A2A-routed agents get prior context
@@ -877,16 +1108,35 @@ function createServer(options = {}) {
           }
 
           // Inject callback instructions so the agent can speak mid-execution.
-          const promptForAgent = (i === 0 ? augmentedPrompt : agentPrompt)
+          const promptForAgent = (i === 0 ? augmentedPromptWithBootstrap : agentPrompt)
             + "\n\n" + callbackInstructions;
+
+          // Charge the full prompt (what the CLI actually sees) to the
+          // cumulative tracker before the CLI process starts. This includes
+          // skills body, callback instructions, and any A2A handoff block.
+          healthTracker.addInput(promptForAgent.length);
 
           // Create per-invocation credentials for MCP-style HTTP callbacks.
           const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
+          threadCtx.currentInvocationId = invocationId;
           const invocationEnv = {
             CAT_CAFE_API_URL: apiUrl,
+            CAT_CAFE_THREAD_ID: sessionId,
             CAT_CAFE_INVOCATION_ID: invocationId,
             CAT_CAFE_CALLBACK_TOKEN: callbackToken,
+            CAT_CAFE_WORKTREE: "1",
+            CAT_CAFE_BASE_DIR: sessionWorktree.baseDir,
+            CAT_CAFE_WORKTREE_DIR: sessionWorktree.worktreeDir,
+            CAT_CAFE_BRANCH: sessionWorktree.branch,
+            INVOKE_CLI_SESSION_FILE: path.join(sessionWorktree.worktreeDir, ".cat-cafe", "invoke-cli-session.json"),
           };
+
+          transcript.appendEvent(sessionId, invocationId, "invocation-start", {
+            agent,
+            shouldResume,
+            promptBytes: promptForAgent.length,
+            fillRatioAtStart: healthTracker.getFillRatio(),
+          });
 
           const args = buildChatArgs(agent, agentPrompt, shouldResume, promptForAgent);
           const killGraceMs = options.killGraceMs;
@@ -895,19 +1145,34 @@ function createServer(options = {}) {
             spawnRunner,
             args,
             res,
-            cwd: projectDir,
+            cwd: sessionWorktree.worktreeDir,
             killGraceMs,
             timeoutMs,
             signal: invocationController.signal,
             env: invocationEnv,
             onStdout(text) {
               assistantContent += text;
+              transcript.appendEvent(sessionId, invocationId, "stdout", { agent, text });
               sendSse(res, "message", { agent, role: "assistant", text });
             },
             onStderr(text) {
+              transcript.appendEvent(sessionId, invocationId, "stderr", { agent, text });
               const visible = filterBenignStderr(text);
               if (visible) sendSse(res, "stderr", { agent, text: visible });
             },
+            onHealth(charCount) {
+              healthTracker.addOutput(charCount);
+              const ratio = healthTracker.getFillRatio();
+              const state = sealer.update(ratio);
+              if (state === sessionSealer.STATE.SEALING && !contextWarned) {
+                sendSse(res, "context-warning", { agent, ratio, threshold: sealer.thresholds.warn });
+                contextWarned = true;
+              } else if (state === sessionSealer.STATE.SEALED && !contextSealedSseSent) {
+                sendSse(res, "sealed", { agent, ratio, reason: "context overflow" });
+                contextSealedSseSent = true;
+              }
+            },
+            shouldStop: () => sealer.isSealed(),
           });
 
           // Client disconnected or session was aborted while this agent ran.
@@ -923,10 +1188,25 @@ function createServer(options = {}) {
             exitCode: code,
             signal,
           });
+          transcript.appendEvent(sessionId, invocationId, "invocation-end", {
+            agent,
+            code,
+            signal,
+            contentBytes: assistantContent.length,
+            fillRatioAtEnd: healthTracker.getFillRatio(),
+            sealerState: sealer.getState(),
+          });
           sendSse(res, "agent-exit", { agent, code, signal });
 
           // Record for A2A context
           a2aHistory.push({ agent, content: assistantContent });
+
+          // If this invocation pushed us into sealed, stop the chain here so
+          // we don't spawn more agents on top of a full context.
+          if (sealer.isSealed()) {
+            aborted = true;
+            break;
+          }
 
           // Check for @mentions after agent finishes
           // Only check if there's still depth budget left
@@ -938,19 +1218,31 @@ function createServer(options = {}) {
                 worklist.push(m);
                 threadCtx.a2aCount += 1;
                 sendSse(res, "a2a-route", { from: agent, to: m });
+                transcript.appendEvent(sessionId, invocationId, "a2a-route", {
+                  from: agent,
+                  to: m,
+                });
               }
             }
           }
         }
       } finally {
-        activeInvocations.delete(sessionId);
-        callbacks.unregisterThread(sessionId);
+        if (activeInvocations.get(sessionId) === invocationController) {
+          activeInvocations.delete(sessionId);
+        }
+        if (callbacks.getThread(sessionId) === threadCtx) {
+          callbacks.unregisterThread(sessionId);
+        }
       }
 
       if (!aborted) {
         sendSse(res, "done", {});
       }
       res.end();
+      // Wait for any pending transcript writes to flush before returning so
+      // subsequent GET /api/callbacks/session-search calls see the full record.
+      await transcript.flush();
+      threadCtx.currentInvocationId = null;
       return;
     }
 
@@ -978,8 +1270,10 @@ module.exports = {
   readSessions,
   writeSessions,
   createSession,
+  ensureSession,
   listSessions,
   getSession,
+  setSessionWorktree,
   deleteSession,
   appendToSession,
 };

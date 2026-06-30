@@ -3,5 +3,7 @@ npm-debug.log*
 
 .invoke-cli-session.json
 .invoke-chat-sessions.json
+.invoke-worktrees.json
 
+data/transcripts/
 .reasonix/truncated-results/

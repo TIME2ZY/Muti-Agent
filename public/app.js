@@ -25,7 +25,16 @@
     const themeToggle  = $("#theme-toggle");
     const projectDirEl = $("#project-dir");
     const projectDirPath = $("#project-dir-path");
+    const worktreeStatusEl = $("#worktree-status");
     const mentionMenuEl = $("#mention-menu");
+    const memoryToggle = $("#memory-toggle");
+    const memoryPanel = $("#memory-panel");
+    const memoryOverlay = $("#memory-overlay");
+    const memoryClose = $("#memory-close");
+    const memoryRefresh = $("#memory-refresh");
+    const memorySearchInput = $("#memory-search-input");
+    const memoryList = $("#memory-list");
+    const memoryBody = $("#memory-body");
 
     /* ═══════════════════════════════════════════════════════════
        THEME
@@ -55,12 +64,47 @@
     async function loadProjectDir() {
       try {
         const res = await fetch("/api/project");
-        const data = await res.json();
+        const data = await jsonOrThrow(res);
         state.projectDir = data.dir || "";
         projectDirPath.textContent = state.projectDir || "(当前目录)";
       } catch {
         projectDirPath.textContent = "(当前目录)";
       }
+    }
+
+    async function loadWorktreeStatus() {
+      if (!state.currentSessionId) {
+        state.worktreeStatus = null;
+        renderWorktreeStatus();
+        return;
+      }
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/worktree/status`);
+        if (!res.ok) {
+          state.worktreeStatus = null;
+          renderWorktreeStatus();
+          return;
+        }
+        state.worktreeStatus = await jsonOrThrow(res);
+        renderWorktreeStatus();
+      } catch {
+        state.worktreeStatus = null;
+        renderWorktreeStatus();
+      }
+    }
+
+    function renderWorktreeStatus() {
+      const wt = state.worktreeStatus;
+      if (!wt) {
+        worktreeStatusEl.textContent = "";
+        worktreeStatusEl.className = "worktree-status";
+        worktreeStatusEl.title = "当前对话尚未创建修改 worktree";
+        return;
+      }
+      const marker = wt.clean ? "clean" : "dirty";
+      worktreeStatusEl.textContent = `${wt.branch || "(worktree)"} · ${marker}`;
+      worktreeStatusEl.className = "worktree-status" + (wt.clean ? "" : " dirty");
+      worktreeStatusEl.title = wt.worktreeDir || wt.branch || "";
     }
 
     projectDirEl.addEventListener("click", () => {
@@ -87,13 +131,9 @@
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ dir: val }),
             });
-            const data = await res.json();
-            if (res.ok) {
-              state.projectDir = data.dir;
-              projectDirPath.textContent = data.dir;
-            } else {
-              alert(data.error || "设置失败");
-            }
+            const data = await jsonOrThrow(res);
+            state.projectDir = data.dir;
+            projectDirPath.textContent = data.dir;
           } catch (e) {
             alert("设置失败: " + e.message);
           }
@@ -123,6 +163,7 @@
       liveMessages: new Map(),   // agent → { wrapper, bubble, rawText }
       skillDebounce: null,
       projectDir: "",
+      worktreeStatus: null,
       mentionOpen: false,
       mentionIndex: 0,
       mentionMatches: [],
@@ -198,6 +239,14 @@
       if (!emptyStateEl.parentNode) {
         messagesEl.insertBefore(emptyStateEl, spacerEl);
       }
+    }
+
+    async function jsonOrThrow(res) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `${res.status} ${res.statusText}`);
+      }
+      return data;
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -452,7 +501,7 @@
     async function refreshSessionList() {
       try {
         const res = await fetch("/api/sessions");
-        const data = await res.json();
+        const data = await jsonOrThrow(res);
         const sessions = data.sessions || [];
         renderSessionList(sessions);
         return sessions;
@@ -509,12 +558,13 @@
 
     async function switchSession(id) {
       if (id === state.currentSessionId) return;
+      const previousSessionId = state.currentSessionId;
       state.currentSessionId = id;
       state.liveMessages.clear();
       messagesEl.replaceChildren();
       try {
         const res = await fetch(`/api/messages?sessionId=${id}`);
-        const data = await res.json();
+        const data = await jsonOrThrow(res);
         if (!data.messages || data.messages.length === 0) {
           ensureSpacer();
           showEmpty();
@@ -529,46 +579,54 @@
           }
           ensureSpacer();
         }
-      } catch {
-        addSystem("加载消息失败", "error");
+      } catch (e) {
+        state.currentSessionId = previousSessionId;
+        addSystem("加载消息失败: " + e.message, "error");
         ensureSpacer();
       }
       await refreshSessionList();
+      await loadWorktreeStatus();
+      if (!memoryPanel.hidden) refreshMemoryList();
     }
 
     async function newSession() {
       try {
         const res = await fetch("/api/sessions", { method: "POST" });
-        const data = await res.json();
+        const data = await jsonOrThrow(res);
         state.currentSessionId = data.session.id;
         state.liveMessages.clear();
         messagesEl.replaceChildren();
         ensureSpacer();
         showEmpty();
+        state.worktreeStatus = null;
+        renderWorktreeStatus();
         setStatus("就绪");
         await refreshSessionList();
         promptEl.focus();
         closeSidebarIfMobile();
-      } catch {
-        addSystem("创建会话失败", "error");
+      } catch (e) {
+        addSystem("创建会话失败: " + e.message, "error");
       }
     }
 
     async function deleteSession(id) {
       try {
-        await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+        await jsonOrThrow(await fetch(`/api/sessions/${id}`, { method: "DELETE" }));
         if (state.currentSessionId === id) {
           state.currentSessionId = null;
           state.liveMessages.clear();
           messagesEl.replaceChildren();
           ensureSpacer();
           showEmpty();
+          state.worktreeStatus = null;
+          renderWorktreeStatus();
           setStatus("就绪");
         }
         await refreshSessionList();
+        if (!memoryPanel.hidden) refreshMemoryList();
         closeSidebarIfMobile();
-      } catch {
-        addSystem("删除会话失败", "error");
+      } catch (e) {
+        addSystem("删除会话失败: " + e.message, "error");
       }
     }
 
@@ -682,6 +740,39 @@
       scrollDown();
     }
 
+    function finalizeLiveMessages() {
+      if (_rafId) {
+        cancelAnimationFrame(_rafId);
+        _flushRaf();
+      }
+      for (const [, item] of state.liveMessages) {
+        item.bubble.innerHTML = renderMd(item.rawText || "");
+        if (!item.wrapper.querySelector(".msg-copy")) {
+          const copy = document.createElement("button");
+          copy.className = "msg-copy";
+          copy.textContent = "⎘";
+          copy.title = "复制";
+          copy.addEventListener("click", () => {
+            navigator.clipboard.writeText(item.rawText || "").then(() => {
+              copy.textContent = "✓";
+              setTimeout(() => { copy.textContent = "⎘"; }, 1200);
+            }).catch(() => {});
+          });
+          const meta = item.wrapper.querySelector(".msg-meta");
+          if (meta) meta.appendChild(copy);
+        }
+      }
+    }
+
+    function finishStream(statusText) {
+      state.doneReceived = true;
+      finalizeLiveMessages();
+      setStatus(statusText || "就绪");
+      loadSessions();
+      loadWorktreeStatus();
+      if (!memoryPanel.hidden) refreshMemoryList();
+    }
+
     function addSystem(text, variant = "") {
       hideEmpty();
       ensureSpacer();
@@ -732,7 +823,7 @@
       clearTimeout(state.skillDebounce);
       state.skillDebounce = setTimeout(() => {
         fetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`)
-          .then((r) => r.json())
+          .then(jsonOrThrow)
           .then((d) => renderSkillTags(d.active))
           .catch(() => {});
       }, 300);
@@ -746,13 +837,49 @@
       agentTabsEl.replaceChildren(...state.agents.map((a) => {
         const item = document.createElement("article");
         item.className = "agent-tab";
+        item.setAttribute("role", "button");
+        item.tabIndex = 0;
+        item.title = `插入 @${agentMention(a)}`;
         item.innerHTML = `
           <span class="agent-tab-name"></span>
           <span class="agent-tab-model"></span>`;
         item.querySelector(".agent-tab-name").textContent = `@${agentMention(a)}`;
         item.querySelector(".agent-tab-model").textContent = agentMeta(a);
+        item.addEventListener("click", () => insertAgentMention(a));
+        item.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            insertAgentMention(a);
+          }
+        });
         return item;
       }));
+    }
+
+    function insertAgentMention(agent) {
+      const mention = `@${agentMention(agent)} `;
+      const current = promptEl.value;
+      const leadingAgent = resolvePromptAgent(current);
+
+      if (!current.trim()) {
+        promptEl.value = mention;
+      } else if (leadingAgent) {
+        const trimmedStart = current.match(/^\s*/)?.[0] || "";
+        const start = trimmedStart.length;
+        const afterStart = current.slice(start);
+        const token = `@${agentMention(leadingAgent)}`;
+        const idToken = `@${leadingAgent.id}`;
+        const oldToken = afterStart.startsWith(token) ? token : idToken;
+        promptEl.value = trimmedStart + mention + afterStart.slice(oldToken.length).trimStart();
+      } else {
+        promptEl.value = mention + current;
+      }
+
+      state.selectedAgent = agent.id;
+      promptEl.setSelectionRange(promptEl.value.length, promptEl.value.length);
+      updateActiveSkills(promptEl.value);
+      hideMentionMenu();
+      promptEl.focus();
     }
 
     function getMentionTrigger() {
@@ -834,7 +961,7 @@
     async function loadAgents() {
       try {
         const res = await fetch("/api/agents");
-        const data = await res.json();
+        const data = await jsonOrThrow(res);
         state.agents = data.agents;
         if (!state.agents.find(a => a.id === state.selectedAgent)) {
           state.selectedAgent = state.agents[0]?.id || "architect";
@@ -869,6 +996,7 @@
         case "session":
           state.currentSessionId = data.sessionId;
           loadSessions();
+          loadWorktreeStatus();
           break;
         case "skills-active":
           renderSkillTags(data.skills);
@@ -885,6 +1013,14 @@
         case "error":
           addSystem(data.message, "error");
           break;
+        case "context-warning":
+          setStatus("上下文接近上限");
+          break;
+        case "sealed":
+          if (data.agent) stopThinking(data.agent);
+          finishStream("上下文已封存");
+          addSystem(`context overflow: 已停止继续路由`);
+          break;
         case "agent-exit":
           if (data.code !== 0) {
             stopThinking(data.agent);
@@ -895,31 +1031,279 @@
           addSystem(`🔄 ${agentLabel(data.from)} → ${agentLabel(data.to)}`);
           break;
         case "done":
-          state.doneReceived = true;
-          // Flush any pending rAF renders
-          if (_rafId) { cancelAnimationFrame(_rafId); _flushRaf(); }
-          setStatus("就绪");
-          loadSessions();
-          // Final markdown render + add copy buttons for streamed messages
-          for (const [, item] of state.liveMessages) {
-            item.bubble.innerHTML = renderMd(item.rawText || "");
-            if (!item.wrapper.querySelector(".msg-copy")) {
-              const copy = document.createElement("button");
-              copy.className = "msg-copy";
-              copy.textContent = "⎘";
-              copy.title = "复制";
-              copy.addEventListener("click", () => {
-                navigator.clipboard.writeText(item.rawText || "").then(() => {
-                  copy.textContent = "✓";
-                  setTimeout(() => { copy.textContent = "⎘"; }, 1200);
-                }).catch(() => {});
-              });
-              const meta = item.wrapper.querySelector(".msg-meta");
-              if (meta) meta.appendChild(copy);
-            }
-          }
+          finishStream("就绪");
           break;
       }
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       MEMORY PANEL
+       ═══════════════════════════════════════════════════════════ */
+
+    const memoryState = {
+      invocations: [],
+      expandedIds: new Set(),
+      loading: false,
+    };
+
+    function openMemoryPanel() {
+      memoryPanel.hidden = false;
+      memoryOverlay.hidden = false;
+      refreshMemoryList();
+      setTimeout(() => memorySearchInput.focus(), 50);
+    }
+
+    function closeMemoryPanel() {
+      memoryPanel.hidden = true;
+      memoryOverlay.hidden = true;
+    }
+
+    memoryToggle.addEventListener("click", openMemoryPanel);
+    memoryClose.addEventListener("click", closeMemoryPanel);
+    memoryRefresh.addEventListener("click", () => {
+      if (memoryState.loading) return;
+      refreshMemoryList();
+    });
+    memoryOverlay.addEventListener("click", closeMemoryPanel);
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !memoryPanel.hidden) {
+        closeMemoryPanel();
+      }
+    });
+
+    async function refreshMemoryList() {
+      memoryState.loading = true;
+      memoryRefresh.classList.add("spinning");
+
+      if (!state.currentSessionId) {
+        renderMemoryEmpty("没有当前对话", "先在主界面发一条消息，或在左侧选一个对话");
+        memoryState.loading = false;
+        memoryRefresh.classList.remove("spinning");
+        return;
+      }
+
+      const url = `/api/sessions/${encodeURIComponent(state.currentSessionId)}/transcript/invocations`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          const errText = `${res.status} ${res.statusText}`;
+          renderMemoryEmpty(`加载失败 (${errText})`, `URL: ${url}`, true);
+          memoryState.loading = false;
+          memoryRefresh.classList.remove("spinning");
+          return;
+        }
+        const data = await res.json();
+        memoryState.invocations = data.invocations || [];
+        if (memoryState.invocations.length === 0) {
+          renderMemoryEmpty(
+            "这个对话还没有 invocation",
+            `sessionId: ${state.currentSessionId}\n（需要先发一条消息，等 CLI 跑完才会出现记录）`
+          );
+        } else {
+          renderMemoryList();
+        }
+      } catch (e) {
+        renderMemoryEmpty("网络错误", `${e.message}\nURL: ${url}`, true);
+      } finally {
+        memoryState.loading = false;
+        memoryRefresh.classList.remove("spinning");
+      }
+    }
+
+    function renderMemoryEmpty(text, detail, isError) {
+      memoryList.replaceChildren();
+      const empty = document.createElement("div");
+      empty.className = "memory-empty" + (isError ? " memory-empty-error" : "");
+      empty.textContent = text;
+      if (detail) {
+        const d = document.createElement("div");
+        d.className = "memory-empty-detail";
+        d.textContent = detail;
+        empty.appendChild(d);
+      }
+      memoryList.appendChild(empty);
+    }
+
+    function renderMemoryList() {
+      if (memoryState.invocations.length === 0) {
+        renderMemoryEmpty("这个对话还没有 invocation");
+        return;
+      }
+      memoryList.replaceChildren(...memoryState.invocations.map((inv) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "memory-invocation";
+
+        const header = document.createElement("div");
+        header.className = "memory-invocation-header";
+
+        const info = document.createElement("div");
+        info.className = "memory-invocation-info";
+
+        const title = document.createElement("div");
+        title.className = "memory-invocation-title";
+        title.textContent = inv.invocationId;
+        title.title = inv.invocationId;
+
+        const meta = document.createElement("div");
+        meta.className = "memory-invocation-meta";
+        meta.textContent = `${agentLabel(inv.agent)} · ${fmtTime(inv.startedAt)} · ${inv.eventCount} events`;
+
+        info.append(title, meta);
+
+        const state = document.createElement("span");
+        const stateText = inv.state || "in-flight";
+        state.className = `memory-invocation-state ${stateText}`;
+        state.textContent = stateText;
+
+        header.append(info, state);
+        wrapper.appendChild(header);
+        header.addEventListener("click", () => toggleInvocation(inv.invocationId));
+
+        if (memoryState.expandedIds.has(inv.invocationId)) {
+          const eventsDiv = document.createElement("div");
+          eventsDiv.className = "memory-invocation-events";
+          eventsDiv.dataset.invId = inv.invocationId;
+          wrapper.appendChild(eventsDiv);
+          loadInvocationEvents(inv.invocationId);
+        }
+
+        return wrapper;
+      }));
+    }
+
+    function toggleInvocation(invId) {
+      if (memoryState.expandedIds.has(invId)) {
+        memoryState.expandedIds.delete(invId);
+      } else {
+        memoryState.expandedIds.add(invId);
+      }
+      renderMemoryList();
+    }
+
+    async function loadInvocationEvents(invId) {
+      const container = memoryList.querySelector(`[data-inv-id="${CSS.escape(invId)}"]`);
+      if (!container) return;
+      container.replaceChildren();
+      const loading = document.createElement("div");
+      loading.className = "memory-empty";
+      loading.textContent = "加载中…";
+      container.appendChild(loading);
+
+      try {
+        const res = await fetch(
+          `/api/sessions/${state.currentSessionId}/transcript/invocations/${encodeURIComponent(invId)}?limit=200`
+        );
+        if (!res.ok) {
+          container.textContent = "加载失败";
+          return;
+        }
+        const data = await res.json();
+        container.replaceChildren(...data.events.map(renderMemoryEvent));
+      } catch (e) {
+        container.textContent = "加载失败: " + e.message;
+      }
+    }
+
+    function renderMemoryEvent(ev) {
+      const div = document.createElement("div");
+      div.className = "memory-event";
+
+      const kind = document.createElement("span");
+      kind.className = "memory-event-kind";
+      kind.textContent = ev.kind;
+
+      const meta = document.createElement("span");
+      meta.className = "memory-event-meta";
+      meta.textContent = " · " + fmtTime(ev.ts);
+
+      div.append(kind, meta);
+
+      if (ev.payload && Object.keys(ev.payload).length > 0) {
+        const text = document.createElement("div");
+        text.className = "memory-event-text";
+        const preview = JSON.stringify(ev.payload);
+        text.textContent = preview.length > 200 ? preview.slice(0, 200) + "…" : preview;
+        div.appendChild(text);
+      }
+
+      return div;
+    }
+
+    let _memorySearchDebounce = null;
+    memorySearchInput.addEventListener("input", () => {
+      clearTimeout(_memorySearchDebounce);
+      _memorySearchDebounce = setTimeout(
+        () => doMemorySearch(memorySearchInput.value.trim()),
+        300
+      );
+    });
+
+    async function doMemorySearch(query) {
+      if (!query) {
+        renderMemoryList();
+        return;
+      }
+      if (!state.currentSessionId) {
+        renderMemoryEmpty("选择一个对话后查看记忆");
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/sessions/${state.currentSessionId}/transcript/search?q=${encodeURIComponent(query)}&limit=20`
+        );
+        if (!res.ok) {
+          renderMemoryEmpty("搜索失败");
+          return;
+        }
+        const data = await res.json();
+        renderSearchResults(data.hits || [], query);
+      } catch (e) {
+        renderMemoryEmpty("搜索失败: " + e.message);
+      }
+    }
+
+    function renderSearchResults(hits, query) {
+      if (hits.length === 0) {
+        renderMemoryEmpty(
+          `无匹配 "${query}" 的结果`,
+          "试试别的关键词，或先让 agent 跑出记录再搜"
+        );
+        return;
+      }
+      memoryList.replaceChildren(...hits.map((hit) => {
+        const div = document.createElement("div");
+        div.className = "memory-search-hit";
+
+        const snippet = document.createElement("div");
+        snippet.className = "memory-search-hit-snippet";
+        snippet.innerHTML = highlightQuery(hit.snippet, query);
+
+        const meta = document.createElement("div");
+        meta.className = "memory-search-hit-meta";
+        meta.textContent = `${hit.invocationId.slice(0, 16)}… · ${hit.kind} · ${fmtTime(hit.ts)}`;
+
+        div.append(snippet, meta);
+        div.addEventListener("click", () => {
+          memorySearchInput.value = "";
+          memoryState.expandedIds.add(hit.invocationId);
+          renderMemoryList();
+          // Scroll the expanded card into view
+          setTimeout(() => {
+            const el = memoryList.querySelector(`[data-inv-id="${CSS.escape(hit.invocationId)}"]`);
+            if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          }, 50);
+        });
+
+        return div;
+      }));
+    }
+
+    function highlightQuery(text, query) {
+      if (!query) return escHtml(text);
+      const escaped = escHtml(text);
+      const pattern = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return escaped.replace(new RegExp(pattern, "gi"), (m) => `<mark>${m}</mark>`);
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -943,7 +1327,7 @@
       if (!state.currentSessionId) {
         try {
           const res = await fetch("/api/sessions", { method: "POST" });
-          const data = await res.json();
+          const data = await jsonOrThrow(res);
           state.currentSessionId = data.session.id;
         } catch (e) {
           addSystem(e.message, "error");
@@ -981,8 +1365,8 @@
         });
 
         if (!res.ok) {
-          const err = await res.json();
-          addSystem(err.error, "error");
+          const err = await res.json().catch(() => ({}));
+          addSystem(err.error || `${res.status} ${res.statusText}`, "error");
           setStatus("错误", "error");
           return;
         }
@@ -1037,7 +1421,7 @@
     btnClear.addEventListener("click", async () => {
       // P2-4 方案 A: 真正丢弃当前对话 — DELETE session + 清屏
       if (state.currentSessionId) {
-        try { await fetch(`/api/sessions/${state.currentSessionId}`, { method: "DELETE" }); } catch {}
+        try { await jsonOrThrow(await fetch(`/api/sessions/${state.currentSessionId}`, { method: "DELETE" })); } catch {}
         state.currentSessionId = null;
       }
       state.liveMessages.clear();
@@ -1100,7 +1484,7 @@
     loadProjectDir();
 
     fetch("/api/skills")
-      .then((r) => r.json())
+      .then(jsonOrThrow)
       .then((d) => {
         state.skillsMetadata = d.skills || [];
         renderSkillTags([]);
