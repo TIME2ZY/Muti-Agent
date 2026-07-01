@@ -1,0 +1,4 @@
+{"ts":"2026-07-01T02:21:45.479Z","kind":"invocation-start","payload":{"agent":"sage","shouldResume":true,"promptBytes":5726,"fillRatioAtStart":0.0071575}}
+{"ts":"2026-07-01T02:21:45.479Z","kind":"stdout","payload":{"agent":"sage","text":"partial "}}
+{"ts":"2026-07-01T02:21:45.479Z","kind":"stdout","payload":{"agent":"sage","text":"answer"}}
+{"ts":"2026-07-01T02:21:45.481Z","kind":"invocation-end","payload":{"agent":"sage","code":0,"signal":null,"contentBytes":14,"fillRatioAtEnd":0.007175,"sealerState":"active"}}

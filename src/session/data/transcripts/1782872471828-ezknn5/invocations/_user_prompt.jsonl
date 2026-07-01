@@ -1,0 +1,2 @@
+{"ts":"2026-07-01T02:21:11.834Z","kind":"user-prompt","payload":{"agent":"architect","content":"long task","activeSkills":["a2a-handoff","uncertainty-ask"]}}
+{"ts":"2026-07-01T02:21:11.846Z","kind":"user-prompt","payload":{"agent":"sage","content":"new task","activeSkills":["a2a-handoff","uncertainty-ask"]}}

@@ -1,0 +1,4 @@
+{"ts":"2026-07-01T02:20:22.487Z","kind":"invocation-start","payload":{"agent":"architect","shouldResume":false,"promptBytes":8026,"fillRatioAtStart":0.0100325}}
+{"ts":"2026-07-01T02:20:22.487Z","kind":"stdout","payload":{"agent":"architect","text":"@小智\nhandoff please\narchitect result"}}
+{"ts":"2026-07-01T02:20:22.490Z","kind":"invocation-end","payload":{"agent":"architect","code":0,"signal":null,"contentBytes":35,"fillRatioAtEnd":0.01007625,"sealerState":"active"}}
+{"ts":"2026-07-01T02:20:22.490Z","kind":"a2a-route","payload":{"from":"architect","to":"sage"}}

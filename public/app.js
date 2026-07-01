@@ -434,7 +434,31 @@
       html = html.replace(new RegExp(`${MARKER}(\\d+)${MARKER}`, "g"), (_, k) => {
         const { lang, code } = codeBlocks[+k];
         const langLabel = lang || "text";
-        return `<div class="md-code"><div class="md-code-head"><span class="md-code-lang">${escHtml(langLabel)}</span><button type="button" class="md-code-copy" data-copy="1">Copy</button></div><pre><code class="lang-${escHtml(lang)}">${code}</code></pre></div>`;
+        
+        // 语法高亮
+        let highlightedCode = code;
+        if (lang && typeof Prism !== 'undefined' && Prism.languages[lang]) {
+          try {
+            highlightedCode = Prism.highlight(code, Prism.languages[lang], lang);
+          } catch (e) {
+            // 高亮失败时使用原始代码
+            highlightedCode = code;
+          }
+        }
+        
+        // 计算行数
+        const lineCount = code.split('\n').length;
+        const shouldCollapse = lineCount > 20; // 超过20行时可折叠
+        
+        return `<div class="md-code ${shouldCollapse ? 'md-code-collapsible' : ''}">
+          <div class="md-code-head">
+            <span class="md-code-lang">${escHtml(langLabel)}</span>
+            <span class="md-code-lines">${lineCount} lines</span>
+            ${shouldCollapse ? '<button type="button" class="md-code-toggle" data-toggle="1">▼</button>' : ''}
+            <button type="button" class="md-code-copy" data-copy="1">Copy</button>
+          </div>
+          <pre class="${shouldCollapse ? 'md-code-pre-collapsed' : ''}"><code class="language-${escHtml(lang)}">${highlightedCode}</code></pre>
+        </div>`;
       });
 
       return html;
@@ -463,6 +487,29 @@
         btn.textContent = "Failed";
         setTimeout(() => { btn.textContent = "Copy"; }, 1200);
       });
+    });
+
+    // Wire up toggle buttons for collapsible code blocks.
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest(".md-code-toggle");
+      if (!btn) return;
+      const codeBlock = btn.closest(".md-code");
+      if (!codeBlock) return;
+      const pre = codeBlock.querySelector("pre");
+      if (!pre) return;
+      
+      const isCollapsed = pre.classList.contains("md-code-pre-collapsed");
+      if (isCollapsed) {
+        pre.classList.remove("md-code-pre-collapsed");
+        pre.classList.add("md-code-pre-expanded");
+        btn.textContent = "▲";
+        btn.title = "Collapse";
+      } else {
+        pre.classList.remove("md-code-pre-expanded");
+        pre.classList.add("md-code-pre-collapsed");
+        btn.textContent = "▼";
+        btn.title = "Expand";
+      }
     });
 
     /* ═══════════════════════════════════════════════════════════
@@ -652,6 +699,12 @@
       metaLabel.textContent = role === "user" ? "You" : agentLabel(agent);
       meta.appendChild(metaLabel);
 
+      // Status badge (hidden by default, shown only for live agents)
+      const badge = document.createElement("span");
+      badge.className = "msg-badge";
+      badge.style.display = "none";
+      meta.appendChild(badge);
+
       // Copy button (assistant only)
       if (role === "assistant" && content) {
         const copy = document.createElement("button");
@@ -683,38 +736,49 @@
         attachRecallToggle(wrapper, invocationId);
       }
 
-      return { wrapper, bubble };
+      /**
+       * Update the status badge on this message.
+       * @param {"thinking"|"writing"|"done"|"error"|null} state
+       */
+      function setBadge(state) {
+        if (!state) {
+          badge.style.display = "none";
+          badge.className = "msg-badge";
+          return;
+        }
+        badge.style.display = "";
+
+        const configs = {
+          thinking: { cls: "badge-thinking", text: "思考中", dot: true },
+          writing:  { cls: "badge-writing",  text: "输出中", dot: true },
+          done:     { cls: "badge-done",     text: "",        dot: false },
+          error:    { cls: "badge-error",    text: "异常退出", dot: false },
+        };
+        const cfg = configs[state] || configs.thinking;
+        badge.className = "msg-badge " + cfg.cls;
+        badge.innerHTML = cfg.dot
+          ? `<span class="badge-dot"></span>${cfg.text}`
+          : cfg.text;
+      }
+
+      return { wrapper, bubble, meta, setBadge };
     }
 
     function showThinking(agent) {
-      hideEmpty();
-      ensureSpacer();
+      // Prevent duplicate thinking entries for the same agent.
+      if (state.liveMessages.has(agent)) return;
 
-      const existing = messagesEl.querySelector(`.thinking[data-agent="${agent}"]`);
-      if (existing) return;
-
-      const wrapper = document.createElement("article");
-      wrapper.className = "message assistant";
-
-      const meta = document.createElement("div");
-      meta.className = "msg-meta";
-      meta.textContent = agentLabel(agent);
-
-      const bubble = document.createElement("div");
-      bubble.className = "thinking";
-      bubble.setAttribute("data-agent", agent);
-      bubble.innerHTML = `
-        <span class="thinking-text">思考中</span>
-        <span class="thinking-dots"><span></span><span></span><span></span></span>`;
-
-      wrapper.append(meta, bubble);
-      messagesEl.insertBefore(wrapper, spacerEl);
-      scrollDown();
+      const item = createMessage({ role: "assistant", agent, content: "" });
+      item.setBadge("thinking");
+      item.rawText = "";
+      state.liveMessages.set(agent, item);
     }
 
     function stopThinking(agent) {
-      const el = messagesEl.querySelector(`.thinking[data-agent="${agent}"]`);
-      if (el) el.closest(".message").remove();
+      const item = state.liveMessages.get(agent);
+      if (!item) return;
+      // Transition: thinking → done (will be overwritten if message arrives)
+      item.setBadge("done");
     }
 
     /* rAF batch — coalesce multiple SSE tokens into one render frame */
@@ -724,10 +788,118 @@
     function _flushRaf() {
       for (const [agent, raw] of _rafPending) {
         const item = state.liveMessages.get(agent);
-        if (item) item.bubble.innerHTML = renderMd(raw);
+        if (item) {
+          // 分段渲染：将文本按段落分段显示
+          const segments = splitIntoSegments(raw);
+          renderSegments(item.bubble, segments);
+        }
       }
       _rafPending.clear();
       _rafId = null;
+    }
+
+    /**
+     * 将文本分成多个段落
+     * 分段策略：
+     * 1. 代码块（```...```）单独成段
+     * 2. 标题（##、###等）单独成段
+     * 3. 连续两个换行符分段
+     * 4. 列表项（-、*、1.等）连续成段
+     */
+    function splitIntoSegments(text) {
+      if (!text) return [];
+
+      const segments = [];
+      let current = "";
+      let inCodeBlock = false;
+      let codeBlockContent = "";
+
+      const lines = text.split("\n");
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        // 代码块开始
+        if (trimmed.startsWith("```") && !inCodeBlock) {
+          // 保存之前的内容
+          if (current.trim()) {
+            segments.push({ type: "text", content: current.trim() });
+          }
+          current = "";
+          inCodeBlock = true;
+          codeBlockContent = line + "\n";
+          continue;
+        }
+
+        // 代码块结束
+        if (trimmed.startsWith("```") && inCodeBlock) {
+          codeBlockContent += line + "\n";
+          segments.push({ type: "code", content: codeBlockContent.trim() });
+          codeBlockContent = "";
+          inCodeBlock = false;
+          continue;
+        }
+
+        // 代码块内部
+        if (inCodeBlock) {
+          codeBlockContent += line + "\n";
+          continue;
+        }
+
+        // 标题（##、###等）- 单独成段
+        if (trimmed.match(/^#{1,6}\s+/)) {
+          if (current.trim()) {
+            segments.push({ type: "text", content: current.trim() });
+          }
+          current = "";
+          segments.push({ type: "heading", content: trimmed });
+          continue;
+        }
+
+        // 连续两个换行符 - 分段
+        if (trimmed === "" && current.trim()) {
+          segments.push({ type: "text", content: current.trim() });
+          current = "";
+          continue;
+        }
+
+        // 普通文本
+        current += line + "\n";
+      }
+
+      // 保存剩余内容
+      if (inCodeBlock) {
+        segments.push({ type: "code", content: codeBlockContent.trim() });
+      } else if (current.trim()) {
+        segments.push({ type: "text", content: current.trim() });
+      }
+
+      return segments;
+    }
+
+    /**
+     * 渲染分段内容到气泡
+     */
+    function renderSegments(bubble, segments) {
+      if (segments.length === 0) {
+        bubble.innerHTML = "";
+        return;
+      }
+
+      // 如果只有一个段落，直接渲染（保持原有行为）
+      if (segments.length === 1) {
+        bubble.innerHTML = renderMd(segments[0].content);
+        return;
+      }
+
+      // 多个段落：分段渲染
+      bubble.innerHTML = segments.map((seg, idx) => {
+        const rendered = renderMd(seg.content);
+        const segClass = seg.type === "code" ? "segment-code" :
+                        seg.type === "heading" ? "segment-heading" : "segment-text";
+        return `<div class="${segClass}" data-segment="${idx}">${rendered}</div>`;
+      }).join("");
     }
 
     function appendLive(agent, text) {
@@ -735,14 +907,18 @@
       ensureSpacer();
 
       if (!state.liveMessages.has(agent)) {
-        stopThinking(agent);
+        // Defensive: message arrived before agent-start (shouldn't happen, but handle gracefully)
         const item = createMessage({ role: "assistant", agent });
         item.rawText = "";
         item.invocationId = state.liveInvocations.get(agent) || null;
+        item.setBadge("writing");
         state.liveMessages.set(agent, item);
       }
       const item = state.liveMessages.get(agent);
       item.rawText += text;
+
+      // Switch from thinking to writing on first text
+      item.setBadge("writing");
 
       // Batch renders: at most one renderMd per animation frame
       _rafPending.set(agent, item.rawText);
@@ -772,13 +948,14 @@
           if (meta) meta.appendChild(copy);
         }
         if (item.invocationId) attachRecallToggle(item.wrapper, item.invocationId);
+        // Clear the status badge (fade out)
+        item.setBadge("done");
       }
     }
 
     function finishStream(statusText) {
       state.doneReceived = true;
       finalizeLiveMessages();
-      setStatus(statusText || "就绪");
       loadSessions();
       loadWorktreeStatus();
     }
@@ -1279,13 +1456,13 @@
           setStatus("上下文接近上限");
           break;
         case "sealed":
-          if (data.agent) stopThinking(data.agent);
           finishStream("上下文已封存");
           addSystem(`context overflow: 已停止继续路由`);
           break;
         case "agent-exit":
           if (data.code !== 0) {
-            stopThinking(data.agent);
+            const item = state.liveMessages.get(data.agent);
+            if (item) item.setBadge("error");
             addSystem(`${agentLabel(data.agent)} exited with ${data.code ?? data.signal}`, "error");
           }
           break;
@@ -1342,7 +1519,6 @@
       promptEl.disabled = true;
       btnSend.textContent = "Stop";
       btnSend.classList.add("danger");
-      setStatus("运行中…");
 
       try {
         const res = await fetch("/api/chat", {
@@ -1384,10 +1560,9 @@
           setStatus("错误", "error");
           addSystem(err.message || "连接中断", "error");
         }
-        // Clean thinking indicators
-        messagesEl.querySelectorAll(".thinking").forEach((el) => el.closest(".message")?.remove());
-        // Final render live messages
+        // Clean up live messages on error: clear badges, finalize rendering
         for (const [, item] of state.liveMessages) {
+          item.setBadge("done");
           item.bubble.innerHTML = renderMd(item.rawText || "");
         }
       } finally {

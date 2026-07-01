@@ -585,6 +585,50 @@
     .msg-bubble > *:first-child { margin-top: 0; }
     .msg-bubble > *:last-child { margin-bottom: 0; }
 
+    /* ═══════════════════════════════════════════════════════════
+       分段显示样式
+       ═══════════════════════════════════════════════════════════ */
+
+    .segment-text,
+    .segment-code,
+    .segment-heading {
+      margin-bottom: var(--space-3);
+      padding-bottom: var(--space-3);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .segment-text:last-child,
+    .segment-code:last-child,
+    .segment-heading:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .segment-text {
+      /* 普通文本段落 */
+    }
+
+    .segment-code {
+      /* 代码段落 */
+      background: var(--surface-inset);
+      border-radius: var(--radius);
+      padding: var(--space-2);
+      margin-left: calc(-1 * var(--space-2));
+      margin-right: calc(-1 * var(--space-2));
+    }
+
+    .segment-heading {
+      /* 标题段落 */
+      font-weight: 600;
+      color: var(--text-primary);
+      padding-top: var(--space-2);
+    }
+
+    .segment-heading:first-child {
+      padding-top: 0;
+    }
+
     .msg-bubble p { margin: var(--space-2) 0; }
     .msg-bubble p + p { margin-top: var(--space-3); }
 
@@ -683,6 +727,80 @@
     .md-code pre::-webkit-scrollbar { height: 6px; }
     .md-code pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     .md-code pre::-webkit-scrollbar-track { background: transparent; }
+
+    /* ═══════════════════════════════════════════════════════════
+       代码块美化样式
+       ═══════════════════════════════════════════════════════════ */
+
+    /* 代码行数统计 */
+    .md-code-lines {
+      color: var(--text-tertiary);
+      font-size: 10px;
+      margin-left: var(--space-2);
+    }
+
+    /* 折叠/展开按钮 */
+    .md-code-toggle {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-tertiary);
+      padding: 2px 6px;
+      border-radius: 2px;
+      transition: color 0.15s, background 0.15s;
+      margin-right: var(--space-1);
+    }
+    .md-code-toggle:hover {
+      color: var(--accent);
+      background: var(--surface);
+    }
+
+    /* 可折叠代码块 */
+    .md-code-collapsible {
+      /* 可折叠代码块的特殊样式 */
+    }
+
+    /* 折叠状态 */
+    .md-code-pre-collapsed {
+      max-height: 300px;
+      overflow: hidden;
+      position: relative;
+    }
+    .md-code-pre-collapsed::after {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: linear-gradient(transparent, var(--surface-inset));
+      pointer-events: none;
+    }
+
+    /* 展开状态 */
+    .md-code-pre-expanded {
+      max-height: none;
+      overflow: visible;
+    }
+
+    /* Prism.js 语法高亮覆盖 */
+    .md-code pre[class*="language-"] {
+      margin: 0;
+      padding: var(--space-3) var(--space-4);
+      background: transparent;
+    }
+    .md-code code[class*="language-"] {
+      background: none;
+      padding: 0;
+      font-size: 1em;
+    }
+
+    /* 行号样式（可选） */
+    .md-code .line-numbers {
+      padding-left: var(--space-4);
+    }
+    .md-code .line-numbers .line-numbers-rows {
+      border-right: 1px solid var(--border-subtle);
+    }
 
     /* ── Headings ────────────────────────────────── */
 
@@ -806,6 +924,57 @@
 
     @media (prefers-reduced-motion: reduce) {
       .thinking-dots span { animation: none; opacity: 0.5; }
+    }
+
+    /* ── Agent status badge ──────────────────────────── */
+
+    .msg-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      padding: 0 6px;
+      border-radius: 3px;
+      margin-left: 6px;
+      line-height: 1.6;
+      transition: opacity 0.3s, background 0.3s;
+    }
+
+    .msg-badge.badge-thinking {
+      background: #f0e6d3;
+      color: #8a6d3b;
+    }
+
+    .msg-badge.badge-writing {
+      background: #d4ede4;
+      color: #2f7d68;
+    }
+
+    .msg-badge.badge-done {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .msg-badge.badge-error {
+      background: #f5d6d6;
+      color: var(--danger);
+    }
+
+    .badge-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .badge-thinking .badge-dot {
+      background: #c9a84c;
+      animation: dot-pulse 1.2s ease-in-out infinite;
+    }
+
+    .badge-writing .badge-dot {
+      background: var(--accent);
+      animation: dot-pulse 0.8s ease-in-out infinite;
     }
 
     /* ── Empty state ─────────────────────────────────── */

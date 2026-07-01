@@ -4,8 +4,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test",
-    "check": "node --check server.js && node --check invoke-cli.js && node --check a2a-routing.js && node --check callbacks.js && node --check transcript.js && node --check context-health.js && node --check session-sealer.js && node --check session-bootstrap.js && node --check worktree-manager.js"
+    "start": "node src/server/index.js",
+    "test": "node --test tests/",
+    "check": "node --check src/server/index.js && node --check src/agents/invoke-cli.js && node --check src/agents/routing.js && node --check src/agents/callbacks.js && node --check src/session/transcript.js && node --check src/session/health.js && node --check src/session/sealer.js && node --check src/session/bootstrap.js && node --check src/worktree/manager.js"
   }
 }
