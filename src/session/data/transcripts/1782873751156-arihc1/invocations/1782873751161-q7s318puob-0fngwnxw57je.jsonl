@@ -1,3 +1,0 @@
-{"ts":"2026-07-01T02:42:31.161Z","kind":"invocation-start","payload":{"agent":"architect","shouldResume":false,"promptBytes":5729,"fillRatioAtStart":71.6125}}
-{"ts":"2026-07-01T02:42:31.162Z","kind":"stdout","payload":{"agent":"architect","text":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}
-{"ts":"2026-07-01T02:42:31.165Z","kind":"invocation-end","payload":{"agent":"architect","code":0,"signal":null,"contentBytes":80,"fillRatioAtEnd":72.6125,"sealerState":"sealed"}}

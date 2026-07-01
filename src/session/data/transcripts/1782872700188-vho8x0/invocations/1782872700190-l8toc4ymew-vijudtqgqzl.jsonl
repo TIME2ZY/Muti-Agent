@@ -1,5 +1,0 @@
-{"ts":"2026-07-01T02:25:00.190Z","kind":"invocation-start","payload":{"agent":"architect","shouldResume":false,"promptBytes":5736,"fillRatioAtStart":0.00717}}
-{"ts":"2026-07-01T02:25:00.191Z","kind":"stderr","payload":{"agent":"architect","text":"Reading additional input from stdin...\n"}}
-{"ts":"2026-07-01T02:25:00.191Z","kind":"stderr","payload":{"agent":"architect","text":"2026-06-28T13:52:47.421934Z WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported\n"}}
-{"ts":"2026-07-01T02:25:00.191Z","kind":"stdout","payload":{"agent":"architect","text":"answer"}}
-{"ts":"2026-07-01T02:25:00.193Z","kind":"invocation-end","payload":{"agent":"architect","code":0,"signal":null,"contentBytes":6,"fillRatioAtEnd":0.0071775,"sealerState":"active"}}

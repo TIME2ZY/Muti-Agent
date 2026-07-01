@@ -1,5 +1,0 @@
-{"ts":"2026-07-01T02:37:09.043Z","kind":"invocation-start","payload":{"agent":"forge","shouldResume":false,"promptBytes":5862,"fillRatioAtStart":0.0073275}}
-{"ts":"2026-07-01T02:38:08.285Z","kind":"stdout","payload":{"agent":"forge","text":"I'll write a clean quicksort implementation in Node.js."}}
-{"ts":"2026-07-01T02:41:25.769Z","kind":"stdout","payload":{"agent":"forge","text":"已写入 `D:\\HW\\Muti-Agent\\quicksort.js`，所有测试用例通过：\n\n| 场景 | 输入 | 输出 |\n|---|---|---|\n| 普通（含重复） | `[5,2,9,1,5,6]` | `[1,2,5,5,6,9]` |\n| 全部相同 | `[3,3,3,3]` | `[3,3,3,3]` |\n| 单元素 | `[1]` | `[1]` |\n| 空数组 | `[]` | `[]` |\n| 反序 | `[9,8,7,6,5]` | `[5,6,7,8,9]` |\n| 已排序 | `[1,2,3,4,5]` | `[1,2,3,4,5]` |\n| 含负数 | `[10,-1,0,5,-3,20]` | `[-3,-1,0,5,10,20]` |\n\n实现采用 **Lomuto 分区方案**，原地排序，时间复杂度 O(n log n) 平均 / O(n²) 最坏。"}}
-{"ts":"2026-07-01T02:41:26.900Z","kind":"stdout","payload":{"agent":"forge","text":"\n"}}
-{"ts":"2026-07-01T02:41:26.915Z","kind":"invocation-end","payload":{"agent":"forge","code":0,"signal":null,"contentBytes":454,"fillRatioAtEnd":0.007895,"sealerState":"active"}}

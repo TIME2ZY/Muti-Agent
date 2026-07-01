@@ -1,3 +1,0 @@
-{"ts":"2026-07-01T02:20:36.752Z","kind":"invocation-start","payload":{"agent":"sage","shouldResume":false,"promptBytes":5729,"fillRatioAtStart":0.00716125}}
-{"ts":"2026-07-01T02:20:36.753Z","kind":"stdout","payload":{"agent":"sage","text":"done"}}
-{"ts":"2026-07-01T02:20:36.756Z","kind":"invocation-end","payload":{"agent":"sage","code":0,"signal":null,"contentBytes":4,"fillRatioAtEnd":0.00716625,"sealerState":"active"}}

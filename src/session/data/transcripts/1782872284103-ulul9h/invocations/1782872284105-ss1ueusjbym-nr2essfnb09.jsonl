@@ -1,4 +1,0 @@
-{"ts":"2026-07-01T02:18:04.105Z","kind":"invocation-start","payload":{"agent":"sage","shouldResume":false,"promptBytes":3430,"fillRatioAtStart":0.0042875}}
-{"ts":"2026-07-01T02:18:04.106Z","kind":"stdout","payload":{"agent":"sage","text":"hello recall"}}
-{"ts":"2026-07-01T02:18:04.106Z","kind":"stderr","payload":{"agent":"sage","text":"a stderr line\n"}}
-{"ts":"2026-07-01T02:18:04.108Z","kind":"invocation-end","payload":{"agent":"sage","code":0,"signal":null,"contentBytes":12,"fillRatioAtEnd":0.0043025,"sealerState":"active"}}

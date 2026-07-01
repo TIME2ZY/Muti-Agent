@@ -1,2 +1,0 @@
-{"ts":"2026-07-01T03:56:51.644Z","kind":"invocation-start","payload":{"agent":"architect","resumeSessionId":null,"promptBytes":6406,"fillRatioAtStart":0.0080075}}
-{"ts":"2026-07-01T03:56:51.645Z","kind":"stderr","payload":{"agent":"architect","text":"killed:SIGTERM\n"}}

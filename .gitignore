@@ -1,9 +1,44 @@
+# Dependencies
 node_modules/
 npm-debug.log*
 
+# Environment & secrets
+.env
+.env.*
+.env.local
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials*
+*secret*
+
+# Tool cache & state
+.cat-cafe/
+.sisyphus/
+.invoke-chat-invocations.json
 .invoke-cli-session.json
 .invoke-chat-sessions.json
 .invoke-worktrees.json
 
+# Session data (user conversation logs)
+src/session/data/transcripts/
 data/transcripts/
 .reasonix/truncated-results/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build output
+dist/
+build/
+*.tsbuildinfo

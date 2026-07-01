@@ -1,3 +1,0 @@
-{"ts":"2026-07-01T02:21:45.547Z","kind":"invocation-start","payload":{"agent":"architect","shouldResume":false,"promptBytes":5729,"fillRatioAtStart":0.00716125}}
-{"ts":"2026-07-01T02:21:45.547Z","kind":"stdout","payload":{"agent":"architect","text":"ok"}}
-{"ts":"2026-07-01T02:21:45.549Z","kind":"invocation-end","payload":{"agent":"architect","code":0,"signal":null,"contentBytes":2,"fillRatioAtEnd":0.00716375,"sealerState":"active"}}
