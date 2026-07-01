@@ -154,8 +154,8 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       assert.ok(calls[0].args[3].includes("hello"), `Expected prompt to contain "hello", got: ${calls[0].args[3]?.slice(-50)}`);
       assert.ok(calls[0].args[3].includes("APPLICATION SKILL"), "Expected augmented prompt to contain APPLICATION SKILL marker");
       assert.ok(calls[0].args[3].includes("MCP 回调工具说明"), "Expected prompt to contain callback instructions");
-      // With stream buffering (16ms interval), adjacent writes are coalesced into one SSE event
-      assert.match(text, /event: message\ndata: \{"agent":"sage","role":"assistant","text":"partial answer"\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"sage","role":"assistant","text":"partial "\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"sage","role":"assistant","text":"answer"\}/);
       // Verify session event is emitted
       const sessionMatch = text.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
       assert.ok(sessionMatch, "Expected SSE session event with sessionId");
@@ -169,6 +169,35 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       assert.equal(history.messages[0].agent, "sage");
       assert.equal(history.messages[1].role, "assistant");
       assert.equal(history.messages[1].content, "partial answer");
+    }
+  );
+});
+
+test("chat endpoint preserves raw stdout chunk boundaries in SSE message events", async () => {
+  await withServer(
+    {
+      spawnRunner() {
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write("line 1\n\n");
+          child.stdout.write("    code-ish indent\n");
+          child.stdout.write("- list item");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "sage", prompt: "hello chunks" }),
+      });
+      const text = await response.text();
+
+      assert.match(text, /event: message\ndata: \{"agent":"sage","role":"assistant","text":"line 1\\n\\n"\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"sage","role":"assistant","text":"    code-ish indent\\n"\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"sage","role":"assistant","text":"- list item"\}/);
     }
   );
 });
@@ -1430,10 +1459,73 @@ test("buildCallbackInstructions mentions all 3 new endpoints", () => {
   assert.match(tpl, /不要凭印象猜/);
 });
 
+test("parseUnifiedDiff splits multi-file patches into file entries", () => {
+  const { parseUnifiedDiff } = require("../public/workspace-diff.js");
+  const diff = [
+    "diff --git a/public/app.js b/public/app.js",
+    "--- a/public/app.js",
+    "+++ b/public/app.js",
+    "@@ -1,2 +1,3 @@",
+    " line 1",
+    "+line 2",
+    "diff --git a/public/new-file.js b/public/new-file.js",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/public/new-file.js",
+    "@@ -0,0 +1,2 @@",
+    "+export const ok = true;",
+    "+console.log(ok);",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(diff);
+  assert.deepEqual(
+    files.map((file) => ({ path: file.path, status: file.status })),
+    [
+      { path: "public/app.js", status: "modified" },
+      { path: "public/new-file.js", status: "untracked" },
+    ]
+  );
+  assert.match(files[1].patch, /new file mode 100644/);
+});
+
+test("summarizeUnifiedDiff counts total and untracked files", () => {
+  const { summarizeUnifiedDiff } = require("../public/workspace-diff.js");
+  const files = [
+    { path: "public/app.js", status: "modified", patch: "@@ -1 +1,2 @@\n line 1\n+line 2" },
+    { path: "public/new-file.js", status: "untracked", patch: "new file mode 100644\n+console.log('ok');" },
+  ];
+
+  assert.deepEqual(summarizeUnifiedDiff(files), {
+    totalFiles: 2,
+    untrackedFiles: 1,
+    hasDiff: true,
+  });
+});
+
 test("frontend index.html exposes explicit worktree mode toggle", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.match(html, /id="use-worktree"/);
   assert.match(html, /title="为本次对话创建或复用隔离 worktree"/);
+});
+
+test("frontend exposes agent and workspace panel tabs", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  assert.match(html, /id="panel-tab-agents"/);
+  assert.match(html, /id="panel-tab-workspace"/);
+  assert.match(html, /id="workspace-panel"/);
+  assert.match(html, /src="\/public\/workspace-diff\.js"/);
+});
+
+test("frontend uses unified Chinese console copy in the main shell", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  assert.match(html, /多 Agent 协作台/);
+  assert.match(html, /已激活能力/);
+  assert.match(html, /参与 Agent/);
+  assert.match(html, />清空</);
+  assert.match(html, />发送</);
+  assert.doesNotMatch(html, />Agent Chat</);
+  assert.doesNotMatch(html, />Rules</);
+  assert.doesNotMatch(html, />Models</);
 });
 
 test("frontend app.js sends useWorktree from the explicit toggle", () => {
@@ -1441,8 +1533,43 @@ test("frontend app.js sends useWorktree from the explicit toggle", () => {
     assert.match(js, /const useWorktreeInput\s*=\s*\$\("#use-worktree"\)/);
     assert.match(js, /useWorktree:\s*useWorktreeInput\.checked/);
   });
-  
-  test("frontend treats sealed SSE event as an expected terminal state", () => {
+
+test("frontend app.js defines unified display helpers for user and agent identities", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /function roleDisplayName\(role, agentId\)/);
+  assert.match(js, /return role === "user" \? "用户" : agentLabel\(agentId\);/);
+  assert.match(js, /function roleBadgeLabel\(role\)/);
+  assert.match(js, /metaLabel\.textContent = roleDisplayName\(role, agent\)/);
+  assert.match(js, /metaRole\.textContent = roleBadgeLabel\(role\)/);
+});
+
+test("frontend app.js loads workspace status and diff for the workspace tab", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /rightPanelTab:\s*"agents"/);
+  assert.match(js, /async function loadWorkspaceState\(\)/);
+  assert.match(js, /\/worktree\/status/);
+  assert.match(js, /\/worktree\/diff/);
+  assert.match(js, /function renderWorkspacePanel\(\)/);
+});
+
+test("frontend app.js handles missing worktree and discard actions", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /当前会话尚未创建 worktree/);
+  assert.match(js, /当前无改动/);
+  assert.match(js, /async function discardWorkspace\(\)/);
+  assert.match(js, /method:\s*"POST"[\s\S]*\/worktree\/discard/);
+});
+
+test("frontend app.js renders workspace file selection and diff output", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /function renderWorkspaceFileList\(\)/);
+  assert.match(js, /function renderWorkspaceDiff\(\)/);
+  assert.match(js, /workspace\.selectedPath = path/);
+  assert.match(js, /打开预览/);
+  assert.match(js, /刷新改动/);
+});
+
+test("frontend treats sealed SSE event as an expected terminal state", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   assert.match(js, /case "sealed":/);
   assert.match(js, /state\.doneReceived = true;[\s\S]*context overflow/);
@@ -1454,9 +1581,75 @@ test("frontend lets model cards insert an agent mention", () => {
   assert.match(js, /function insertAgentMention/);
 });
 
+test("frontend keeps right-side agent and workspace surfaces in a shared tab system", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /panelTabAgentsEl\.addEventListener\("click"/);
+  assert.match(js, /panelTabWorkspaceEl\.addEventListener\("click"/);
+  assert.match(js, /state\.rightPanelTab = "workspace"/);
+  assert.match(js, /loadWorkspaceState\(\)/);
+});
+
 test("frontend exposes delete session button on keyboard focus", () => {
   const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
   assert.match(css, /\.btn-delete-session:focus-visible/);
+});
+
+test("frontend app.js uses plain-text live streaming instead of segmented markdown streaming", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /liveText\.className = "stream-live-text"/);
+  assert.match(js, /item\._liveTextEl\.textContent = raw/);
+  assert.doesNotMatch(js, /function splitIntoSegments/);
+  assert.doesNotMatch(js, /stream-suffix/);
+});
+
+test("frontend styles.css defines plain-text live streaming style", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  assert.match(css, /\.stream-live-text\s*\{/);
+  assert.doesNotMatch(css, /\.stream-suffix\s*\{/);
+});
+
+test("frontend keeps thinking and writing as badge-only live states", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /function showThinking\(agent\)/);
+  assert.match(js, /item\.setBadge\("thinking"\)/);
+  assert.match(js, /bubble\.classList\.add\("msg-bubble-live-pending"\)/);
+  assert.match(js, /function appendLive\(agent, text\)/);
+  assert.match(js, /item\.bubble\.classList\.remove\("msg-bubble-live-pending"\)/);
+  assert.match(js, /item\.setBadge\("writing"\)/);
+  assert.doesNotMatch(js, /thinking-text/);
+});
+
+test("frontend routes stderr SSE into a separate system stderr message", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /case "stderr":/);
+  assert.match(js, /function addDebug\(agent, text\)/);
+  assert.match(js, /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/);
+  assert.match(js, /addDebug\(data\.agent, data\.text\)/);
+  assert.doesNotMatch(js, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
+});
+
+test("frontend styles.css gives stderr messages a separate debug appearance", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  assert.match(css, /\.system\.stderr \.msg-bubble/);
+  assert.match(css, /\.system\.stderr \.msg-meta/);
+});
+
+test("frontend styles define a shared card system for messages and agent roles", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  assert.match(css, /\.msg-card/);
+  assert.match(css, /\.message\.user \.msg-card/);
+  assert.match(css, /\.message\.assistant \.msg-card/);
+  assert.match(css, /\.agent-tab-role/);
+});
+
+test("frontend styles.css defines workspace panel layout and diff colors", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  assert.match(css, /\.panel-tabs/);
+  assert.match(css, /\.workspace-panel/);
+  assert.match(css, /\.workspace-file-list/);
+  assert.match(css, /\.workspace-diff/);
+  assert.match(css, /\.workspace-diff-line-added/);
+  assert.match(css, /\.workspace-diff-line-removed/);
 });
 
 // ── Phase 4: Session Bootstrap ──────────────────────────────────

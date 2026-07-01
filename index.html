@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agent Chat</title>
+  <title>多 Agent 协作台</title>
   <link rel="stylesheet" href="/public/styles.css">
   <!-- Prism.js for syntax highlighting -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
@@ -35,7 +35,7 @@
     <!-- Main -->
     <main class="main">
       <div class="main-header">
-        <span class="main-title">Agent Chat</span>
+        <span class="main-title">多 Agent 协作台</span>
         <span class="project-dir" id="project-dir" title="点击修改项目目录">
           <span class="project-dir-icon">📁</span>
           <span class="project-dir-path" id="project-dir-path"></span>
@@ -48,23 +48,32 @@
       </div>
 
       <div class="skills-bar" id="skills-bar">
-        <span class="skills-bar-label">Rules</span>
+        <span class="skills-bar-label">已激活能力</span>
       </div>
 
       <section class="messages" id="messages" aria-live="polite" aria-label="消息列表">
         <div class="empty-state" id="empty-state">
           <div class="empty-state-icon">✦</div>
           输入 @ 选择模型并开始对话
-          <small>Enter 发送 · Shift+Enter 换行</small>
+          <small>Enter 发送 · Shift + Enter 换行</small>
         </div>
         <div class="messages-spacer"></div>
       </section>
 
-      <aside class="agent-panel" aria-label="模型列表">
-        <div class="agent-panel-head">
-          <div class="agent-panel-title">Models</div>
+      <aside class="side-panel" aria-label="右侧面板">
+        <div class="panel-tabs" role="tablist" aria-label="右侧面板标签">
+          <button id="panel-tab-agents" class="panel-tab is-active" type="button" role="tab" aria-selected="true">参与 Agent</button>
+          <button id="panel-tab-workspace" class="panel-tab" type="button" role="tab" aria-selected="false">工作区</button>
         </div>
-        <div class="agent-tabs" id="agent-tabs" aria-label="可用模型"></div>
+
+        <section class="agent-panel" id="agent-panel" role="tabpanel" aria-label="模型列表">
+          <div class="agent-panel-head">
+            <div class="agent-panel-title">参与 Agent</div>
+          </div>
+          <div class="agent-tabs" id="agent-tabs" aria-label="可用模型"></div>
+        </section>
+
+        <section class="workspace-panel" id="workspace-panel" role="tabpanel" aria-label="工作区" hidden></section>
       </aside>
 
       <section class="composer">
@@ -78,8 +87,8 @@
             <span>改代码</span>
           </label>
           <div class="composer-actions-right">
-            <button id="btn-clear" class="btn-cmd" type="button">Clear</button>
-            <button id="btn-send" class="btn-cmd primary" type="button">Send</button>
+            <button id="btn-clear" class="btn-cmd" type="button">清空</button>
+            <button id="btn-send" class="btn-cmd primary" type="button">发送</button>
           </div>
         </div>
       </section>
@@ -99,6 +108,7 @@
   </aside>
   <div class="recall-overlay" id="recall-overlay"></div>
 
+  <script src="/public/workspace-diff.js"></script>
   <script src="/public/app.js"></script>
 </body>
 </html>

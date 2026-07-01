@@ -19,7 +19,11 @@
     const sidebarOverlay = $("#sidebar-overlay");
     const sessionListEl = $("#session-list");
     const btnNewChat   = $("#btn-new-chat");
+    const panelTabAgentsEl = $("#panel-tab-agents");
+    const panelTabWorkspaceEl = $("#panel-tab-workspace");
+    const agentPanelEl = $("#agent-panel");
     const agentTabsEl  = $("#agent-tabs");
+    const workspacePanelEl = $("#workspace-panel");
     const emptyStateEl = $("#empty-state");
     const spacerEl     = messagesEl.querySelector(".messages-spacer");
     const skillsLabel  = skillsBarEl.querySelector(".skills-bar-label");
@@ -119,6 +123,251 @@
       worktreeStatusEl.title = wt.worktreeDir || wt.branch || "";
     }
 
+    function emptyWorkspaceState() {
+      return {
+        status: null,
+        diffText: "",
+        files: [],
+        selectedPath: "",
+        loading: false,
+        error: "",
+      };
+    }
+
+    function renderWorkspaceFileList() {
+      const list = document.createElement("div");
+      list.className = "workspace-file-list";
+
+      for (const file of state.workspace.files) {
+        const path = file.path;
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "workspace-file" + (path === state.workspace.selectedPath ? " selected" : "");
+        item.addEventListener("click", () => {
+          state.workspace.selectedPath = path;
+          renderWorkspacePanel();
+        });
+
+        const filePath = document.createElement("span");
+        filePath.className = "workspace-file-path";
+        filePath.textContent = path;
+
+        const fileStatus = document.createElement("span");
+        fileStatus.className = `workspace-file-status status-${file.status}`;
+        fileStatus.textContent = file.status;
+
+        item.append(filePath, fileStatus);
+        list.appendChild(item);
+      }
+
+      return list;
+    }
+
+    function renderWorkspaceDiff() {
+      const selected = state.workspace.files.find((file) => file.path === state.workspace.selectedPath);
+      const panel = document.createElement("div");
+      panel.className = "workspace-diff";
+
+      if (!selected) {
+        const empty = document.createElement("div");
+        empty.className = "workspace-empty";
+        empty.textContent = "当前无改动";
+        panel.appendChild(empty);
+        return panel;
+      }
+
+      const title = document.createElement("div");
+      title.className = "workspace-diff-title";
+      title.textContent = selected.path;
+      panel.appendChild(title);
+
+      const body = document.createElement("div");
+      body.className = "workspace-diff-body";
+      for (const line of selected.patch.split("\n")) {
+        const row = document.createElement("div");
+        row.className = "workspace-diff-line";
+        if (line.startsWith("+") && !line.startsWith("+++")) {
+          row.classList.add("workspace-diff-line-added");
+        } else if (line.startsWith("-") && !line.startsWith("---")) {
+          row.classList.add("workspace-diff-line-removed");
+        }
+        row.textContent = line || " ";
+        body.appendChild(row);
+      }
+
+      panel.appendChild(body);
+      return panel;
+    }
+
+    function renderWorkspacePanel() {
+      if (!workspacePanelEl) return;
+
+      const { status, files, loading, error } = state.workspace;
+      workspacePanelEl.textContent = "";
+
+      const wrap = document.createElement("div");
+      wrap.className = "workspace-panel-body";
+
+      if (!state.currentSessionId) {
+        setRecallEmpty(wrap, "暂无工作区");
+        workspacePanelEl.append(wrap);
+        return;
+      }
+
+      if (loading) {
+        setRecallEmpty(wrap, "加载工作区中…");
+        workspacePanelEl.append(wrap);
+        return;
+      }
+
+      if (error) {
+        setRecallEmpty(wrap, "工作区加载失败: " + error, true);
+        workspacePanelEl.append(wrap);
+        return;
+      }
+
+      if (!status) {
+        setRecallEmpty(wrap, "当前会话尚未创建 worktree");
+        workspacePanelEl.append(wrap);
+        return;
+      }
+
+      const summary = document.createElement("div");
+      summary.className = "workspace-summary";
+      summary.innerHTML = `
+        <div class="workspace-summary-branch">${escHtml(status.branch || "(worktree)")}</div>
+        <div class="workspace-summary-meta">${status.clean ? "clean" : "dirty"} · ${escHtml(status.worktreeDir || "")}</div>
+      `;
+
+      if (status.previewUrl) {
+        const preview = document.createElement("a");
+        preview.className = "workspace-action-link";
+        preview.href = status.previewUrl;
+        preview.target = "_blank";
+        preview.rel = "noopener";
+        preview.textContent = "打开预览";
+        summary.appendChild(preview);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "workspace-actions";
+
+      const refreshBtn = document.createElement("button");
+      refreshBtn.type = "button";
+      refreshBtn.className = "btn-cmd";
+      refreshBtn.textContent = "刷新改动";
+      refreshBtn.addEventListener("click", () => loadWorkspaceState());
+      actions.appendChild(refreshBtn);
+
+      const discardBtn = document.createElement("button");
+      discardBtn.type = "button";
+      discardBtn.className = "btn-cmd danger";
+      discardBtn.textContent = "丢弃 worktree";
+      discardBtn.addEventListener("click", () => discardWorkspace());
+      actions.appendChild(discardBtn);
+
+      wrap.append(summary, actions);
+
+      if (status.clean) {
+        const empty = document.createElement("div");
+        empty.className = "workspace-empty";
+        empty.textContent = "当前无改动";
+        wrap.append(empty);
+        workspacePanelEl.append(wrap);
+        return;
+      }
+
+      if (files.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "workspace-empty";
+        empty.textContent = "改动暂不可预览";
+        wrap.append(empty);
+        workspacePanelEl.append(wrap);
+        return;
+      }
+
+      const summaryStats = window.WorkspaceDiff
+        ? window.WorkspaceDiff.summarizeUnifiedDiff(files)
+        : { totalFiles: files.length, untrackedFiles: 0 };
+      const fileCount = document.createElement("div");
+      fileCount.className = "workspace-summary-meta";
+      fileCount.textContent = `共 ${summaryStats.totalFiles} 个改动文件 · 新增 ${summaryStats.untrackedFiles} 个`;
+      wrap.append(fileCount);
+
+      const content = document.createElement("div");
+      content.className = "workspace-content";
+      content.append(renderWorkspaceFileList(), renderWorkspaceDiff());
+      wrap.append(content);
+
+      workspacePanelEl.append(wrap);
+    }
+
+    async function loadWorkspaceState() {
+      state.workspace.loading = true;
+      state.workspace.error = "";
+      renderWorkspacePanel();
+
+      if (!state.currentSessionId) {
+        state.workspace = emptyWorkspaceState();
+        renderWorkspacePanel();
+        return;
+      }
+
+      try {
+        const statusRes = await fetch(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/worktree/status`);
+        if (!statusRes.ok) {
+          state.workspace = emptyWorkspaceState();
+          renderWorkspacePanel();
+          return;
+        }
+
+        const status = await jsonOrThrow(statusRes);
+        const diffRes = await fetch(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/worktree/diff`);
+        const diffData = diffRes.ok ? await jsonOrThrow(diffRes) : { diff: "" };
+        const files = window.WorkspaceDiff
+          ? window.WorkspaceDiff.parseUnifiedDiff(diffData.diff || "")
+          : [];
+
+        state.workspace = {
+          status,
+          diffText: diffData.diff || "",
+          files,
+          selectedPath: files[0]?.path || "",
+          loading: false,
+          error: "",
+        };
+      } catch (error) {
+        state.workspace.loading = false;
+        state.workspace.error = error.message || "未知错误";
+      }
+
+      renderWorkspacePanel();
+    }
+
+    async function discardWorkspace() {
+      if (!state.currentSessionId || !confirm("确认丢弃当前 worktree 吗？")) return;
+      const request = {
+        method: "POST",
+      };
+      await fetch(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/worktree/discard`, request);
+      await loadWorktreeStatus();
+      await loadWorkspaceState();
+    }
+
+    function setRightPanelTab(nextTab) {
+      state.rightPanelTab = nextTab;
+      if (agentPanelEl) agentPanelEl.hidden = nextTab !== "agents";
+      if (workspacePanelEl) workspacePanelEl.hidden = nextTab !== "workspace";
+      if (panelTabAgentsEl) {
+        panelTabAgentsEl.classList.toggle("is-active", nextTab === "agents");
+        panelTabAgentsEl.setAttribute("aria-selected", nextTab === "agents" ? "true" : "false");
+      }
+      if (panelTabWorkspaceEl) {
+        panelTabWorkspaceEl.classList.toggle("is-active", nextTab === "workspace");
+        panelTabWorkspaceEl.setAttribute("aria-selected", nextTab === "workspace" ? "true" : "false");
+      }
+    }
+
     projectDirEl.addEventListener("click", () => {
       if (projectDirEl.classList.contains("editing")) return;
       // Enter edit mode
@@ -183,6 +432,8 @@
       liveInvocations: new Map(), // agent → invocationId (captured from agent-start)
       recallOpen: false,
       recallSearchDebounce: null,
+      rightPanelTab: "agents",
+      workspace: emptyWorkspaceState(),
     };
 
     /* ═══════════════════════════════════════════════════════════
@@ -258,6 +509,21 @@
       return agent.reasoningEffort
         ? `${cliLabel} · ${agent.model} · ${agent.reasoningEffort}`
         : `${cliLabel} · ${agent.model}`;
+    }
+
+    function roleDisplayName(role, agentId) {
+      if (role === "system") return "系统";
+      return role === "user" ? "用户" : agentLabel(agentId);
+    }
+
+    function roleBadgeLabel(role) {
+      if (role === "user") return "发起者";
+      if (role === "assistant") return "Agent";
+      return "系统";
+    }
+
+    function agentRoleLabel(agent) {
+      return agent.id === "architect" ? "主控 Agent" : "协作 Agent";
     }
 
     function resolvePromptAgent(prompt) {
@@ -685,6 +951,9 @@
       }
       await refreshSessionList();
       await loadWorktreeStatus();
+      if (state.rightPanelTab === "workspace") {
+        await loadWorkspaceState();
+      }
     }
 
     async function newSession() {
@@ -698,6 +967,8 @@
         showEmpty();
         state.worktreeStatus = null;
         renderWorktreeStatus();
+        state.workspace = emptyWorkspaceState();
+        renderWorkspacePanel();
         setStatus("就绪");
         await refreshSessionList();
         promptEl.focus();
@@ -718,6 +989,8 @@
           showEmpty();
           state.worktreeStatus = null;
           renderWorktreeStatus();
+          state.workspace = emptyWorkspaceState();
+          renderWorkspacePanel();
           setStatus("就绪");
         }
         await refreshSessionList();
@@ -728,6 +1001,14 @@
     }
 
     btnNewChat.addEventListener("click", newSession);
+    panelTabAgentsEl.addEventListener("click", () => {
+      setRightPanelTab("agents");
+    });
+    panelTabWorkspaceEl.addEventListener("click", async () => {
+      state.rightPanelTab = "workspace";
+      setRightPanelTab("workspace");
+      await loadWorkspaceState();
+    });
 
     /* ═══════════════════════════════════════════════════════════
        MESSAGES
@@ -744,8 +1025,13 @@
       const meta = document.createElement("div");
       meta.className = "msg-meta";
       const metaLabel = document.createElement("span");
-      metaLabel.textContent = role === "user" ? "You" : agentLabel(agent);
+      metaLabel.className = "msg-name";
+      metaLabel.textContent = roleDisplayName(role, agent);
       meta.appendChild(metaLabel);
+      const metaRole = document.createElement("span");
+      metaRole.className = "msg-role-label";
+      metaRole.textContent = roleBadgeLabel(role);
+      meta.appendChild(metaRole);
 
       // Status badge (hidden by default, shown only for live agents)
       const badge = document.createElement("span");
@@ -766,30 +1052,32 @@
       }
 
       // Bubble
+      const card = document.createElement("div");
+      card.className = "msg-card";
       const bubble = document.createElement("div");
       bubble.className = "msg-bubble";
+      card.appendChild(bubble);
 
       // Live messages from showThinking: use dual-container for smooth streaming
       if (role === "assistant" && content === "") {
         bubble.classList.add("msg-bubble-live");
-        const prefix = document.createElement("div");
-        prefix.className = "md-prefix";
-        const suffix = document.createElement("div");
-        suffix.className = "stream-suffix";
-        bubble.append(prefix, suffix);
-        wrapper.append(meta, bubble);
+        bubble.classList.add("msg-bubble-live-pending");
+        const liveText = document.createElement("div");
+        liveText.className = "stream-live-text";
+        bubble.append(liveText);
+        wrapper.append(meta, card);
         messagesEl.insertBefore(wrapper, spacerEl);
         scrollDown();
 
         const setBadge = makeSetBadge(badge);
 
-        return { wrapper, bubble, meta, setBadge, _prefixEl: prefix, _suffixEl: suffix, _renderedSegs: 0 };
+        return { wrapper, bubble, meta, setBadge, _liveTextEl: liveText };
       }
 
       // Static message: standard rendering
       bubble.innerHTML = renderMd(content);
 
-      wrapper.append(meta, bubble);
+      wrapper.append(meta, card);
       messagesEl.insertBefore(wrapper, spacerEl);
       scrollDown();
 
@@ -819,125 +1107,19 @@
       item.setBadge("done");
     }
 
-    /* rAF batch — coalesce multiple SSE tokens into one render frame.
-       Uses dual-container incremental rendering:
-       - Completed segments → insertAdjacentHTML into .md-prefix (Markdown)
-       - Current incomplete segment → textContent into .stream-suffix (zero flicker)
-    */
+    /* rAF batch — coalesce multiple SSE tokens into one render frame. */
     let _rafId = null;
     let _rafPending = new Map(); // agent → rawText
 
     function _flushRaf() {
       for (const [agent, raw] of _rafPending) {
         const item = state.liveMessages.get(agent);
-        if (!item || !item._prefixEl) continue;
-
-        const segments = splitIntoSegments(raw);
-        if (segments.length === 0) continue;
-
-        // All segments except the last are complete (closed by \n\n, ```, heading, etc.)
-        const completed = segments.slice(0, -1);
-        const current   = segments[segments.length - 1];
-
-        // Append newly completed segments to the prefix container as Markdown
-        for (let i = item._renderedSegs; i < completed.length; i++) {
-          item._prefixEl.insertAdjacentHTML("beforeend", renderMd(completed[i].content));
-        }
-        item._renderedSegs = completed.length;
-
-        // Stream the current (potentially incomplete) segment as plain text
-        item._suffixEl.textContent = current.content;
+        if (!item || !item._liveTextEl) continue;
+        item._liveTextEl.textContent = raw;
       }
       _rafPending.clear();
       _rafId = null;
       scrollDown();
-    }
-
-    /**
-     * 将文本分成多个段落（保留，供 _flushRaf 使用）
-      }
-      _rafPending.clear();
-      _rafId = null;
-    }
-
-    /**
-     * 将文本分成多个段落
-     * 分段策略：
-     * 1. 代码块（```...```）单独成段
-     * 2. 标题（##、###等）单独成段
-     * 3. 连续两个换行符分段
-     * 4. 列表项（-、*、1.等）连续成段
-     */
-    function splitIntoSegments(text) {
-      if (!text) return [];
-
-      const segments = [];
-      let current = "";
-      let inCodeBlock = false;
-      let codeBlockContent = "";
-
-      const lines = text.split("\n");
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
-
-        // 代码块开始
-        if (trimmed.startsWith("```") && !inCodeBlock) {
-          // 保存之前的内容
-          if (current.trim()) {
-            segments.push({ type: "text", content: current.trim() });
-          }
-          current = "";
-          inCodeBlock = true;
-          codeBlockContent = line + "\n";
-          continue;
-        }
-
-        // 代码块结束
-        if (trimmed.startsWith("```") && inCodeBlock) {
-          codeBlockContent += line + "\n";
-          segments.push({ type: "code", content: codeBlockContent.trim() });
-          codeBlockContent = "";
-          inCodeBlock = false;
-          continue;
-        }
-
-        // 代码块内部
-        if (inCodeBlock) {
-          codeBlockContent += line + "\n";
-          continue;
-        }
-
-        // 标题（##、###等）- 单独成段
-        if (trimmed.match(/^#{1,6}\s+/)) {
-          if (current.trim()) {
-            segments.push({ type: "text", content: current.trim() });
-          }
-          current = "";
-          segments.push({ type: "heading", content: trimmed });
-          continue;
-        }
-
-        // 连续两个换行符 - 分段
-        if (trimmed === "" && current.trim()) {
-          segments.push({ type: "text", content: current.trim() });
-          current = "";
-          continue;
-        }
-
-        // 普通文本
-        current += line + "\n";
-      }
-
-      // 保存剩余内容
-      if (inCodeBlock) {
-        segments.push({ type: "code", content: codeBlockContent.trim() });
-      } else if (current.trim()) {
-        segments.push({ type: "text", content: current.trim() });
-      }
-
-      return segments;
     }
 
     function appendLive(agent, text) {
@@ -956,6 +1138,7 @@
       item.rawText += text;
 
       // Switch from thinking to writing on first text
+      item.bubble.classList.remove("msg-bubble-live-pending");
       item.setBadge("writing");
 
       // Batch renders: at most one renderMd per animation frame
@@ -993,6 +1176,9 @@
       finalizeLiveMessages();
       loadSessions();
       loadWorktreeStatus();
+      if (state.rightPanelTab === "workspace") {
+        loadWorkspaceState();
+      }
     }
 
     function addSystem(text, variant = "") {
@@ -1006,7 +1192,15 @@
         wrapper.className = "message system";
         const meta = document.createElement("div");
         meta.className = "msg-meta";
-        meta.textContent = "system";
+        const metaLabel = document.createElement("span");
+        metaLabel.className = "msg-name";
+        metaLabel.textContent = roleDisplayName("system", "system");
+        const metaRole = document.createElement("span");
+        metaRole.className = "msg-role-label";
+        metaRole.textContent = roleBadgeLabel("system");
+        meta.append(metaLabel, metaRole);
+        const card = document.createElement("div");
+        card.className = "msg-card";
         const bubble = document.createElement("div");
         bubble.className = "msg-bubble";
         const retry = document.createElement("button");
@@ -1019,10 +1213,17 @@
           sendPrompt();
         });
         bubble.appendChild(retry);
-        wrapper.append(meta, bubble);
+        card.appendChild(bubble);
+        wrapper.append(meta, card);
         messagesEl.insertBefore(wrapper, spacerEl);
         scrollDown();
       }
+    }
+
+    function addDebug(agent, text) {
+      hideEmpty();
+      ensureSpacer();
+      createMessage({ role: "system", agent, content: text, variant: "stderr" });
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -1063,9 +1264,11 @@
         item.tabIndex = 0;
         item.title = `插入 @${agentMention(a)}`;
         item.innerHTML = `
+          <span class="agent-tab-role"></span>
           <span class="agent-tab-name"></span>
           <span class="agent-tab-model"></span>`;
-        item.querySelector(".agent-tab-name").textContent = `@${agentMention(a)}`;
+        item.querySelector(".agent-tab-role").textContent = agentRoleLabel(a);
+        item.querySelector(".agent-tab-name").textContent = agentLabel(a.id);
         item.querySelector(".agent-tab-model").textContent = agentMeta(a);
         item.addEventListener("click", () => insertAgentMention(a));
         item.addEventListener("keydown", (e) => {
@@ -1470,6 +1673,9 @@
           state.currentSessionId = data.sessionId;
           loadSessions();
           loadWorktreeStatus();
+          if (state.rightPanelTab === "workspace") {
+            loadWorkspaceState();
+          }
           break;
         case "skills-active":
           renderSkillTags(data.skills);
@@ -1482,7 +1688,7 @@
           appendLive(data.agent, data.text);
           break;
         case "stderr":
-          createMessage({ role: "assistant", agent: data.agent, content: data.text, variant: "stderr" });
+          addDebug(data.agent, data.text);
           break;
         case "error":
           addSystem(data.message, "error");
@@ -1552,7 +1758,7 @@
 
       state.controller = new AbortController();
       promptEl.disabled = true;
-      btnSend.textContent = "Stop";
+      btnSend.textContent = "停止";
       btnSend.classList.add("danger");
 
       try {
@@ -1608,7 +1814,7 @@
         }
         state.controller = null;
         promptEl.disabled = false;
-        btnSend.textContent = "Send";
+        btnSend.textContent = "发送";
         btnSend.classList.remove("danger");
       }
     }
@@ -1685,7 +1891,9 @@
        ═══════════════════════════════════════════════════════════ */
 
     initTheme();
+    setRightPanelTab("agents");
     loadProjectDir();
+    renderWorkspacePanel();
 
     fetch("/api/skills")
       .then(jsonOrThrow)
