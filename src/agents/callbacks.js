@@ -138,7 +138,7 @@ function postMessage(threadId, invocationId, content, { appendToSession, readSes
       content,
       source: "callback",
       invocationId,
-    });
+    }, { allowCreate: false });
   }
 
   // Record the mid-execution callback in the transcript under the originating

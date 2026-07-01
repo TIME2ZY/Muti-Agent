@@ -38,6 +38,11 @@
     const recallOverlayEl = $("#recall-overlay");
     const recallBodyEl = $("#recall-body");
     const recallSearchInputEl = $("#recall-search-input");
+    const sessionApi = window.SessionApi.createSessionApi(window.fetch.bind(window));
+    const worktreeApi = window.WorktreeApi.createWorktreeApi(window.fetch.bind(window));
+    const recallApi = window.RecallApi.createRecallApi(window.fetch.bind(window));
+    const escHtml = window.MarkdownLite.escHtml;
+    const renderMd = window.MarkdownLite.renderMd;
 
     /* ═══════════════════════════════════════════════════════════
        THEME
@@ -64,13 +69,16 @@
        PROJECT DIRECTORY
        ═══════════════════════════════════════════════════════════ */
 
-    async function loadProjectDir() {
+    async function loadProjectDir(sessionId = state.currentSessionId) {
+      if (!sessionId) {
+        projectDirPath.textContent = state.projectDir || "(当前目录)";
+        return;
+      }
       try {
-        const res = await fetch("/api/project");
-        const data = await jsonOrThrow(res);
-        state.projectDir = data.dir || "";
+        state.projectDir = await sessionApi.readProjectDir(sessionId);
         projectDirPath.textContent = state.projectDir || "(当前目录)";
       } catch {
+        state.projectDir = "";
         projectDirPath.textContent = "(当前目录)";
       }
     }
@@ -82,13 +90,7 @@
         return;
       }
       try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/worktree/status`);
-        if (!res.ok) {
-          state.worktreeStatus = null;
-          renderWorktreeStatus();
-          return;
-        }
-        state.worktreeStatus = await jsonOrThrow(res);
+        state.worktreeStatus = await worktreeApi.readStatus(state.currentSessionId, { allowMissing: true });
         renderWorktreeStatus();
       } catch {
         state.worktreeStatus = null;
@@ -314,23 +316,20 @@
       }
 
       try {
-        const statusRes = await fetch(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/worktree/status`);
-        if (!statusRes.ok) {
+        const status = await worktreeApi.readStatus(state.currentSessionId, { allowMissing: true });
+        if (!status) {
           state.workspace = emptyWorkspaceState();
           renderWorkspacePanel();
           return;
         }
-
-        const status = await jsonOrThrow(statusRes);
-        const diffRes = await fetch(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/worktree/diff`);
-        const diffData = diffRes.ok ? await jsonOrThrow(diffRes) : { diff: "" };
+        const diffText = await worktreeApi.readDiff(state.currentSessionId, { allowMissing: true });
         const files = window.WorkspaceDiff
-          ? window.WorkspaceDiff.parseUnifiedDiff(diffData.diff || "")
+          ? window.WorkspaceDiff.parseUnifiedDiff(diffText)
           : [];
 
         state.workspace = {
           status,
-          diffText: diffData.diff || "",
+          diffText,
           files,
           selectedPath: files[0]?.path || "",
           loading: false,
@@ -346,10 +345,7 @@
 
     async function discardWorkspace() {
       if (!state.currentSessionId || !confirm("确认丢弃当前 worktree 吗？")) return;
-      const request = {
-        method: "POST",
-      };
-      await fetch(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/worktree/discard`, request);
+      await worktreeApi.discard(state.currentSessionId);
       await loadWorktreeStatus();
       await loadWorkspaceState();
     }
@@ -386,15 +382,14 @@
         projectDirEl.classList.remove("editing");
 
         if (save && val && val !== state.projectDir) {
+          if (!state.currentSessionId) {
+            state.projectDir = val;
+            projectDirPath.textContent = val;
+            return;
+          }
           try {
-            const res = await fetch("/api/project", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ dir: val }),
-            });
-            const data = await jsonOrThrow(res);
-            state.projectDir = data.dir;
-            projectDirPath.textContent = data.dir;
+            state.projectDir = await sessionApi.updateProjectDir(state.currentSessionId, val);
+            projectDirPath.textContent = state.projectDir;
           } catch (e) {
             alert("设置失败: " + e.message);
           }
@@ -439,11 +434,6 @@
     /* ═══════════════════════════════════════════════════════════
        HELPERS
        ═══════════════════════════════════════════════════════════ */
-
-    const _ESC_MAP = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
-    function escHtml(text) {
-      return String(text).replace(/[&<>"']/g, m => _ESC_MAP[m]);
-    }
 
     function copyToClipboard(text, btn, okText = "✓", failText = "Failed") {
       const orig = btn.textContent;
@@ -572,225 +562,6 @@
       return data;
     }
 
-    /* ═══════════════════════════════════════════════════════════
-       MARKDOWN
-       ═══════════════════════════════════════════════════════════ */
-
-    // A small, dependency-free GFM-ish renderer.
-    // Pipeline:
-    //   1. Protect fenced code blocks with placeholders
-    //   2. Process block-level patterns line-by-line (tables, lists, quotes, hr, headers)
-    //   3. Process inline patterns (code, bold, italic, strike, links, autolinks)
-    //   4. Restore code blocks with a header bar (language + copy button)
-    function renderMd(text) {
-      if (!text) return "";
-
-      const MARKER = "\uE000";
-      const codeBlocks = [];
-      let html = escHtml(text);
-
-      // 1. Fenced code blocks — store with language label
-      html = html.replace(/```([\w+-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-        const idx = codeBlocks.length;
-        codeBlocks.push({ lang: lang || "", code: code.replace(/\n$/, "") });
-        return `${MARKER}${idx}${MARKER}`;
-      });
-
-      // Also handle inline code blocks first to protect them from later replacements
-      const inlineCodes = [];
-      html = html.replace(/`([^`\n]+)`/g, (_, code) => {
-        const idx = inlineCodes.length;
-        inlineCodes.push(code);
-        return `${MARKER}i${idx}${MARKER}`;
-      });
-
-      // 2. Block-level patterns (line-by-line)
-      const lines = html.split("\n");
-      const out = [];
-      let i = 0;
-      let inList = null; // "ul" | "ol"
-      let listType = null; // tracks GFM task list
-      const closeList = () => { if (inList) { out.push(`</${inList}>`); inList = null; listType = null; } };
-
-      while (i < lines.length) {
-        const raw = lines[i];
-
-        // Horizontal rule
-        if (/^---+\s*$/.test(raw) || /^\*\*\*+\s*$/.test(raw)) {
-          closeList();
-          out.push("<hr>");
-          i++;
-          continue;
-        }
-
-        // Table — header row + alignment row + body
-        // Format: | col1 | col2 | followed by | --- | :---: | etc.
-        if (/^\|.*\|\s*$/.test(raw) && i + 1 < lines.length && /^\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
-          closeList();
-          const headerCells = splitTableRow(raw);
-          const alignCells = splitTableRow(lines[i + 1]);
-          const aligns = alignCells.map((c) => {
-            const left = c.trim().startsWith(":");
-            const right = c.trim().endsWith(":");
-            if (left && right) return "center";
-            if (right) return "right";
-            if (left) return "left";
-            return "";
-          });
-          const bodyRows = [];
-          let j = i + 2;
-          while (j < lines.length && /^\|.*\|\s*$/.test(lines[j]) && lines[j].trim()) {
-            bodyRows.push(splitTableRow(lines[j]));
-            j++;
-          }
-          out.push("<table class=\"md-table\"><thead><tr>");
-          headerCells.forEach((c, k) => {
-            const align = aligns[k] ? ` class="ta-${aligns[k]}"` : "";
-            out.push(`<th${align}>${c}</th>`);
-          });
-          out.push("</tr></thead><tbody>");
-          bodyRows.forEach((row) => {
-            out.push("<tr>");
-            row.forEach((c, k) => {
-              const align = aligns[k] ? ` class="ta-${aligns[k]}"` : "";
-              out.push(`<td${align}>${c}</td>`);
-            });
-            out.push("</tr>");
-          });
-          out.push("</tbody></table>");
-          i = j;
-          continue;
-        }
-
-        // Headers: ###, ##, #
-        const h = raw.match(/^(#{1,3})\s+(.+)/);
-        if (h) {
-          closeList();
-          const level = h[1].length;
-          out.push(`<h${level} class="md-h md-h${level}">${h[2]}</h${level}>`);
-          i++;
-          continue;
-        }
-
-        // Task list item: - [ ] or - [x]
-        const task = raw.match(/^[-*]\s+\[([ xX])\]\s+(.+)/);
-        if (task) {
-          if (inList !== "ul" || listType !== "task") {
-            closeList();
-            out.push("<ul class=\"md-task\">");
-            inList = "ul";
-            listType = "task";
-          }
-          const checked = task[1] !== " ";
-          out.push(`<li><input type="checkbox" disabled${checked ? " checked" : ""}><span>${task[2]}</span></li>`);
-          i++;
-          continue;
-        }
-
-        // Unordered list: - or *
-        const ul = raw.match(/^[-*]\s+(.+)/);
-        if (ul) {
-          if (inList !== "ul" || listType !== "ul") {
-            closeList();
-            out.push("<ul>");
-            inList = "ul";
-            listType = "ul";
-          }
-          out.push(`<li>${ul[1]}</li>`);
-          i++;
-          continue;
-        }
-
-        // Ordered list: 1.
-        const ol = raw.match(/^\d+\.\s+(.+)/);
-        if (ol) {
-          if (inList !== "ol") { closeList(); out.push("<ol>"); inList = "ol"; listType = "ol"; }
-          out.push(`<li>${ol[1]}</li>`);
-          i++;
-          continue;
-        }
-
-        // Blockquote: > (allow consecutive lines to merge)
-        if (/^>\s?/.test(raw)) {
-          closeList();
-          const quoteLines = [];
-          while (i < lines.length && /^>\s?/.test(lines[i])) {
-            quoteLines.push(lines[i].replace(/^>\s?/, ""));
-            i++;
-          }
-          out.push(`<blockquote class="md-quote">${quoteLines.join("<br>")}</blockquote>`);
-          continue;
-        }
-
-        // Blank line
-        if (raw.trim() === "") {
-          closeList();
-          out.push("");
-          i++;
-          continue;
-        }
-
-        closeList();
-        out.push(raw);
-        i++;
-      }
-      closeList();
-
-      html = out.join("\n");
-
-      // 3. Inline patterns (safe order: code > autolink > links > bold > italic > strike)
-      html = html.replace(/<(http[^>\s]+)>/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-      html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-        (_, label, url) => `<a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(label)}</a>`);
-      html = html.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-      // bold then italic (italic uses single * that is not part of **)
-      html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
-      html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-
-      // 4. Restore inline code placeholders
-      html = html.replace(new RegExp(`${MARKER}i(\\d+)${MARKER}`, "g"), (_, k) =>
-        `<code class="md-code-inline">${inlineCodes[+k]}</code>`);
-
-      // 5. Restore code block placeholders — wrap in a container with header bar
-      html = html.replace(new RegExp(`${MARKER}(\\d+)${MARKER}`, "g"), (_, k) => {
-        const { lang, code } = codeBlocks[+k];
-        const langLabel = lang || "text";
-        
-        // 语法高亮
-        let highlightedCode = code;
-        if (lang && typeof Prism !== 'undefined' && Prism.languages[lang]) {
-          try {
-            highlightedCode = Prism.highlight(code, Prism.languages[lang], lang);
-          } catch (e) {
-            // 高亮失败时使用原始代码
-            highlightedCode = code;
-          }
-        }
-        
-        // 计算行数
-        const lineCount = code.split('\n').length;
-        const shouldCollapse = lineCount > 20; // 超过20行时可折叠
-        
-        return `<div class="md-code ${shouldCollapse ? 'md-code-collapsible' : ''}">
-          <div class="md-code-head">
-            <span class="md-code-lang">${escHtml(langLabel)}</span>
-            <span class="md-code-lines">${lineCount} lines</span>
-            ${shouldCollapse ? '<button type="button" class="md-code-toggle" data-toggle="1">▼</button>' : ''}
-            <button type="button" class="md-code-copy" data-copy="1">Copy</button>
-          </div>
-          <pre class="${shouldCollapse ? 'md-code-pre-collapsed' : ''}"><code class="language-${escHtml(lang)}">${highlightedCode}</code></pre>
-        </div>`;
-      });
-
-      return html;
-    }
-
-    function splitTableRow(line) {
-      // Trim leading/trailing pipe, then split. Empty cells preserved.
-      const inner = line.replace(/^\||\|$/g, "");
-      return inner.split("|").map((c) => c.trim());
-    }
-
     // Wire up copy buttons on every code block after render.
     // Delegated handler — robust to re-renders.
     document.addEventListener("click", (e) => {
@@ -859,30 +630,7 @@
     function closeSidebarIfMobile() {
       if (window.innerWidth <= 700) sidebarEl.classList.remove("open");
     }
-
-    async function refreshSessionList() {
-      try {
-        const res = await fetch("/api/sessions");
-        const data = await jsonOrThrow(res);
-        const sessions = data.sessions || [];
-        renderSessionList(sessions);
-        return sessions;
-      } catch {
-        // Session list load failure is non-critical
-        return [];
-      }
-    }
-
-    async function loadSessions() {
-      const sessions = await refreshSessionList();
-      if (!state.currentSessionId && sessions.length > 0) {
-        try {
-          await switchSession(sessions[0].id);
-        } catch {
-          // Initial history load failure is non-critical
-        }
-      }
-    }
+    let sessionController = null;
 
     function renderSessionList(sessions) {
       if (sessions.length === 0) {
@@ -900,7 +648,7 @@
 
         item.addEventListener("click", (e) => {
           if (e.target.closest(".btn-delete-session")) return;
-          switchSession(s.id);
+          sessionController.switchSession(s.id);
           closeSidebarIfMobile();
         });
 
@@ -910,97 +658,35 @@
         del.title = "删除对话";
         del.addEventListener("click", (e) => {
           e.stopPropagation();
-          deleteSession(s.id);
+          sessionController.deleteSession(s.id);
         });
         item.appendChild(del);
 
         return item;
       }));
     }
+    sessionController = window.SessionController.createSessionController({
+      state,
+      sessionApi,
+      renderSessionList,
+      addSystem,
+      ensureSpacer,
+      showEmpty,
+      createMessage,
+      messagesEl,
+      promptEl,
+      projectDirPath,
+      closeSidebarIfMobile,
+      loadProjectDir,
+      loadWorktreeStatus,
+      loadWorkspaceState,
+      renderWorktreeStatus,
+      renderWorkspacePanel,
+      emptyWorkspaceState,
+      setStatus,
+    });
 
-    async function switchSession(id) {
-      if (id === state.currentSessionId) return;
-      if (state.controller) { state.controller.abort(); state.controller = null; }
-      const previousSessionId = state.currentSessionId;
-      state.currentSessionId = id;
-      state.liveMessages.clear();
-      state.liveInvocations.clear();
-      messagesEl.replaceChildren();
-      try {
-        const res = await fetch(`/api/messages?sessionId=${id}`);
-        const data = await jsonOrThrow(res);
-        if (!data.messages || data.messages.length === 0) {
-          ensureSpacer();
-          showEmpty();
-        } else {
-          for (const msg of data.messages) {
-            createMessage({
-              role: msg.role,
-              agent: msg.agent,
-              content: msg.content || "",
-              variant: msg.exitCode && msg.exitCode !== 0 ? "error" : "",
-              invocationId: msg.invocationId || null,
-            });
-          }
-          ensureSpacer();
-        }
-      } catch (e) {
-        state.currentSessionId = previousSessionId;
-        addSystem("加载消息失败: " + e.message, "error");
-        ensureSpacer();
-      }
-      await refreshSessionList();
-      await loadWorktreeStatus();
-      if (state.rightPanelTab === "workspace") {
-        await loadWorkspaceState();
-      }
-    }
-
-    async function newSession() {
-      try {
-        const res = await fetch("/api/sessions", { method: "POST" });
-        const data = await jsonOrThrow(res);
-        state.currentSessionId = data.session.id;
-        state.liveMessages.clear();
-        messagesEl.replaceChildren();
-        ensureSpacer();
-        showEmpty();
-        state.worktreeStatus = null;
-        renderWorktreeStatus();
-        state.workspace = emptyWorkspaceState();
-        renderWorkspacePanel();
-        setStatus("就绪");
-        await refreshSessionList();
-        promptEl.focus();
-        closeSidebarIfMobile();
-      } catch (e) {
-        addSystem("创建会话失败: " + e.message, "error");
-      }
-    }
-
-    async function deleteSession(id) {
-      try {
-        await jsonOrThrow(await fetch(`/api/sessions/${id}`, { method: "DELETE" }));
-        if (state.currentSessionId === id) {
-          state.currentSessionId = null;
-          state.liveMessages.clear();
-          messagesEl.replaceChildren();
-          ensureSpacer();
-          showEmpty();
-          state.worktreeStatus = null;
-          renderWorktreeStatus();
-          state.workspace = emptyWorkspaceState();
-          renderWorkspacePanel();
-          setStatus("就绪");
-        }
-        await refreshSessionList();
-        closeSidebarIfMobile();
-      } catch (e) {
-        addSystem("删除会话失败: " + e.message, "error");
-      }
-    }
-
-    btnNewChat.addEventListener("click", newSession);
+    btnNewChat.addEventListener("click", () => sessionController.newSession());
     panelTabAgentsEl.addEventListener("click", () => {
       setRightPanelTab("agents");
     });
@@ -1122,6 +808,13 @@
       scrollDown();
     }
 
+    function flushPendingLiveRender() {
+      if (_rafId) {
+        cancelAnimationFrame(_rafId);
+        _flushRaf();
+      }
+    }
+
     function appendLive(agent, text) {
       hideEmpty();
       ensureSpacer();
@@ -1148,10 +841,7 @@
     }
 
     function finalizeLiveMessages() {
-      if (_rafId) {
-        cancelAnimationFrame(_rafId);
-        _flushRaf();
-      }
+      flushPendingLiveRender();
       for (const [, item] of state.liveMessages) {
         item.bubble.innerHTML = renderMd(item.rawText || "");
         if (!item.wrapper.querySelector(".msg-copy")) {
@@ -1174,7 +864,7 @@
     function finishStream(statusText) {
       state.doneReceived = true;
       finalizeLiveMessages();
-      loadSessions();
+      sessionController.loadSessions();
       loadWorktreeStatus();
       if (state.rightPanelTab === "workspace") {
         loadWorkspaceState();
@@ -1210,7 +900,7 @@
           promptEl.value = state.lastPrompt;
           state.selectedAgent = state.lastAgent;
           renderAgentTabs();
-          sendPrompt();
+          chatClient.sendPrompt();
         });
         bubble.appendChild(retry);
         card.appendChild(bubble);
@@ -1455,11 +1145,7 @@
     async function fetchInvocationEvents(invocationId) {
       const sid = state.currentSessionId;
       if (!sid || !invocationId) return [];
-      const url = `/api/callbacks/read-invocation?sessionId=${encodeURIComponent(sid)}`
-        + `&targetInvocationId=${encodeURIComponent(invocationId)}&from=0&limit=500`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`read-invocation ${res.status}`);
-      const data = await res.json();
+      const data = await recallApi.readInvocation(sid, invocationId, { from: 0, limit: 500 });
       return data.events || [];
     }
 
@@ -1525,9 +1211,7 @@
       const sid = state.currentSessionId;
       if (!sid) { setRecallEmpty(recallBodyEl, "暂无会话"); return; }
       try {
-        const res = await fetch(`/api/callbacks/list-invocations?sessionId=${encodeURIComponent(sid)}`);
-        const data = await res.json();
-        renderRecallList(data.invocations || []);
+        renderRecallList(await recallApi.listInvocations(sid));
       } catch (e) {
         setRecallEmpty(recallBodyEl, "加载失败: " + e.message, true);
       }
@@ -1595,10 +1279,7 @@
       const sid = state.currentSessionId;
       if (!sid) { setRecallEmpty(recallBodyEl, "暂无会话"); return; }
       try {
-        const res = await fetch(`/api/callbacks/session-search?sessionId=${encodeURIComponent(sid)}`
-          + `&query=${encodeURIComponent(query)}&limit=30`);
-        const data = await res.json();
-        renderRecallHits(data.hits || []);
+        renderRecallHits(await recallApi.searchSession(sid, query, { limit: 30 }));
       } catch (e) {
         setRecallEmpty(recallBodyEl, "搜索失败: " + e.message, true);
       }
@@ -1653,171 +1334,32 @@
        SSE PARSER
        ═══════════════════════════════════════════════════════════ */
 
-    function parseSse(buffer, onEvent) {
-      let rest = buffer;
-      let idx;
-      while ((idx = rest.indexOf("\n\n")) !== -1) {
-        const frame = rest.slice(0, idx);
-        rest = rest.slice(idx + 2);
-        const eventLine = frame.split("\n").find((l) => l.startsWith("event: "));
-        const dataLine  = frame.split("\n").find((l) => l.startsWith("data: "));
-        if (!eventLine || !dataLine) continue;
-        onEvent(eventLine.slice(7), JSON.parse(dataLine.slice(6)));
-      }
-      return rest;
-    }
-
-    function handleSseEvent(event, data) {
-      switch (event) {
-        case "session":
-          state.currentSessionId = data.sessionId;
-          loadSessions();
-          loadWorktreeStatus();
-          if (state.rightPanelTab === "workspace") {
-            loadWorkspaceState();
-          }
-          break;
-        case "skills-active":
-          renderSkillTags(data.skills);
-          break;
-        case "agent-start":
-          if (data.invocationId) state.liveInvocations.set(data.agent, data.invocationId);
-          showThinking(data.agent);
-          break;
-        case "message":
-          appendLive(data.agent, data.text);
-          break;
-        case "stderr":
-          addDebug(data.agent, data.text);
-          break;
-        case "error":
-          addSystem(data.message, "error");
-          break;
-        case "context-warning":
-          setStatus("上下文接近上限");
-          break;
-        case "sealed":
-          finishStream("上下文已封存");
-          addSystem(`context overflow: 已停止继续路由`);
-          break;
-        case "agent-exit":
-          if (data.code !== 0) {
-            const item = state.liveMessages.get(data.agent);
-            if (item) item.setBadge("error");
-            addSystem(`${agentLabel(data.agent)} exited with ${data.code ?? data.signal}`, "error");
-          }
-          break;
-        case "a2a-route":
-          addSystem(`🔄 ${agentLabel(data.from)} → ${agentLabel(data.to)}`);
-          break;
-        case "done":
-          finishStream("就绪");
-          break;
-      }
-    }
-
-    /* ═══════════════════════════════════════════════════════════
-       SEND
-       ═══════════════════════════════════════════════════════════ */
-
-    async function sendPrompt() {
-      const prompt = promptEl.value.trim();
-      if (!prompt || state.controller) return;
-
-      const targetAgent = resolvePromptAgent(prompt);
-      if (!targetAgent) {
-        addSystem("请先输入 @ 选择一个模型", "error");
-        setStatus("请选择模型", "error");
-        promptEl.focus();
-        updateMentionMenu();
-        return;
-      }
-
-      // Create session if needed
-      if (!state.currentSessionId) {
-        try {
-          const res = await fetch("/api/sessions", { method: "POST" });
-          const data = await jsonOrThrow(res);
-          state.currentSessionId = data.session.id;
-        } catch (e) {
-          addSystem(e.message, "error");
-          return;
-        }
-      }
-
-      state.lastPrompt = prompt;
-      state.lastAgent = targetAgent.id;
-      state.selectedAgent = targetAgent.id;
-      state.doneReceived = false;
-      state.liveMessages.clear();
-      state.liveInvocations.clear();
-
-      createMessage({ role: "user", agent: targetAgent.id, content: prompt });
-      promptEl.value = "";
-      hideMentionMenu();
-
-      state.controller = new AbortController();
-      promptEl.disabled = true;
-      btnSend.textContent = "停止";
-      btnSend.classList.add("danger");
-
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            agent: targetAgent.id,
-            prompt,
-            sessionId: state.currentSessionId,
-            projectDir: state.projectDir || undefined,
-            useWorktree: useWorktreeInput.checked,
-          }),
-          signal: state.controller.signal,
-        });
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          addSystem(err.error || `${res.status} ${res.statusText}`, "error");
-          setStatus("错误", "error");
-          return;
-        }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          buf = parseSse(buf, handleSseEvent);
-        }
-      } catch (err) {
-        if (_rafId) { cancelAnimationFrame(_rafId); _flushRaf(); }
-        if (err.name === "AbortError") {
-          setStatus("已停止");
-          addSystem("已停止", "error");
-        } else {
-          setStatus("错误", "error");
-          addSystem(err.message || "连接中断", "error");
-        }
-        // Clean up live messages on error: clear badges, finalize rendering
-        for (const [, item] of state.liveMessages) {
-          item.setBadge("done");
-          item.bubble.innerHTML = renderMd(item.rawText || "");
-        }
-      } finally {
-        // Detect unexpected disconnect
-        if (!state.doneReceived && !(state.controller && state.controller.signal.aborted)) {
-          setStatus("错误", "error");
-          addSystem("连接意外中断", "error");
-        }
-        state.controller = null;
-        promptEl.disabled = false;
-        btnSend.textContent = "发送";
-        btnSend.classList.remove("danger");
-      }
-    }
+    const chatClient = window.ChatClient.createChatClient({
+      state,
+      promptEl,
+      btnSend,
+      useWorktreeInput,
+      resolvePromptAgent,
+      addSystem,
+      setStatus,
+      updateMentionMenu,
+      sessionApi,
+      createMessage,
+      hideMentionMenu,
+      fetchImpl: window.fetch.bind(window),
+      flushPendingLiveRender,
+      renderMd,
+      sessionController,
+      loadProjectDir,
+      loadWorktreeStatus,
+      loadWorkspaceState,
+      renderSkillTags,
+      showThinking,
+      appendLive,
+      addDebug,
+      finishStream,
+      agentLabel,
+    });
 
     /* ═══════════════════════════════════════════════════════════
        EVENT BINDINGS
@@ -1825,22 +1367,15 @@
 
     btnSend.addEventListener("click", () => {
       if (state.controller) { state.controller.abort(); return; }
-      sendPrompt();
+      chatClient.sendPrompt();
     });
 
     btnClear.addEventListener("click", async () => {
-      // P2-4 方案 A: 真正丢弃当前对话 — DELETE session + 清屏
-      if (state.currentSessionId) {
-        try { await jsonOrThrow(await fetch(`/api/sessions/${state.currentSessionId}`, { method: "DELETE" })); } catch (e) { console.warn("Delete session failed:", e); }
-        state.currentSessionId = null;
+      if (state.controller) {
+        state.controller.abort();
       }
-      state.liveMessages.clear();
-      messagesEl.replaceChildren();
-      ensureSpacer();
-      showEmpty();
-      setStatus("就绪");
+      await sessionController.newSession();
       renderSkillTags([]);
-      loadSessions();
     });
 
     promptEl.addEventListener("input", () => {
@@ -1882,7 +1417,7 @@
 
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        sendPrompt();
+        chatClient.sendPrompt();
       }
     });
 
@@ -1903,7 +1438,7 @@
       })
       .catch((e) => console.warn("Skills metadata load failed:", e));
 
-    Promise.all([loadAgents(), loadSessions()]).catch((e) => {
+    Promise.all([loadAgents(), sessionController.loadSessions()]).catch((e) => {
       setStatus("加载失败", "error");
     });
   })();

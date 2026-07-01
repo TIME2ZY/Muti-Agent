@@ -1,7 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
-
-const DEFAULT_TRANSCRIPT_DIR = path.join(__dirname, "data", "transcripts");
+const { DEFAULT_TRANSCRIPT_DIR } = require("../server/runtime-paths");
 const MAX_LINE_BYTES = 256 * 1024;
 
 // Single global write queue. Serializing all appends through one chain
@@ -36,6 +35,11 @@ function getInvocationPath(sessionId, invocationId) {
 
 function getSessionDir(sessionId) {
   return path.join(getTranscriptDir(), sanitizeId(sessionId));
+}
+
+function deleteSessionData(sessionId) {
+  if (!sessionId) return;
+  fs.rmSync(getSessionDir(sessionId), { recursive: true, force: true });
 }
 
 function enqueueWrite(filePath, content) {
@@ -230,6 +234,7 @@ async function getInvocationStats(sessionId) {
 
 module.exports = {
   appendEvent,
+  deleteSessionData,
   readInvocation,
   readInvocationPage,
   readInvocationMeta,

@@ -43,10 +43,15 @@ function createPassthroughWorktreeManager() {
 
 async function withServer(options, fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoke-server-test-"));
+  const prevTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
+  if (!prevTranscriptDir) {
+    process.env.CAT_CAFE_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
+  }
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
     invocationsFile: path.join(tmpDir, "invocations.json"),
+    sessionMapRoot: path.join(tmpDir, "session-maps"),
     ...options,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -56,6 +61,10 @@ async function withServer(options, fn) {
     await fn(`http://127.0.0.1:${port}`);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (!prevTranscriptDir) {
+      delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
@@ -394,11 +403,109 @@ test("DELETE /api/sessions/:id deletes a session", async () => {
   });
 });
 
+test("DELETE /api/sessions/:id discards an attached worktree", async () => {
+  const calls = [];
+
+  await withServer(
+    {
+      worktreeManager: {
+        ensureWorktree({ baseDir, sessionId }) {
+          calls.push(["ensure", sessionId]);
+          return {
+            sessionId,
+            baseDir,
+            worktreeDir: baseDir,
+            branch: `codex/session-${sessionId}`,
+            status: "active",
+            createdAt: new Date().toISOString(),
+          };
+        },
+        getStatus(sessionId) {
+          return { sessionId, branch: `codex/session-${sessionId}`, clean: true, porcelain: [] };
+        },
+        getDiff() {
+          return "";
+        },
+        discardWorktree(sessionId) {
+          calls.push(["discard", sessionId]);
+          return { ok: true, sessionId };
+        },
+      },
+      spawnRunner() {
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write("answer");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-delete-worktree-"));
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "sage", prompt: "hello", projectDir: baseDir, useWorktree: true }),
+      });
+      const text = await response.text();
+      const sessionId = text.match(/"sessionId":"([^"]+)"/)[1];
+
+      const deleted = await fetch(`${baseUrl}/api/sessions/${sessionId}`, { method: "DELETE" });
+      assert.equal(deleted.status, 200);
+      assert.deepEqual(calls, [
+        ["ensure", sessionId],
+        ["discard", sessionId],
+      ]);
+    }
+  );
+});
+
 test("DELETE /api/sessions/:id returns 404 for unknown session", async () => {
   await withServer({}, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/sessions/nonexistent`, { method: "DELETE" });
     assert.equal(response.status, 404);
   });
+});
+
+test("DELETE /api/sessions/:id does not let a still-running chat recreate the session", async () => {
+  const spawned = [];
+
+  await withServer(
+    {
+      spawnRunner() {
+        const child = createMockChild();
+        child.closeNow = (code = 0, signal = null) => child.emit("close", code, signal);
+        spawned.push(child);
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const { session } = await created.json();
+
+      const chatPromise = fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "architect", prompt: "long task", sessionId: session.id }),
+      }).then((res) => res.text());
+
+      const deadline = Date.now() + 2000;
+      while (spawned.length < 1 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(spawned.length, 1);
+
+      const deleted = await fetch(`${baseUrl}/api/sessions/${session.id}`, { method: "DELETE" });
+      assert.equal(deleted.status, 200);
+
+      spawned[0].stdout.write("late answer");
+      spawned[0].closeNow(0, null);
+      await chatPromise;
+
+      const getResponse = await fetch(`${baseUrl}/api/sessions/${session.id}`);
+      assert.equal(getResponse.status, 404);
+    }
+  );
 });
 
 test("POST /api/chat with explicit sessionId stores messages there", async () => {
@@ -462,6 +569,74 @@ test("POST /api/chat rejects invalid projectDir", async () => {
       assert.equal(response.status, 400);
       const body = JSON.parse(text);
       assert.match(body.error, /Directory not found/);
+    }
+  );
+});
+
+test("project endpoint stores projectDir per session and chat reuses the saved directory", async () => {
+  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "server-project-a-"));
+  const dirB = fs.mkdtempSync(path.join(os.tmpdir(), "server-project-b-"));
+  const cwds = [];
+
+  await withServer(
+    {
+      spawnRunner(command, args, options) {
+        cwds.push(options.cwd);
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write("ok");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const createdA = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const { session: sessionA } = await createdA.json();
+      const createdB = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const { session: sessionB } = await createdB.json();
+
+      let response = await fetch(`${baseUrl}/api/project`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: sessionA.id, dir: dirA }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).dir, dirA);
+
+      response = await fetch(`${baseUrl}/api/project`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: sessionB.id, dir: dirB }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).dir, dirB);
+
+      response = await fetch(`${baseUrl}/api/project?sessionId=${encodeURIComponent(sessionA.id)}`);
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).dir, dirA);
+
+      response = await fetch(`${baseUrl}/api/project?sessionId=${encodeURIComponent(sessionB.id)}`);
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).dir, dirB);
+
+      response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "sage", prompt: "hello A", sessionId: sessionA.id }),
+      });
+      assert.equal(response.status, 200);
+      await response.text();
+
+      response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "sage", prompt: "hello B", sessionId: sessionB.id }),
+      });
+      assert.equal(response.status, 200);
+      await response.text();
+
+      assert.deepEqual(cwds, [dirA, dirB]);
     }
   );
 });
@@ -1513,6 +1688,11 @@ test("frontend exposes agent and workspace panel tabs", () => {
   assert.match(html, /id="panel-tab-agents"/);
   assert.match(html, /id="panel-tab-workspace"/);
   assert.match(html, /id="workspace-panel"/);
+  assert.match(html, /src="\/public\/session-api\.js"/);
+  assert.match(html, /src="\/public\/session-controller\.js"/);
+  assert.match(html, /src="\/public\/worktree-api\.js"/);
+  assert.match(html, /src="\/public\/recall-api\.js"/);
+  assert.match(html, /src="\/public\/chat-client\.js"/);
   assert.match(html, /src="\/public\/workspace-diff\.js"/);
 });
 
@@ -1529,10 +1709,12 @@ test("frontend uses unified Chinese console copy in the main shell", () => {
 });
 
 test("frontend app.js sends useWorktree from the explicit toggle", () => {
-    const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-    assert.match(js, /const useWorktreeInput\s*=\s*\$\("#use-worktree"\)/);
-    assert.match(js, /useWorktree:\s*useWorktreeInput\.checked/);
-  });
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
+  assert.match(appJs, /const useWorktreeInput\s*=\s*\$\("#use-worktree"\)/);
+  assert.match(appJs, /window\.ChatClient\.createChatClient/);
+  assert.match(chatJs, /useWorktree:\s*useWorktreeInput\.checked/);
+});
 
 test("frontend app.js defines unified display helpers for user and agent identities", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
@@ -1547,8 +1729,9 @@ test("frontend app.js loads workspace status and diff for the workspace tab", ()
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   assert.match(js, /rightPanelTab:\s*"agents"/);
   assert.match(js, /async function loadWorkspaceState\(\)/);
-  assert.match(js, /\/worktree\/status/);
-  assert.match(js, /\/worktree\/diff/);
+  assert.match(js, /window\.WorktreeApi\.createWorktreeApi/);
+  assert.match(js, /worktreeApi\.readStatus\(state\.currentSessionId,\s*\{\s*allowMissing:\s*true\s*\}\)/);
+  assert.match(js, /worktreeApi\.readDiff\(state\.currentSessionId,\s*\{\s*allowMissing:\s*true\s*\}\)/);
   assert.match(js, /function renderWorkspacePanel\(\)/);
 });
 
@@ -1557,7 +1740,7 @@ test("frontend app.js handles missing worktree and discard actions", () => {
   assert.match(js, /当前会话尚未创建 worktree/);
   assert.match(js, /当前无改动/);
   assert.match(js, /async function discardWorkspace\(\)/);
-  assert.match(js, /method:\s*"POST"[\s\S]*\/worktree\/discard/);
+  assert.match(js, /worktreeApi\.discard\(state\.currentSessionId\)/);
 });
 
 test("frontend app.js renders workspace file selection and diff output", () => {
@@ -1570,9 +1753,11 @@ test("frontend app.js renders workspace file selection and diff output", () => {
 });
 
 test("frontend treats sealed SSE event as an expected terminal state", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /case "sealed":/);
-  assert.match(js, /state\.doneReceived = true;[\s\S]*context overflow/);
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
+  assert.match(chatJs, /case "sealed":/);
+  assert.match(chatJs, /context overflow/);
+  assert.match(appJs, /state\.doneReceived = true/);
 });
 
 test("frontend lets model cards insert an agent mention", () => {
@@ -1620,12 +1805,13 @@ test("frontend keeps thinking and writing as badge-only live states", () => {
 });
 
 test("frontend routes stderr SSE into a separate system stderr message", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /case "stderr":/);
-  assert.match(js, /function addDebug\(agent, text\)/);
-  assert.match(js, /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/);
-  assert.match(js, /addDebug\(data\.agent, data\.text\)/);
-  assert.doesNotMatch(js, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
+  assert.match(chatJs, /case "stderr":/);
+  assert.match(appJs, /function addDebug\(agent, text\)/);
+  assert.match(appJs, /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/);
+  assert.match(chatJs, /addDebug\(data\.agent, data\.text\)/);
+  assert.doesNotMatch(appJs, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
 });
 
 test("frontend styles.css gives stderr messages a separate debug appearance", () => {

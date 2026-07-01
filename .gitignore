@@ -26,6 +26,7 @@ credentials*
 # Session data (user conversation logs)
 src/session/data/transcripts/
 data/transcripts/
+data/runtime/
 .reasonix/truncated-results/
 
 # IDE & OS
