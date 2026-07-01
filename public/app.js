@@ -28,14 +28,6 @@
     const projectDirPath = $("#project-dir-path");
     const worktreeStatusEl = $("#worktree-status");
     const mentionMenuEl = $("#mention-menu");
-    const memoryToggle = $("#memory-toggle");
-    const memoryPanel = $("#memory-panel");
-    const memoryOverlay = $("#memory-overlay");
-    const memoryClose = $("#memory-close");
-    const memoryRefresh = $("#memory-refresh");
-    const memorySearchInput = $("#memory-search-input");
-    const memoryList = $("#memory-list");
-    const memoryBody = $("#memory-body");
     const recallToggleEl = $("#recall-toggle");
     const recallPanelEl = $("#recall-panel");
     const recallCloseEl = $("#recall-close");
@@ -598,7 +590,6 @@
       }
       await refreshSessionList();
       await loadWorktreeStatus();
-      if (!memoryPanel.hidden) refreshMemoryList();
     }
 
     async function newSession() {
@@ -635,7 +626,6 @@
           setStatus("就绪");
         }
         await refreshSessionList();
-        if (!memoryPanel.hidden) refreshMemoryList();
         closeSidebarIfMobile();
       } catch (e) {
         addSystem("删除会话失败: " + e.message, "error");
@@ -791,7 +781,6 @@
       setStatus(statusText || "就绪");
       loadSessions();
       loadWorktreeStatus();
-      if (!memoryPanel.hidden) refreshMemoryList();
     }
 
     function addSystem(text, variant = "") {
@@ -1307,276 +1296,6 @@
           finishStream("就绪");
           break;
       }
-    }
-
-    /* ═══════════════════════════════════════════════════════════
-       MEMORY PANEL
-       ═══════════════════════════════════════════════════════════ */
-
-    const memoryState = {
-      invocations: [],
-      expandedIds: new Set(),
-      loading: false,
-    };
-
-    function openMemoryPanel() {
-      memoryPanel.hidden = false;
-      memoryOverlay.hidden = false;
-      refreshMemoryList();
-      setTimeout(() => memorySearchInput.focus(), 50);
-    }
-
-    function closeMemoryPanel() {
-      memoryPanel.hidden = true;
-      memoryOverlay.hidden = true;
-    }
-
-    memoryToggle.addEventListener("click", openMemoryPanel);
-    memoryClose.addEventListener("click", closeMemoryPanel);
-    memoryRefresh.addEventListener("click", () => {
-      if (memoryState.loading) return;
-      refreshMemoryList();
-    });
-    memoryOverlay.addEventListener("click", closeMemoryPanel);
-
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && !memoryPanel.hidden) {
-        closeMemoryPanel();
-      }
-    });
-
-    async function refreshMemoryList() {
-      memoryState.loading = true;
-      memoryRefresh.classList.add("spinning");
-
-      if (!state.currentSessionId) {
-        renderMemoryEmpty("没有当前对话", "先在主界面发一条消息，或在左侧选一个对话");
-        memoryState.loading = false;
-        memoryRefresh.classList.remove("spinning");
-        return;
-      }
-
-      const url = `/api/sessions/${encodeURIComponent(state.currentSessionId)}/transcript/invocations`;
-      try {
-        const res = await fetch(url);
-        if (!res.ok) {
-          const errText = `${res.status} ${res.statusText}`;
-          renderMemoryEmpty(`加载失败 (${errText})`, `URL: ${url}`, true);
-          memoryState.loading = false;
-          memoryRefresh.classList.remove("spinning");
-          return;
-        }
-        const data = await res.json();
-        memoryState.invocations = data.invocations || [];
-        if (memoryState.invocations.length === 0) {
-          renderMemoryEmpty(
-            "这个对话还没有 invocation",
-            `sessionId: ${state.currentSessionId}\n（需要先发一条消息，等 CLI 跑完才会出现记录）`
-          );
-        } else {
-          renderMemoryList();
-        }
-      } catch (e) {
-        renderMemoryEmpty("网络错误", `${e.message}\nURL: ${url}`, true);
-      } finally {
-        memoryState.loading = false;
-        memoryRefresh.classList.remove("spinning");
-      }
-    }
-
-    function renderMemoryEmpty(text, detail, isError) {
-      memoryList.replaceChildren();
-      const empty = document.createElement("div");
-      empty.className = "memory-empty" + (isError ? " memory-empty-error" : "");
-      empty.textContent = text;
-      if (detail) {
-        const d = document.createElement("div");
-        d.className = "memory-empty-detail";
-        d.textContent = detail;
-        empty.appendChild(d);
-      }
-      memoryList.appendChild(empty);
-    }
-
-    function renderMemoryList() {
-      if (memoryState.invocations.length === 0) {
-        renderMemoryEmpty("这个对话还没有 invocation");
-        return;
-      }
-      memoryList.replaceChildren(...memoryState.invocations.map((inv) => {
-        const wrapper = document.createElement("div");
-        wrapper.className = "memory-invocation";
-
-        const header = document.createElement("div");
-        header.className = "memory-invocation-header";
-
-        const info = document.createElement("div");
-        info.className = "memory-invocation-info";
-
-        const title = document.createElement("div");
-        title.className = "memory-invocation-title";
-        title.textContent = inv.invocationId;
-        title.title = inv.invocationId;
-
-        const meta = document.createElement("div");
-        meta.className = "memory-invocation-meta";
-        meta.textContent = `${agentLabel(inv.agent)} · ${fmtTime(inv.startedAt)} · ${inv.eventCount} events`;
-
-        info.append(title, meta);
-
-        const state = document.createElement("span");
-        const stateText = inv.state || "in-flight";
-        state.className = `memory-invocation-state ${stateText}`;
-        state.textContent = stateText;
-
-        header.append(info, state);
-        wrapper.appendChild(header);
-        header.addEventListener("click", () => toggleInvocation(inv.invocationId));
-
-        if (memoryState.expandedIds.has(inv.invocationId)) {
-          const eventsDiv = document.createElement("div");
-          eventsDiv.className = "memory-invocation-events";
-          eventsDiv.dataset.invId = inv.invocationId;
-          wrapper.appendChild(eventsDiv);
-          loadInvocationEvents(inv.invocationId);
-        }
-
-        return wrapper;
-      }));
-    }
-
-    function toggleInvocation(invId) {
-      if (memoryState.expandedIds.has(invId)) {
-        memoryState.expandedIds.delete(invId);
-      } else {
-        memoryState.expandedIds.add(invId);
-      }
-      renderMemoryList();
-    }
-
-    async function loadInvocationEvents(invId) {
-      const container = memoryList.querySelector(`[data-inv-id="${CSS.escape(invId)}"]`);
-      if (!container) return;
-      container.replaceChildren();
-      const loading = document.createElement("div");
-      loading.className = "memory-empty";
-      loading.textContent = "加载中…";
-      container.appendChild(loading);
-
-      try {
-        const res = await fetch(
-          `/api/sessions/${state.currentSessionId}/transcript/invocations/${encodeURIComponent(invId)}?limit=200`
-        );
-        if (!res.ok) {
-          container.textContent = "加载失败";
-          return;
-        }
-        const data = await res.json();
-        container.replaceChildren(...data.events.map(renderMemoryEvent));
-      } catch (e) {
-        container.textContent = "加载失败: " + e.message;
-      }
-    }
-
-    function renderMemoryEvent(ev) {
-      const div = document.createElement("div");
-      div.className = "memory-event";
-
-      const kind = document.createElement("span");
-      kind.className = "memory-event-kind";
-      kind.textContent = ev.kind;
-
-      const meta = document.createElement("span");
-      meta.className = "memory-event-meta";
-      meta.textContent = " · " + fmtTime(ev.ts);
-
-      div.append(kind, meta);
-
-      if (ev.payload && Object.keys(ev.payload).length > 0) {
-        const text = document.createElement("div");
-        text.className = "memory-event-text";
-        const preview = JSON.stringify(ev.payload);
-        text.textContent = preview.length > 200 ? preview.slice(0, 200) + "…" : preview;
-        div.appendChild(text);
-      }
-
-      return div;
-    }
-
-    let _memorySearchDebounce = null;
-    memorySearchInput.addEventListener("input", () => {
-      clearTimeout(_memorySearchDebounce);
-      _memorySearchDebounce = setTimeout(
-        () => doMemorySearch(memorySearchInput.value.trim()),
-        300
-      );
-    });
-
-    async function doMemorySearch(query) {
-      if (!query) {
-        renderMemoryList();
-        return;
-      }
-      if (!state.currentSessionId) {
-        renderMemoryEmpty("选择一个对话后查看记忆");
-        return;
-      }
-      try {
-        const res = await fetch(
-          `/api/sessions/${state.currentSessionId}/transcript/search?q=${encodeURIComponent(query)}&limit=20`
-        );
-        if (!res.ok) {
-          renderMemoryEmpty("搜索失败");
-          return;
-        }
-        const data = await res.json();
-        renderSearchResults(data.hits || [], query);
-      } catch (e) {
-        renderMemoryEmpty("搜索失败: " + e.message);
-      }
-    }
-
-    function renderSearchResults(hits, query) {
-      if (hits.length === 0) {
-        renderMemoryEmpty(
-          `无匹配 "${query}" 的结果`,
-          "试试别的关键词，或先让 agent 跑出记录再搜"
-        );
-        return;
-      }
-      memoryList.replaceChildren(...hits.map((hit) => {
-        const div = document.createElement("div");
-        div.className = "memory-search-hit";
-
-        const snippet = document.createElement("div");
-        snippet.className = "memory-search-hit-snippet";
-        snippet.innerHTML = highlightQuery(hit.snippet, query);
-
-        const meta = document.createElement("div");
-        meta.className = "memory-search-hit-meta";
-        meta.textContent = `${hit.invocationId.slice(0, 16)}… · ${hit.kind} · ${fmtTime(hit.ts)}`;
-
-        div.append(snippet, meta);
-        div.addEventListener("click", () => {
-          memorySearchInput.value = "";
-          memoryState.expandedIds.add(hit.invocationId);
-          renderMemoryList();
-          // Scroll the expanded card into view
-          setTimeout(() => {
-            const el = memoryList.querySelector(`[data-inv-id="${CSS.escape(hit.invocationId)}"]`);
-            if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-          }, 50);
-        });
-
-        return div;
-      }));
-    }
-
-    function highlightQuery(text, query) {
-      if (!query) return escHtml(text);
-      const escaped = escHtml(text);
-      const pattern = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      return escaped.replace(new RegExp(pattern, "gi"), (m) => `<mark>${m}</mark>`);
     }
 
     /* ═══════════════════════════════════════════════════════════

@@ -752,44 +752,6 @@ function createServer(options = {}) {
       }
     }
 
-    // ── Transcript access for the frontend (no callback token needed) ──
-    const transcriptListMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/transcript\/invocations$/);
-    if (req.method === "GET" && transcriptListMatch) {
-      const sessionId = transcriptListMatch[1];
-      const session = getSession(sessionsFile, sessionId);
-      if (!session) { sendJson(res, 404, { error: "Session not found." }); return; }
-      const invocations = await transcript.listInvocationsWithMeta(sessionId);
-      sendJson(res, 200, { invocations });
-      return;
-    }
-
-    const transcriptReadMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/transcript\/invocations\/([a-zA-Z0-9_.\-]+)$/);
-    if (req.method === "GET" && transcriptReadMatch) {
-      const sessionId = transcriptReadMatch[1];
-      const invId = transcriptReadMatch[2];
-      const session = getSession(sessionsFile, sessionId);
-      if (!session) { sendJson(res, 404, { error: "Session not found." }); return; }
-      const from = Math.max(0, parseInt(url.searchParams.get("from") || "0", 10) || 0);
-      const limitRaw = url.searchParams.get("limit");
-      const limit = limitRaw ? Math.max(1, Math.min(2000, parseInt(limitRaw, 10) || 200)) : 200;
-      const result = await transcript.readInvocationPage(sessionId, invId, { from, limit });
-      sendJson(res, 200, { invocationId: invId, ...result });
-      return;
-    }
-
-    const transcriptSearchMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/transcript\/search$/);
-    if (req.method === "GET" && transcriptSearchMatch) {
-      const sessionId = transcriptSearchMatch[1];
-      const session = getSession(sessionsFile, sessionId);
-      if (!session) { sendJson(res, 404, { error: "Session not found." }); return; }
-      const q = url.searchParams.get("q") || "";
-      if (!q) { sendJson(res, 400, { error: "q is required." }); return; }
-      const limit = Math.max(1, Math.min(200, parseInt(url.searchParams.get("limit") || "20", 10) || 20));
-      const hits = await transcript.searchTranscript(sessionId, q, { limit });
-      sendJson(res, 200, { hits, query: q, limit });
-      return;
-    }
-
     const worktreeMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/worktree\/(status|diff|discard)$/);
     if (worktreeMatch) {
       const sessionId = worktreeMatch[1];
