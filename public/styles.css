@@ -585,50 +585,6 @@
     .msg-bubble > *:first-child { margin-top: 0; }
     .msg-bubble > *:last-child { margin-bottom: 0; }
 
-    /* ═══════════════════════════════════════════════════════════
-       分段显示样式
-       ═══════════════════════════════════════════════════════════ */
-
-    .segment-text,
-    .segment-code,
-    .segment-heading {
-      margin-bottom: var(--space-3);
-      padding-bottom: var(--space-3);
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .segment-text:last-child,
-    .segment-code:last-child,
-    .segment-heading:last-child {
-      margin-bottom: 0;
-      padding-bottom: 0;
-      border-bottom: none;
-    }
-
-    .segment-text {
-      /* 普通文本段落 */
-    }
-
-    .segment-code {
-      /* 代码段落 */
-      background: var(--surface-inset);
-      border-radius: var(--radius);
-      padding: var(--space-2);
-      margin-left: calc(-1 * var(--space-2));
-      margin-right: calc(-1 * var(--space-2));
-    }
-
-    .segment-heading {
-      /* 标题段落 */
-      font-weight: 600;
-      color: var(--text-primary);
-      padding-top: var(--space-2);
-    }
-
-    .segment-heading:first-child {
-      padding-top: 0;
-    }
-
     .msg-bubble p { margin: var(--space-2) 0; }
     .msg-bubble p + p { margin-top: var(--space-3); }
 
@@ -975,6 +931,27 @@
     .badge-writing .badge-dot {
       background: var(--accent);
       animation: dot-pulse 0.8s ease-in-out infinite;
+    }
+
+    /* ── Live streaming: dual-container rendering ───────── */
+
+    .msg-bubble-live {
+      display: block;
+    }
+
+    .md-prefix:not(:empty) {
+      /* Completed segments — rendered Markdown */
+      margin-bottom: 2px;
+    }
+
+    .stream-suffix {
+      /* Current incomplete segment — plain text, zero flicker */
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .stream-suffix:empty {
+      display: none;
     }
 
     /* ── Empty state ─────────────────────────────────── */

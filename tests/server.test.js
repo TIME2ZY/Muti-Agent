@@ -154,8 +154,8 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       assert.ok(calls[0].args[3].includes("hello"), `Expected prompt to contain "hello", got: ${calls[0].args[3]?.slice(-50)}`);
       assert.ok(calls[0].args[3].includes("APPLICATION SKILL"), "Expected augmented prompt to contain APPLICATION SKILL marker");
       assert.ok(calls[0].args[3].includes("MCP 回调工具说明"), "Expected prompt to contain callback instructions");
-      assert.match(text, /event: message\ndata: \{"agent":"sage","role":"assistant","text":"partial "\}/);
-      assert.match(text, /event: message\ndata: \{"agent":"sage","role":"assistant","text":"answer"\}/);
+      // With stream buffering (16ms interval), adjacent writes are coalesced into one SSE event
+      assert.match(text, /event: message\ndata: \{"agent":"sage","role":"assistant","text":"partial answer"\}/);
       // Verify session event is emitted
       const sessionMatch = text.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
       assert.ok(sessionMatch, "Expected SSE session event with sessionId");
@@ -389,12 +389,13 @@ test("POST /api/chat with explicit sessionId stores messages there", async () =>
       const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
       const { session } = await created.json();
 
-      // Chat into that session
-      await fetch(`${baseUrl}/api/chat`, {
+      // Chat into that session (consume body to wait for stream completion)
+      const chatResp = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agent: "architect", prompt: "hello", sessionId: session.id }),
       });
+      await chatResp.text(); // drain SSE stream — ensures appendToSession ran
 
       // Verify messages are there
       const got = await fetch(`${baseUrl}/api/sessions/${session.id}`);

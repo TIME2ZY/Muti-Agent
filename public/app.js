@@ -723,23 +723,53 @@
       // Bubble
       const bubble = document.createElement("div");
       bubble.className = "msg-bubble";
+
+      // Live messages from showThinking: use dual-container for smooth streaming
+      if (role === "assistant" && content === "") {
+        bubble.classList.add("msg-bubble-live");
+        const prefix = document.createElement("div");
+        prefix.className = "md-prefix";
+        const suffix = document.createElement("div");
+        suffix.className = "stream-suffix";
+        bubble.append(prefix, suffix);
+        wrapper.append(meta, bubble);
+        messagesEl.insertBefore(wrapper, spacerEl);
+        scrollDown();
+
+        function setBadge(state) {
+          if (!state) {
+            badge.style.display = "none";
+            badge.className = "msg-badge";
+            return;
+          }
+          badge.style.display = "";
+          const configs = {
+            thinking: { cls: "badge-thinking", text: "思考中", dot: true },
+            writing:  { cls: "badge-writing",  text: "输出中", dot: true },
+            done:     { cls: "badge-done",     text: "",        dot: false },
+            error:    { cls: "badge-error",    text: "异常退出", dot: false },
+          };
+          const cfg = configs[state] || configs.thinking;
+          badge.className = "msg-badge " + cfg.cls;
+          badge.innerHTML = cfg.dot
+            ? `<span class="badge-dot"></span>${cfg.text}`
+            : cfg.text;
+        }
+
+        return { wrapper, bubble, meta, setBadge, _prefixEl: prefix, _suffixEl: suffix, _renderedSegs: 0 };
+      }
+
+      // Static message: standard rendering
       bubble.innerHTML = renderMd(content);
 
       wrapper.append(meta, bubble);
       messagesEl.insertBefore(wrapper, spacerEl);
       scrollDown();
 
-      // Recall toggle: let the user expand this invocation's event trace.
-      // Attached after the bubble is in the DOM so live messages can also
-      // get it retroactively via attachRecallToggle in the done handler.
       if (role === "assistant" && invocationId) {
         attachRecallToggle(wrapper, invocationId);
       }
 
-      /**
-       * Update the status badge on this message.
-       * @param {"thinking"|"writing"|"done"|"error"|null} state
-       */
       function setBadge(state) {
         if (!state) {
           badge.style.display = "none";
@@ -747,7 +777,6 @@
           return;
         }
         badge.style.display = "";
-
         const configs = {
           thinking: { cls: "badge-thinking", text: "思考中", dot: true },
           writing:  { cls: "badge-writing",  text: "输出中", dot: true },
@@ -781,18 +810,42 @@
       item.setBadge("done");
     }
 
-    /* rAF batch — coalesce multiple SSE tokens into one render frame */
+    /* rAF batch — coalesce multiple SSE tokens into one render frame.
+       Uses dual-container incremental rendering:
+       - Completed segments → insertAdjacentHTML into .md-prefix (Markdown)
+       - Current incomplete segment → textContent into .stream-suffix (zero flicker)
+    */
     let _rafId = null;
     let _rafPending = new Map(); // agent → rawText
 
     function _flushRaf() {
       for (const [agent, raw] of _rafPending) {
         const item = state.liveMessages.get(agent);
-        if (item) {
-          // 分段渲染：将文本按段落分段显示
-          const segments = splitIntoSegments(raw);
-          renderSegments(item.bubble, segments);
+        if (!item || !item._prefixEl) continue;
+
+        const segments = splitIntoSegments(raw);
+        if (segments.length === 0) continue;
+
+        // All segments except the last are complete (closed by \n\n, ```, heading, etc.)
+        const completed = segments.slice(0, -1);
+        const current   = segments[segments.length - 1];
+
+        // Append newly completed segments to the prefix container as Markdown
+        for (let i = item._renderedSegs; i < completed.length; i++) {
+          item._prefixEl.insertAdjacentHTML("beforeend", renderMd(completed[i].content));
         }
+        item._renderedSegs = completed.length;
+
+        // Stream the current (potentially incomplete) segment as plain text
+        item._suffixEl.textContent = current.content;
+      }
+      _rafPending.clear();
+      _rafId = null;
+      scrollDown();
+    }
+
+    /**
+     * 将文本分成多个段落（保留，供 _flushRaf 使用）
       }
       _rafPending.clear();
       _rafId = null;
@@ -876,30 +929,6 @@
       }
 
       return segments;
-    }
-
-    /**
-     * 渲染分段内容到气泡
-     */
-    function renderSegments(bubble, segments) {
-      if (segments.length === 0) {
-        bubble.innerHTML = "";
-        return;
-      }
-
-      // 如果只有一个段落，直接渲染（保持原有行为）
-      if (segments.length === 1) {
-        bubble.innerHTML = renderMd(segments[0].content);
-        return;
-      }
-
-      // 多个段落：分段渲染
-      bubble.innerHTML = segments.map((seg, idx) => {
-        const rendered = renderMd(seg.content);
-        const segClass = seg.type === "code" ? "segment-code" :
-                        seg.type === "heading" ? "segment-heading" : "segment-text";
-        return `<div class="${segClass}" data-segment="${idx}">${rendered}</div>`;
-      }).join("");
     }
 
     function appendLive(agent, text) {

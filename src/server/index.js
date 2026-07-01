@@ -1343,6 +1343,36 @@ function createServer(options = {}) {
           const args = buildChatArgs(agent, agentPrompt, promptForAgent);
           const killGraceMs = options.killGraceMs;
           const timeoutMs = options.timeoutMs;
+
+          // ── Stream buffer: character-level SSE emission ──────────
+          // Raw stdout chunks arrive at unpredictable sizes (sentence/paragraph).
+          // We accumulate them and emit at ~60fps so the frontend sees smooth
+          // character-by-character growth via its requestAnimationFrame pipeline.
+          let streamBuffer = "";
+          let streamDone = false;
+          let streamTimer = null;
+
+          const streamFlushPromise = new Promise((resolve) => {
+            streamTimer = setInterval(() => {
+              if (res.destroyed || res.writableEnded) {
+                clearInterval(streamTimer);
+                streamTimer = null;
+                resolve();
+                return;
+              }
+              if (streamBuffer.length > 0) {
+                const text = streamBuffer;
+                streamBuffer = "";
+                sendSse(res, "message", { agent, role: "assistant", text });
+              }
+              if (streamDone && streamBuffer.length === 0) {
+                clearInterval(streamTimer);
+                streamTimer = null;
+                resolve();
+              }
+            }, 16); // ~60fps
+          });
+
           const { code, signal } = await runChildStream({
             spawnRunner,
             args,
@@ -1356,7 +1386,7 @@ function createServer(options = {}) {
               assistantContent += text;
               transcript.appendEvent(sessionId, invocationId, "stdout", { agent, text });
               recordInvocationEvent(invocationEvents, invocationId, "stdout", { text });
-              sendSse(res, "message", { agent, role: "assistant", text });
+              streamBuffer += text;
             },
             onStderr(text) {
               transcript.appendEvent(sessionId, invocationId, "stderr", { agent, text });
@@ -1378,6 +1408,11 @@ function createServer(options = {}) {
             },
             shouldStop: () => sealer.isSealed(),
           });
+
+          // Signal the flush loop that no more data is coming, then wait
+          // for it to drain the remaining buffer before moving on.
+          streamDone = true;
+          if (streamTimer) await streamFlushPromise;
 
           // Finalise the invocation event record regardless of outcome, so the
           // recall panel can show completed/aborted state and persist to disk.
