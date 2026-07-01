@@ -176,10 +176,48 @@
        HELPERS
        ═══════════════════════════════════════════════════════════ */
 
+    const _ESC_MAP = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
     function escHtml(text) {
-      const el = document.createElement("span");
-      el.textContent = text;
-      return el.innerHTML;
+      return String(text).replace(/[&<>"']/g, m => _ESC_MAP[m]);
+    }
+
+    function copyToClipboard(text, btn, okText = "✓", failText = "Failed") {
+      const orig = btn.textContent;
+      return navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = okText;
+        btn.classList.add("copied");
+      }).catch(() => {
+        btn.textContent = failText;
+      }).finally(() => {
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1200);
+      });
+    }
+
+    function makeSetBadge(badgeEl) {
+      return function setBadge(state) {
+        if (!state) {
+          badgeEl.style.display = "none";
+          badgeEl.className = "msg-badge";
+          return;
+        }
+        badgeEl.style.display = "";
+        const configs = {
+          thinking: { cls: "badge-thinking", text: "思考中", dot: true },
+          writing:  { cls: "badge-writing",  text: "输出中", dot: true },
+          done:     { cls: "badge-done",     text: "",        dot: false },
+          error:    { cls: "badge-error",    text: "异常退出", dot: false },
+        };
+        const cfg = configs[state] || configs.thinking;
+        badgeEl.className = "msg-badge " + cfg.cls;
+        badgeEl.innerHTML = cfg.dot
+          ? `<span class="badge-dot"></span>${cfg.text}`
+          : cfg.text;
+      };
+    }
+
+    function setRecallEmpty(targetEl, msg, isError = false) {
+      const cls = isError ? "recall-empty recall-empty-error" : "recall-empty";
+      targetEl.innerHTML = `<div class="${cls}">${escHtml(msg)}</div>`;
     }
 
     function fmtTime(iso) {
@@ -244,9 +282,13 @@
     }
 
     async function jsonOrThrow(res) {
-      const data = await res.json().catch(() => ({}));
+      const text = await res.text();
+      let data = {};
+      try { data = JSON.parse(text); } catch { /* keep text for error context */ }
       if (!res.ok) {
-        throw new Error(data.error || `${res.status} ${res.statusText}`);
+        const err = new Error(data.error || `${res.status} ${res.statusText}`);
+        err.body = text;
+        throw err;
       }
       return data;
     }
@@ -324,14 +366,14 @@
           }
           out.push("<table class=\"md-table\"><thead><tr>");
           headerCells.forEach((c, k) => {
-            const align = aligns[k] ? ` style="text-align:${aligns[k]}"` : "";
+            const align = aligns[k] ? ` class="ta-${aligns[k]}"` : "";
             out.push(`<th${align}>${c}</th>`);
           });
           out.push("</tr></thead><tbody>");
           bodyRows.forEach((row) => {
             out.push("<tr>");
             row.forEach((c, k) => {
-              const align = aligns[k] ? ` style="text-align:${aligns[k]}"` : "";
+              const align = aligns[k] ? ` class="ta-${aligns[k]}"` : "";
               out.push(`<td${align}>${c}</td>`);
             });
             out.push("</tr>");
@@ -478,15 +520,7 @@
       const code = btn.closest(".md-code")?.querySelector("code");
       if (!code) return;
       const text = code.textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        const orig = btn.textContent;
-        btn.textContent = "Copied";
-        btn.classList.add("copied");
-        setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1200);
-      }).catch(() => {
-        btn.textContent = "Failed";
-        setTimeout(() => { btn.textContent = "Copy"; }, 1200);
-      });
+      copyToClipboard(text, btn, "Copied");
     });
 
     // Wire up toggle buttons for collapsible code blocks.
@@ -607,6 +641,7 @@
 
     async function switchSession(id) {
       if (id === state.currentSessionId) return;
+      if (state.controller) { state.controller.abort(); state.controller = null; }
       const previousSessionId = state.currentSessionId;
       state.currentSessionId = id;
       state.liveMessages.clear();
@@ -712,10 +747,7 @@
         copy.textContent = "⎘";
         copy.title = "复制";
         copy.addEventListener("click", () => {
-          navigator.clipboard.writeText(content).then(() => {
-            copy.textContent = "✓";
-            setTimeout(() => { copy.textContent = "⎘"; }, 1200);
-          }).catch(() => {});
+          copyToClipboard(content, copy);
         });
         meta.appendChild(copy);
       }
@@ -736,25 +768,7 @@
         messagesEl.insertBefore(wrapper, spacerEl);
         scrollDown();
 
-        function setBadge(state) {
-          if (!state) {
-            badge.style.display = "none";
-            badge.className = "msg-badge";
-            return;
-          }
-          badge.style.display = "";
-          const configs = {
-            thinking: { cls: "badge-thinking", text: "思考中", dot: true },
-            writing:  { cls: "badge-writing",  text: "输出中", dot: true },
-            done:     { cls: "badge-done",     text: "",        dot: false },
-            error:    { cls: "badge-error",    text: "异常退出", dot: false },
-          };
-          const cfg = configs[state] || configs.thinking;
-          badge.className = "msg-badge " + cfg.cls;
-          badge.innerHTML = cfg.dot
-            ? `<span class="badge-dot"></span>${cfg.text}`
-            : cfg.text;
-        }
+        const setBadge = makeSetBadge(badge);
 
         return { wrapper, bubble, meta, setBadge, _prefixEl: prefix, _suffixEl: suffix, _renderedSegs: 0 };
       }
@@ -770,25 +784,7 @@
         attachRecallToggle(wrapper, invocationId);
       }
 
-      function setBadge(state) {
-        if (!state) {
-          badge.style.display = "none";
-          badge.className = "msg-badge";
-          return;
-        }
-        badge.style.display = "";
-        const configs = {
-          thinking: { cls: "badge-thinking", text: "思考中", dot: true },
-          writing:  { cls: "badge-writing",  text: "输出中", dot: true },
-          done:     { cls: "badge-done",     text: "",        dot: false },
-          error:    { cls: "badge-error",    text: "异常退出", dot: false },
-        };
-        const cfg = configs[state] || configs.thinking;
-        badge.className = "msg-badge " + cfg.cls;
-        badge.innerHTML = cfg.dot
-          ? `<span class="badge-dot"></span>${cfg.text}`
-          : cfg.text;
-      }
+      const setBadge = makeSetBadge(badge);
 
       return { wrapper, bubble, meta, setBadge };
     }
@@ -968,10 +964,7 @@
           copy.textContent = "⎘";
           copy.title = "复制";
           copy.addEventListener("click", () => {
-            navigator.clipboard.writeText(item.rawText || "").then(() => {
-              copy.textContent = "✓";
-              setTimeout(() => { copy.textContent = "⎘"; }, 1200);
-            }).catch(() => {});
+            copyToClipboard(item.rawText || "", copy);
           });
           const meta = item.wrapper.querySelector(".msg-meta");
           if (meta) meta.appendChild(copy);
@@ -1041,7 +1034,7 @@
         fetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`)
           .then(jsonOrThrow)
           .then((d) => renderSkillTags(d.active))
-          .catch(() => {});
+          .catch((e) => console.warn("Active skills load failed:", e));
       }, 300);
     }
 
@@ -1219,7 +1212,7 @@
       const container = document.createElement("div");
       container.className = "recall-events";
       if (!events || events.length === 0) {
-        container.innerHTML = '<div class="recall-empty">无事件记录</div>';
+        setRecallEmpty(container, "无事件记录");
         return container;
       }
       for (const evt of events) {
@@ -1278,14 +1271,14 @@
       }
       panel = document.createElement("div");
       panel.className = "msg-recall-panel";
-      panel.innerHTML = '<div class="recall-empty">加载中…</div>';
+      setRecallEmpty(panel, "加载中…");
       wrapper.appendChild(panel);
       btn.classList.add("open");
       try {
         const events = await fetchInvocationEvents(invocationId);
         panel.replaceChildren(renderEventList(events));
       } catch (e) {
-        panel.innerHTML = `<div class="recall-empty">加载失败: ${escHtml(e.message)}</div>`;
+        setRecallEmpty(panel, "加载失败: " + e.message, true);
       }
     }
 
@@ -1312,21 +1305,21 @@
 
     async function loadRecallList() {
       recallSearchInputEl.value = "";
-      recallBodyEl.innerHTML = '<div class="recall-empty">加载中…</div>';
+      setRecallEmpty(recallBodyEl, "加载中…");
       const sid = state.currentSessionId;
-      if (!sid) { recallBodyEl.innerHTML = '<div class="recall-empty">暂无会话</div>'; return; }
+      if (!sid) { setRecallEmpty(recallBodyEl, "暂无会话"); return; }
       try {
         const res = await fetch(`/api/callbacks/list-invocations?sessionId=${encodeURIComponent(sid)}`);
         const data = await res.json();
         renderRecallList(data.invocations || []);
       } catch (e) {
-        recallBodyEl.innerHTML = `<div class="recall-empty">加载失败: ${escHtml(e.message)}</div>`;
+        setRecallEmpty(recallBodyEl, "加载失败: " + e.message, true);
       }
     }
 
     function renderRecallList(invocations) {
       if (invocations.length === 0) {
-        recallBodyEl.innerHTML = '<div class="recall-empty">本会话暂无调用记录</div>';
+        setRecallEmpty(recallBodyEl, "本会话暂无调用记录");
         return;
       }
       recallBodyEl.replaceChildren(...invocations.map((inv) => {
@@ -1364,13 +1357,13 @@
       row.classList.add("expanded");
       body = document.createElement("div");
       body.className = "recall-item-body";
-      body.innerHTML = '<div class="recall-empty">加载中…</div>';
+      setRecallEmpty(body, "加载中…");
       row.append(body);
       try {
         const events = await fetchInvocationEvents(invocationId);
         body.replaceChildren(renderEventList(events));
       } catch (e) {
-        body.innerHTML = `<div class="recall-empty">加载失败: ${escHtml(e.message)}</div>`;
+        setRecallEmpty(body, "加载失败: " + e.message, true);
       }
     }
 
@@ -1382,22 +1375,22 @@
     });
 
     async function runRecallSearch(query) {
-      recallBodyEl.innerHTML = '<div class="recall-empty">搜索中…</div>';
+      setRecallEmpty(recallBodyEl, "搜索中…");
       const sid = state.currentSessionId;
-      if (!sid) { recallBodyEl.innerHTML = '<div class="recall-empty">暂无会话</div>'; return; }
+      if (!sid) { setRecallEmpty(recallBodyEl, "暂无会话"); return; }
       try {
         const res = await fetch(`/api/callbacks/session-search?sessionId=${encodeURIComponent(sid)}`
           + `&query=${encodeURIComponent(query)}&limit=30`);
         const data = await res.json();
         renderRecallHits(data.hits || []);
       } catch (e) {
-        recallBodyEl.innerHTML = `<div class="recall-empty">搜索失败: ${escHtml(e.message)}</div>`;
+        setRecallEmpty(recallBodyEl, "搜索失败: " + e.message, true);
       }
     }
 
     function renderRecallHits(hits) {
       if (hits.length === 0) {
-        recallBodyEl.innerHTML = '<div class="recall-empty">无匹配结果</div>';
+        setRecallEmpty(recallBodyEl, "无匹配结果");
         return;
       }
       recallBodyEl.replaceChildren(...hits.map((hit) => {
@@ -1430,13 +1423,13 @@
       }
       body = document.createElement("div");
       body.className = "recall-item-body";
-      body.innerHTML = '<div class="recall-empty">加载中…</div>';
+      setRecallEmpty(body, "加载中…");
       row.append(body);
       try {
         const events = await fetchInvocationEvents(invocationId);
         body.replaceChildren(renderEventList(events));
       } catch (e) {
-        body.innerHTML = `<div class="recall-empty">加载失败: ${escHtml(e.message)}</div>`;
+        setRecallEmpty(body, "加载失败: " + e.message, true);
       }
     }
 
@@ -1619,7 +1612,7 @@
     btnClear.addEventListener("click", async () => {
       // P2-4 方案 A: 真正丢弃当前对话 — DELETE session + 清屏
       if (state.currentSessionId) {
-        try { await jsonOrThrow(await fetch(`/api/sessions/${state.currentSessionId}`, { method: "DELETE" })); } catch {}
+        try { await jsonOrThrow(await fetch(`/api/sessions/${state.currentSessionId}`, { method: "DELETE" })); } catch (e) { console.warn("Delete session failed:", e); }
         state.currentSessionId = null;
       }
       state.liveMessages.clear();
@@ -1687,7 +1680,7 @@
         state.skillsMetadata = d.skills || [];
         renderSkillTags([]);
       })
-      .catch(() => {});
+      .catch((e) => console.warn("Skills metadata load failed:", e));
 
     Promise.all([loadAgents(), loadSessions()]).catch((e) => {
       setStatus("加载失败", "error");
