@@ -1,5 +1,6 @@
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
+const net = require("node:net");
 const path = require("node:path");
 
 const DEFAULT_STATE_FILE = ".invoke-worktrees.json";
@@ -79,6 +80,29 @@ function excludeGeneratedFiles(worktreeDir) {
   if (missing.length > 0) {
     fs.appendFileSync(excludePath, `${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${missing.join("\n")}\n`, "utf8");
   }
+}
+
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+function killProcessTree(pid) {
+  if (!pid) return;
+  try {
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
+    } else {
+      try { process.kill(-pid, "SIGTERM"); } catch {}
+    }
+  } catch {}
 }
 
 function createWorktreeManager(opts = {}) {
@@ -165,6 +189,8 @@ function createWorktreeManager(opts = {}) {
 
   function discardWorktree(sessionId) {
     const safeSessionId = sanitizeId(sessionId);
+    // Stop preview server before removing worktree
+    try { stopPreview(safeSessionId); } catch {}
     const state = load();
     const meta = state.worktrees[safeSessionId];
     if (!meta) throw new Error(`No managed worktree for session ${safeSessionId}.`);
@@ -191,12 +217,91 @@ function createWorktreeManager(opts = {}) {
     return { ok: true, sessionId: safeSessionId, worktreeDir: resolvedDir };
   }
 
+  const previewProcesses = new Map();
+
+  async function startPreview(sessionId) {
+    const safeSessionId = sanitizeId(sessionId);
+    const existing = load().worktrees[safeSessionId];
+    if (!existing) throw new Error(`No managed worktree for session ${safeSessionId}.`);
+
+    // Already running
+    if (existing.previewPid && previewProcesses.has(safeSessionId)) {
+      return existing;
+    }
+
+    const port = await findFreePort();
+    const env = {
+      ...process.env,
+      PORT: String(port),
+      NODE_PATH: path.join(rootDir, "node_modules"),
+      CAT_CAFE_PREVIEW: "1",
+    };
+    const child = spawn("node", ["src/server/index.js"], {
+      cwd: existing.worktreeDir,
+      env,
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+
+    child.on("exit", () => {
+      previewProcesses.delete(safeSessionId);
+      try {
+        const st = load();
+        if (st.worktrees[safeSessionId]) {
+          st.worktrees[safeSessionId].previewPid = null;
+          st.worktrees[safeSessionId].previewPort = null;
+          st.worktrees[safeSessionId].previewUrl = null;
+          save(st);
+        }
+      } catch {}
+    });
+
+    previewProcesses.set(safeSessionId, child);
+
+    const state = load();
+    state.worktrees[safeSessionId] = {
+      ...existing,
+      previewPort: port,
+      previewPid: child.pid,
+      previewUrl: `http://127.0.0.1:${port}`,
+      updatedAt: new Date().toISOString(),
+    };
+    save(state);
+    return state.worktrees[safeSessionId];
+  }
+
+  function stopPreview(sessionId) {
+    const safeSessionId = sanitizeId(sessionId);
+    const meta = load().worktrees[safeSessionId];
+    if (!meta || !meta.previewPid) return;
+    killProcessTree(meta.previewPid);
+    previewProcesses.delete(safeSessionId);
+    const state = load();
+    if (state.worktrees[safeSessionId]) {
+      state.worktrees[safeSessionId].previewPid = null;
+      state.worktrees[safeSessionId].previewPort = null;
+      state.worktrees[safeSessionId].previewUrl = null;
+      save(state);
+    }
+  }
+
+  function stopAllPreviews() {
+    for (const sid of Array.from(previewProcesses.keys())) {
+      try { stopPreview(sid); } catch {}
+    }
+  }
+
   return {
     ensureWorktree,
     getWorktree,
     getStatus,
     getDiff,
     discardWorktree,
+    startPreview,
+    stopPreview,
+    stopAllPreviews,
   };
 }
 
@@ -207,4 +312,5 @@ function osNullPath() {
 module.exports = {
   createWorktreeManager,
   sanitizeId,
+  ensureGitRoot,
 };

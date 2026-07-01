@@ -101,7 +101,20 @@
         return;
       }
       const marker = wt.clean ? "clean" : "dirty";
-      worktreeStatusEl.textContent = `${wt.branch || "(worktree)"} · ${marker}`;
+      worktreeStatusEl.textContent = "";
+      const label = document.createElement("span");
+      label.textContent = `${wt.branch || "(worktree)"} · ${marker}`;
+      worktreeStatusEl.append(label);
+      if (wt.previewUrl) {
+        const link = document.createElement("a");
+        link.href = wt.previewUrl;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = "预览";
+        link.className = "worktree-preview-link";
+        link.title = `预览修改后的应用 (${wt.previewUrl})`;
+        worktreeStatusEl.append(link);
+      }
       worktreeStatusEl.className = "worktree-status" + (wt.clean ? "" : " dirty");
       worktreeStatusEl.title = wt.worktreeDir || wt.branch || "";
     }

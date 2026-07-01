@@ -366,6 +366,21 @@
 
     .worktree-status.dirty { color: var(--stderr); }
 
+    .worktree-preview-link {
+      margin-left: var(--space-2);
+      padding: 1px 6px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--accent-text);
+      background: var(--accent);
+      border-radius: var(--radius);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .worktree-preview-link:hover {
+      background: var(--accent-hover);
+    }
+
     .main-title {
       font-size: 14px;
       font-weight: 500;

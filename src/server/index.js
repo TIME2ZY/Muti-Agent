@@ -14,6 +14,20 @@ const worktreeManagerModule = require("../worktree/manager");
 const ROOT = path.resolve(__dirname, "../..");
 const SKILLS_DIR = path.join(ROOT, "skills");
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
+// Git root of the chat app itself — used to detect self-modification
+// (when projectDir points at this repo, we can preview modified code).
+const SELF_GIT_ROOT = (() => {
+  try { return worktreeManagerModule.ensureGitRoot(__dirname); }
+  catch { return null; }
+})();
+
+// Track all worktree managers so preview servers can be cleaned up on exit.
+const _previewManagers = new Set();
+process.on("exit", () => {
+  for (const mgr of _previewManagers) {
+    try { mgr.stopAllPreviews(); } catch {}
+  }
+});
 const DEFAULT_SESSIONS_FILE = path.join(ROOT, ".invoke-chat-sessions.json");
 const DEFAULT_INVOCATIONS_FILE = path.join(ROOT, ".invoke-chat-invocations.json");
 const DEFAULT_KILL_GRACE_MS = 5000;
@@ -712,6 +726,7 @@ function createServer(options = {}) {
   const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
   const worktreeManager = options.worktreeManager || worktreeManagerModule.createWorktreeManager({ rootDir: ROOT });
   const invocationsFile = options.invocationsFile || DEFAULT_INVOCATIONS_FILE;
+  _previewManagers.add(worktreeManager);
   let projectDir = ROOT;
 
   // Per-instance invocation event registry. Loaded from disk at startup so
@@ -1144,6 +1159,24 @@ function createServer(options = {}) {
           return;
         }
       }
+
+      // Self-modification preview: if the agent is editing THIS project,
+      // spawn a preview server in the worktree on a unique port.
+      // Skip if we're already inside a preview server (prevent recursion).
+      if (useWorktree && sessionWorktree && !sessionWorktree.previewPid && !process.env.CAT_CAFE_PREVIEW) {
+        let targetGitRoot = null;
+        try { targetGitRoot = worktreeManagerModule.ensureGitRoot(projectDir); }
+        catch { targetGitRoot = null; }
+        if (targetGitRoot && targetGitRoot === SELF_GIT_ROOT) {
+          try {
+            sessionWorktree = await worktreeManager.startPreview(sessionId);
+            session = setSessionWorktree(sessionsFile, sessionId, sessionWorktree);
+          } catch (error) {
+            console.warn("Preview server failed to start:", error.message);
+          }
+        }
+      }
+
       const runWorkspace = sessionWorktree || {
         sessionId,
         baseDir: projectDir,
