@@ -33,29 +33,11 @@
     const worktreeStatusEl = $("#worktree-status");
     const mentionMenuEl = $("#mention-menu");
     const recallToggleEl = $("#recall-toggle");
-    const recallPanelEl = $("#recall-panel");
-    const recallCloseEl = $("#recall-close");
-    const recallOverlayEl = $("#recall-overlay");
-    // Both the legacy standalone drawer and the new inline right-panel
-    // tab mount a #recall-body / #recall-search-input. We point to the
-    // canonical elements via querySelectorAll and keep a [0] alias for
-    // legacy single-target code paths.
-    const recallBodyEls = [recallPanelEl.querySelector("#recall-body")];
-    const inlineRecallPanelEl = $("#recall-panel-inline");
-    if (inlineRecallPanelEl) {
-      const inlineBody = inlineRecallPanelEl.querySelector(".recall-body");
-      const inlineSearch = inlineRecallPanelEl.querySelector(".recall-search input");
-      if (inlineBody) {
-        inlineBody.id = "recall-body-inline";
-        recallBodyEls.push(inlineBody);
-      }
-      if (inlineSearch) inlineSearch.id = "recall-search-input-inline";
-    }
-    const recallBodyEl = recallBodyEls[0];
-    const recallSearchInputEls = [recallPanelEl.querySelector(".recall-search input")];
-    const inlineSearchEl = inlineRecallPanelEl ? inlineRecallPanelEl.querySelector(".recall-search input") : null;
-    if (inlineSearchEl) recallSearchInputEls.push(inlineSearchEl);
-    const recallSearchInputEl = recallSearchInputEls[0];
+    // The recall UI now lives exclusively inside the right-side panel
+    // (third tab). The legacy standalone drawer and overlay were removed.
+    const recallPanelInlineEl = $("#recall-panel-inline");
+    const recallBodyEl = recallPanelInlineEl ? recallPanelInlineEl.querySelector(".recall-body") : null;
+    const recallSearchInputEl = recallPanelInlineEl ? recallPanelInlineEl.querySelector(".recall-search input") : null;
     const sessionApi = window.SessionApi.createSessionApi(window.fetch.bind(window));
     const worktreeApi = window.WorktreeApi.createWorktreeApi(window.fetch.bind(window));
     const recallApi = window.RecallApi.createRecallApi(window.fetch.bind(window));
@@ -388,7 +370,6 @@
     }
 
     const panelTabRecallEl = $("#panel-tab-recall");
-    const recallPanelInlineEl = $("#recall-panel-inline");
 
     function setRightPanelTab(nextTab) {
       state.rightPanelTab = nextTab;
@@ -475,7 +456,6 @@
       mentionMatches: [],
       mentionRange: null,
       liveInvocations: new Map(), // agent → invocationId (captured from agent-start)
-      recallOpen: false,
       recallSearchDebounce: null,
       rightPanelTab: "agents",
       workspace: emptyWorkspaceState(),
@@ -543,12 +523,12 @@
       targetEl.innerHTML = `<div class="${cls}">${escHtml(msg)}</div>`;
     }
 
-    // Broadcast a recall-body state to every mounted panel (legacy drawer +
-    // inline right-panel tab). Used so the two views never drift.
+    // Broadcast a recall-body state to every mounted panel (currently
+    // only one — the inline right-side panel). Left as a function so
+    // a future second mount point can be added without touching
+    // every call site.
     function setRecallEmptyAll(msg, isError = false) {
-      for (const el of recallBodyEls) {
-        if (el) setRecallEmpty(el, msg, isError);
-      }
+      if (recallBodyEl) setRecallEmpty(recallBodyEl, msg, isError);
     }
 
     function fmtTime(iso) {
@@ -1279,34 +1259,17 @@
 
     // ── Session-level recall panel ───────────────────────────
 
-    function openRecall() {
-      recallPanelEl.hidden = false;
-      recallOverlayEl.classList.add("show");
-      state.recallOpen = true;
-      loadRecallList();
-    }
-
-    function closeRecall() {
-      recallPanelEl.hidden = true;
-      recallOverlayEl.classList.remove("show");
-      state.recallOpen = false;
-    }
-
+    // The recall UI now lives exclusively as the third tab in the
+    // right-side panel. The top-bar button just switches to that tab.
     recallToggleEl.addEventListener("click", () => {
-      // The legacy standalone drawer is deprecated; the top-bar button now
-      // simply opens the recall tab in the right-side panel.
       setRightPanelTab("recall");
     });
-    recallCloseEl.addEventListener("click", closeRecall);
-    recallOverlayEl.addEventListener("click", closeRecall);
     if (panelTabRecallEl) {
       panelTabRecallEl.addEventListener("click", () => setRightPanelTab("recall"));
     }
 
     async function loadRecallList() {
-      for (const el of recallSearchInputEls) {
-        if (el) el.value = "";
-      }
+      if (recallSearchInputEl) recallSearchInputEl.value = "";
       setRecallEmptyAll("加载中…");
       const sid = state.currentSessionId;
       if (!sid) { setRecallEmptyAll("暂无会话"); return; }
@@ -1318,35 +1281,34 @@
     }
 
     function renderRecallList(invocations) {
+      if (!recallBodyEl) return;
       if (invocations.length === 0) {
         setRecallEmptyAll("本会话暂无调用记录");
         return;
       }
-      for (const target of recallBodyEls) {
-        target.replaceChildren(...invocations.map((inv) => {
-          const row = document.createElement("div");
-          row.className = "recall-item";
-          row.dataset.invocationId = inv.invocationId;
-          const head = document.createElement("div");
-          head.className = "recall-item-head";
-          const agent = document.createElement("span");
-          agent.className = "recall-item-agent";
-          agent.textContent = agentLabel(inv.agent);
-          const st = document.createElement("span");
-          st.className = `recall-item-state state-${inv.state}`;
-          st.textContent = inv.state;
-          const meta = document.createElement("span");
-          meta.className = "recall-item-meta";
-          meta.textContent = `${inv.eventCount} 事件 · ${fmtTime(inv.startedAt)}`;
-          const caret = document.createElement("span");
-          caret.className = "recall-item-caret";
-          caret.textContent = "▸";
-          head.append(agent, st, meta, caret);
-          row.append(head);
-          row.addEventListener("click", () => toggleRecallItem(row, inv.invocationId));
-          return row;
-        }));
-      }
+      recallBodyEl.replaceChildren(...invocations.map((inv) => {
+        const row = document.createElement("div");
+        row.className = "recall-item";
+        row.dataset.invocationId = inv.invocationId;
+        const head = document.createElement("div");
+        head.className = "recall-item-head";
+        const agent = document.createElement("span");
+        agent.className = "recall-item-agent";
+        agent.textContent = agentLabel(inv.agent);
+        const st = document.createElement("span");
+        st.className = `recall-item-state state-${inv.state}`;
+        st.textContent = inv.state;
+        const meta = document.createElement("span");
+        meta.className = "recall-item-meta";
+        meta.textContent = `${inv.eventCount} 事件 · ${fmtTime(inv.startedAt)}`;
+        const caret = document.createElement("span");
+        caret.className = "recall-item-caret";
+        caret.textContent = "▸";
+        head.append(agent, st, meta, caret);
+        row.append(head);
+        row.addEventListener("click", () => toggleRecallItem(row, inv.invocationId));
+        return row;
+      }));
     }
 
     async function toggleRecallItem(row, invocationId) {
@@ -1369,11 +1331,10 @@
       }
     }
 
-    for (const el of recallSearchInputEls) {
-      if (!el) continue;
-      el.addEventListener("input", () => {
+    if (recallSearchInputEl) {
+      recallSearchInputEl.addEventListener("input", () => {
         clearTimeout(state.recallSearchDebounce);
-        const q = el.value.trim();
+        const q = recallSearchInputEl.value.trim();
         if (!q) { loadRecallList(); return; }
         state.recallSearchDebounce = setTimeout(() => runRecallSearch(q), 250);
       });
@@ -1391,32 +1352,31 @@
     }
 
     function renderRecallHits(hits) {
+      if (!recallBodyEl) return;
       if (hits.length === 0) {
         setRecallEmptyAll("无匹配结果");
         return;
       }
-      for (const target of recallBodyEls) {
-        target.replaceChildren(...hits.map((hit) => {
-          const row = document.createElement("div");
-          row.className = "recall-hit";
-          row.dataset.invocationId = hit.invocationId;
-          const head = document.createElement("div");
-          head.className = "recall-hit-head";
-          const kind = document.createElement("span");
-          kind.className = "recall-hit-kind";
-          kind.textContent = `${hit.kind} · #${hit.eventNo}`;
-          const time = document.createElement("span");
-          time.className = "recall-hit-time";
-          time.textContent = fmtTime(hit.ts);
-          head.append(kind, time);
-          const snip = document.createElement("div");
-          snip.className = "recall-hit-snippet";
-          snip.textContent = hit.snippet;
-          row.append(head, snip);
-          row.addEventListener("click", () => toggleRecallHit(row, hit.invocationId));
-          return row;
-        }));
-      }
+      recallBodyEl.replaceChildren(...hits.map((hit) => {
+        const row = document.createElement("div");
+        row.className = "recall-hit";
+        row.dataset.invocationId = hit.invocationId;
+        const head = document.createElement("div");
+        head.className = "recall-hit-head";
+        const kind = document.createElement("span");
+        kind.className = "recall-hit-kind";
+        kind.textContent = `${hit.kind} · #${hit.eventNo}`;
+        const time = document.createElement("span");
+        time.className = "recall-hit-time";
+        time.textContent = fmtTime(hit.ts);
+        head.append(kind, time);
+        const snip = document.createElement("div");
+        snip.className = "recall-hit-snippet";
+        snip.textContent = hit.snippet;
+        row.append(head, snip);
+        row.addEventListener("click", () => toggleRecallHit(row, hit.invocationId));
+        return row;
+      }));
     }
 
     async function toggleRecallHit(row, invocationId) {

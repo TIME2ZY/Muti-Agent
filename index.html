@@ -103,20 +103,8 @@
     </main>
   </div>
 
-  <!-- Recall (memory) panel — legacy standalone drawer. Kept for backward
-       compat but no longer triggered by the top-bar button. The same
-       content now lives in the right-side panel as a third tab. -->
-  <aside class="recall-panel" id="recall-panel" hidden aria-label="回忆面板">
-    <div class="recall-head">
-      <span class="recall-title">回忆</span>
-      <button class="recall-close" id="recall-close" aria-label="关闭">✕</button>
-    </div>
-    <div class="recall-search">
-      <input id="recall-search-input" type="search" placeholder="搜索历史（关键词）…" autocomplete="off" />
-    </div>
-    <div class="recall-body" id="recall-body"></div>
-  </aside>
-  <div class="recall-overlay" id="recall-overlay"></div>
+  <!-- Recall now lives as the third tab inside the right-side panel;
+       the legacy standalone drawer and overlay have been removed. -->
 
   <script src="/public/session-api.js"></script>
   <script src="/public/session-controller.js"></script>
