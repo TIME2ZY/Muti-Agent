@@ -1823,6 +1823,15 @@ test("frontend app.js defines unified display helpers for user and agent identit
   assert.match(js, /metaRole\.textContent = roleBadgeLabel\(role\)/);
 });
 
+test("frontend app.js defines invocation-level live run state and renderer hooks", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /liveRuns:\s*new Map\(\)/);
+  assert.match(js, /function applyAgentEvent\(event\)/);
+  assert.match(js, /function ensureLiveRun\(event\)/);
+  assert.match(js, /progressItems/);
+  assert.match(js, /fileChanges/);
+});
+
 test("frontend app.js loads workspace status and diff for the workspace tab", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   assert.match(js, /rightPanelTab:\s*"agents"/);

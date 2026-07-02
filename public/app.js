@@ -447,7 +447,9 @@
       lastPrompt: "",
       lastAgent: "architect",
       doneReceived: false,
+      hasStructuredEvents: false,
       liveMessages: new Map(),   // agent → { wrapper, bubble, rawText }
+      liveRuns: new Map(),
       skillDebounce: null,
       projectDir: "",
       worktreeStatus: null,
@@ -905,6 +907,79 @@
       _rafPending.set(agent, item.rawText);
       if (!_rafId) _rafId = requestAnimationFrame(_flushRaf);
       scrollDown();
+    }
+
+    function ensureLiveRun(event) {
+      const invocationId = event && event.invocationId ? event.invocationId : state.liveInvocations.get(event.agent) || event.agent;
+      if (!state.liveRuns.has(invocationId)) {
+        state.liveRuns.set(invocationId, {
+          invocationId,
+          agent: event.agent,
+          text: "",
+          thinking: "",
+          progressItems: [],
+          tools: [],
+          commands: [],
+          fileChanges: [],
+          stderr: [],
+          status: "thinking",
+        });
+      }
+      return state.liveRuns.get(invocationId);
+    }
+
+    function applyAgentEvent(event) {
+      if (!event || !event.type || !event.agent) return;
+      const run = ensureLiveRun(event);
+
+      if (event.type === "run.started") {
+        run.status = "thinking";
+        return;
+      }
+
+      if (event.type === "text.delta") {
+        run.text += event.text || "";
+        run.status = "writing";
+        appendLive(event.agent, event.text || "");
+        return;
+      }
+
+      if (event.type === "thinking.delta" || event.type === "thinking.final") {
+        run.thinking += event.text || "";
+        return;
+      }
+
+      if (event.type === "progress.update") {
+        run.progressItems = Array.isArray(event.items) ? event.items : [];
+        return;
+      }
+
+      if (event.type === "tool.started" || event.type === "tool.finished") {
+        run.tools.push(event);
+        return;
+      }
+
+      if (event.type === "command.started" || event.type === "command.finished") {
+        run.commands.push(event);
+        return;
+      }
+
+      if (event.type === "file.changed") {
+        run.fileChanges.push({
+          path: event.path || "",
+          changeType: event.changeType || "",
+        });
+        return;
+      }
+
+      if (event.type === "stderr") {
+        run.stderr.push(event.text || "");
+        return;
+      }
+
+      if (event.type === "run.finished") {
+        run.status = event.exitCode === 0 ? "done" : "error";
+      }
     }
 
     function finalizeLiveMessages() {
@@ -1423,6 +1498,7 @@
       renderSkillTags,
       showThinking,
       appendLive,
+      applyAgentEvent,
       addDebug,
       finishStream,
       agentLabel,

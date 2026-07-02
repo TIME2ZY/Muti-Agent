@@ -46,6 +46,7 @@ function makeDeps(overrides = {}) {
     renderSkillTags() {},
     showThinking() {},
     appendLive() {},
+    applyAgentEvent() {},
     addDebug() {},
     finishStream() {},
     agentLabel: (id) => id,
@@ -80,6 +81,25 @@ test("handleSseEvent session updates state and reloads session-scoped data", () 
 
   assert.equal(deps.state.currentSessionId, "s1");
   assert.deepEqual(calls, [["sessions"], ["project", "s1"], ["worktree"], ["workspace"]]);
+});
+
+test("handleSseEvent routes canonical agent-event frames", () => {
+  const seen = [];
+  const deps = makeDeps({
+    applyAgentEvent(event) {
+      seen.push(event.type);
+    },
+  });
+  const client = chatClientModule.createChatClient(deps);
+
+  client.handleSseEvent("agent-event", {
+    type: "progress.update",
+    agent: "planner",
+    invocationId: "inv-1",
+    items: [],
+  });
+
+  assert.deepEqual(seen, ["progress.update"]);
 });
 
 test("sendPrompt rejects missing agent mention before creating a request", async () => {
