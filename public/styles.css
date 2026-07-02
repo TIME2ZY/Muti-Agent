@@ -280,10 +280,24 @@
     .main-header {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       justify-content: space-between;
       padding: var(--space-4) var(--space-6) var(--space-2);
-      gap: var(--space-4);
+      gap: var(--space-3) var(--space-4);
       min-width: 0;
+    }
+
+    /* Compact viewports: stack the project dir, worktree status, and
+       status text on a second row so the header doesn't overflow. */
+    @media (max-width: 1024px) {
+      .main-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
+      }
+      .main-header > .main-status {
+        align-self: flex-end;
+      }
     }
 
     .theme-toggle {
@@ -416,13 +430,24 @@
     }
 
     .skill-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
       font-size: 11px;
       font-family: var(--font-mono);
-      color: var(--text-tertiary);
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+      border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+      border-radius: 999px;
       white-space: nowrap;
+      cursor: default;
     }
 
-    .skill-tag.inactive { opacity: 0.55; }
+    .skill-tag.inactive {
+      color: var(--text-tertiary);
+      background: var(--surface-inset);
+      border-color: var(--border-subtle);
+    }
 
     /* ═══════════════════════════════════════════════════════════
        MESSAGES
@@ -1035,7 +1060,7 @@
 
     .panel-tabs {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: var(--space-2);
       padding: var(--space-4) var(--space-4) var(--space-3);
       border-bottom: 1px solid var(--border-subtle);
@@ -1097,6 +1122,7 @@
       display: flex;
       flex-direction: column;
       gap: var(--space-2);
+      min-height: 0;
     }
 
     .agent-tab {
@@ -1125,6 +1151,7 @@
       display: inline-flex;
       align-items: center;
       width: fit-content;
+      max-width: 100%;
       min-height: 20px;
       padding: 0 8px;
       border-radius: 999px;
@@ -1135,6 +1162,9 @@
       color: var(--accent);
       background: color-mix(in srgb, var(--accent) 10%, var(--surface));
       border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .agent-tab-name {
@@ -1155,6 +1185,39 @@
 
     .workspace-panel {
       gap: var(--space-3);
+    }
+
+    .recall-panel-inline {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      padding: var(--space-4);
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    .recall-panel-inline .recall-search {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--surface);
+      padding-bottom: var(--space-2);
+    }
+
+    .recall-panel-inline .recall-search input {
+      width: 100%;
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      background: var(--surface-inset);
+      color: var(--text-primary);
+      font-size: 13px;
+    }
+
+    .recall-panel-inline .recall-search input:focus {
+      outline: 1px solid var(--accent);
+      outline-offset: 1px;
+      border-color: var(--accent);
     }
 
     .workspace-panel-body {

@@ -36,8 +36,26 @@
     const recallPanelEl = $("#recall-panel");
     const recallCloseEl = $("#recall-close");
     const recallOverlayEl = $("#recall-overlay");
-    const recallBodyEl = $("#recall-body");
-    const recallSearchInputEl = $("#recall-search-input");
+    // Both the legacy standalone drawer and the new inline right-panel
+    // tab mount a #recall-body / #recall-search-input. We point to the
+    // canonical elements via querySelectorAll and keep a [0] alias for
+    // legacy single-target code paths.
+    const recallBodyEls = [recallPanelEl.querySelector("#recall-body")];
+    const inlineRecallPanelEl = $("#recall-panel-inline");
+    if (inlineRecallPanelEl) {
+      const inlineBody = inlineRecallPanelEl.querySelector(".recall-body");
+      const inlineSearch = inlineRecallPanelEl.querySelector(".recall-search input");
+      if (inlineBody) {
+        inlineBody.id = "recall-body-inline";
+        recallBodyEls.push(inlineBody);
+      }
+      if (inlineSearch) inlineSearch.id = "recall-search-input-inline";
+    }
+    const recallBodyEl = recallBodyEls[0];
+    const recallSearchInputEls = [recallPanelEl.querySelector(".recall-search input")];
+    const inlineSearchEl = inlineRecallPanelEl ? inlineRecallPanelEl.querySelector(".recall-search input") : null;
+    if (inlineSearchEl) recallSearchInputEls.push(inlineSearchEl);
+    const recallSearchInputEl = recallSearchInputEls[0];
     const sessionApi = window.SessionApi.createSessionApi(window.fetch.bind(window));
     const worktreeApi = window.WorktreeApi.createWorktreeApi(window.fetch.bind(window));
     const recallApi = window.RecallApi.createRecallApi(window.fetch.bind(window));
@@ -46,23 +64,42 @@
 
     /* ═══════════════════════════════════════════════════════════
        THEME
+       Three-state cycle: system → light → dark → system.
+       "system" means no data-theme attribute; light-dark() in CSS
+       follows prefers-color-scheme. Explicit "light"/"dark" pins
+       the data-theme attribute.
        ═══════════════════════════════════════════════════════════ */
 
     const THEME_KEY = "agent-chat-theme";
+    const THEME_CYCLE = ["system", "light", "dark"];
+    const THEME_ICON = { system: "◐", light: "☀", dark: "☾" };
+    const THEME_LABEL = { system: "跟随系统", light: "浅色", dark: "深色" };
+
+    function currentTheme() {
+      const saved = localStorage.getItem(THEME_KEY);
+      return THEME_CYCLE.includes(saved) ? saved : "system";
+    }
+
+    function applyTheme(theme) {
+      if (theme === "system") {
+        document.documentElement.removeAttribute("data-theme");
+      } else {
+        document.documentElement.setAttribute("data-theme", theme);
+      }
+      themeToggle.textContent = THEME_ICON[theme];
+      themeToggle.title = `主题：${THEME_LABEL[theme]}（点击切换）`;
+      themeToggle.setAttribute("aria-label", `切换主题，当前：${THEME_LABEL[theme]}`);
+    }
 
     function initTheme() {
-      const saved = localStorage.getItem(THEME_KEY);
-      if (saved) document.documentElement.setAttribute("data-theme", saved);
+      applyTheme(currentTheme());
     }
 
     themeToggle.addEventListener("click", () => {
-      const current = document.documentElement.getAttribute("data-theme");
-      // P3-7 fix: when no saved theme, flip based on current system preference
-      const next = current === "dark" ? "light"
-                 : current === "light" ? "dark"
-                 : window.matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
+      const idx = THEME_CYCLE.indexOf(currentTheme());
+      const next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
       localStorage.setItem(THEME_KEY, next);
+      applyTheme(next);
     });
 
     /* ═══════════════════════════════════════════════════════════
@@ -350,10 +387,14 @@
       await loadWorkspaceState();
     }
 
+    const panelTabRecallEl = $("#panel-tab-recall");
+    const recallPanelInlineEl = $("#recall-panel-inline");
+
     function setRightPanelTab(nextTab) {
       state.rightPanelTab = nextTab;
       if (agentPanelEl) agentPanelEl.hidden = nextTab !== "agents";
       if (workspacePanelEl) workspacePanelEl.hidden = nextTab !== "workspace";
+      if (recallPanelInlineEl) recallPanelInlineEl.hidden = nextTab !== "recall";
       if (panelTabAgentsEl) {
         panelTabAgentsEl.classList.toggle("is-active", nextTab === "agents");
         panelTabAgentsEl.setAttribute("aria-selected", nextTab === "agents" ? "true" : "false");
@@ -361,6 +402,11 @@
       if (panelTabWorkspaceEl) {
         panelTabWorkspaceEl.classList.toggle("is-active", nextTab === "workspace");
         panelTabWorkspaceEl.setAttribute("aria-selected", nextTab === "workspace" ? "true" : "false");
+      }
+      if (panelTabRecallEl) {
+        panelTabRecallEl.classList.toggle("is-active", nextTab === "recall");
+        panelTabRecallEl.setAttribute("aria-selected", nextTab === "recall" ? "true" : "false");
+        if (nextTab === "recall") loadRecallList();
       }
     }
 
@@ -413,6 +459,10 @@
       currentSessionId: null,
       controller: null,
       skillsMetadata: [],
+      // Per-session retry state. Keyed by currentSessionId so that
+      // switching sessions doesn't accidentally replay the previous
+      // session's prompt into the new one.
+      sessions: {},
       lastPrompt: "",
       lastAgent: "architect",
       doneReceived: false,
@@ -431,13 +481,32 @@
       workspace: emptyWorkspaceState(),
     };
 
+    function sessionSlot() {
+      const sid = state.currentSessionId || "_pending";
+      if (!state.sessions[sid]) {
+        state.sessions[sid] = { lastPrompt: "", lastAgent: "architect" };
+      }
+      return state.sessions[sid];
+    }
+
     /* ═══════════════════════════════════════════════════════════
        HELPERS
        ═══════════════════════════════════════════════════════════ */
 
     function copyToClipboard(text, btn, okText = "✓", failText = "Failed") {
       const orig = btn.textContent;
-      return navigator.clipboard.writeText(text).then(() => {
+      // Write both formats: HTML for editors that honor text/html (with
+      // syntax-highlight tokens), plain text for everything else. The
+      // browser's clipboard API lets us mark up rich content without
+      // forcing the user to re-paste it as HTML.
+      const html = btn && btn.dataset && btn.dataset.copyHtml;
+      const payload = html
+        ? { "text/plain": text, "text/html": html }
+        : text;
+      const write = html
+        ? navigator.clipboard.write(payload)
+        : navigator.clipboard.writeText(text);
+      return write.then(() => {
         btn.textContent = okText;
         btn.classList.add("copied");
       }).catch(() => {
@@ -472,6 +541,14 @@
     function setRecallEmpty(targetEl, msg, isError = false) {
       const cls = isError ? "recall-empty recall-empty-error" : "recall-empty";
       targetEl.innerHTML = `<div class="${cls}">${escHtml(msg)}</div>`;
+    }
+
+    // Broadcast a recall-body state to every mounted panel (legacy drawer +
+    // inline right-panel tab). Used so the two views never drift.
+    function setRecallEmptyAll(msg, isError = false) {
+      for (const el of recallBodyEls) {
+        if (el) setRecallEmpty(el, msg, isError);
+      }
     }
 
     function fmtTime(iso) {
@@ -514,6 +591,15 @@
 
     function agentRoleLabel(agent) {
       return agent.description || "";
+    }
+
+    // Render a one-line summary of the role description. Anything past the
+    // first line-clamp is available in the agent-tab's title attribute
+    // (set in renderAgentTabs) and in the existing tooltip on hover.
+    function agentRoleSummary(agent) {
+      const desc = agent.description || "";
+      const max = 32;
+      return desc.length > max ? desc.slice(0, max) + "…" : desc;
     }
 
     function resolvePromptAgent(prompt) {
@@ -730,7 +816,8 @@
         const copy = document.createElement("button");
         copy.className = "msg-copy";
         copy.textContent = "⎘";
-        copy.title = "复制";
+        copy.title = "复制（含 Markdown 与代码高亮）";
+        copy.dataset.copyHtml = renderMd(content);
         copy.addEventListener("click", () => {
           copyToClipboard(content, copy);
         });
@@ -843,12 +930,14 @@
     function finalizeLiveMessages() {
       flushPendingLiveRender();
       for (const [, item] of state.liveMessages) {
-        item.bubble.innerHTML = renderMd(item.rawText || "");
+        const rendered = renderMd(item.rawText || "");
+        item.bubble.innerHTML = rendered;
         if (!item.wrapper.querySelector(".msg-copy")) {
           const copy = document.createElement("button");
           copy.className = "msg-copy";
           copy.textContent = "⎘";
-          copy.title = "复制";
+          copy.title = "复制（含 Markdown 与代码高亮）";
+          copy.dataset.copyHtml = rendered;
           copy.addEventListener("click", () => {
             copyToClipboard(item.rawText || "", copy);
           });
@@ -877,7 +966,8 @@
       createMessage({ role: "system", agent: "system", content: text, variant });
 
       // Retry button
-      if (variant === "error" && state.lastPrompt) {
+      const slot = sessionSlot();
+      if (variant === "error" && slot.lastPrompt) {
         const wrapper = document.createElement("article");
         wrapper.className = "message system";
         const meta = document.createElement("div");
@@ -897,8 +987,9 @@
         retry.className = "btn-retry";
         retry.textContent = "↻ 重试";
         retry.addEventListener("click", () => {
-          promptEl.value = state.lastPrompt;
-          state.selectedAgent = state.lastAgent;
+          const s = sessionSlot();
+          promptEl.value = s.lastPrompt;
+          state.selectedAgent = s.lastAgent;
           renderAgentTabs();
           chatClient.sendPrompt();
         });
@@ -952,12 +1043,14 @@
         item.className = "agent-tab";
         item.setAttribute("role", "button");
         item.tabIndex = 0;
-        item.title = `插入 @${agentMention(a)}`;
+        item.title = a.description
+          ? `${a.label} (${a.id}) — ${a.description}\n点击插入 @${agentMention(a)}`
+          : `插入 @${agentMention(a)}`;
         item.innerHTML = `
           <span class="agent-tab-role"></span>
           <span class="agent-tab-name"></span>
           <span class="agent-tab-model"></span>`;
-        item.querySelector(".agent-tab-role").textContent = agentRoleLabel(a);
+        item.querySelector(".agent-tab-role").textContent = agentRoleSummary(a);
         item.querySelector(".agent-tab-name").textContent = agentLabel(a.id);
         item.querySelector(".agent-tab-model").textContent = agentMeta(a);
         item.addEventListener("click", () => insertAgentMention(a));
@@ -1200,51 +1293,60 @@
     }
 
     recallToggleEl.addEventListener("click", () => {
-      if (state.recallOpen) closeRecall(); else openRecall();
+      // The legacy standalone drawer is deprecated; the top-bar button now
+      // simply opens the recall tab in the right-side panel.
+      setRightPanelTab("recall");
     });
     recallCloseEl.addEventListener("click", closeRecall);
     recallOverlayEl.addEventListener("click", closeRecall);
+    if (panelTabRecallEl) {
+      panelTabRecallEl.addEventListener("click", () => setRightPanelTab("recall"));
+    }
 
     async function loadRecallList() {
-      recallSearchInputEl.value = "";
-      setRecallEmpty(recallBodyEl, "加载中…");
+      for (const el of recallSearchInputEls) {
+        if (el) el.value = "";
+      }
+      setRecallEmptyAll("加载中…");
       const sid = state.currentSessionId;
-      if (!sid) { setRecallEmpty(recallBodyEl, "暂无会话"); return; }
+      if (!sid) { setRecallEmptyAll("暂无会话"); return; }
       try {
         renderRecallList(await recallApi.listInvocations(sid));
       } catch (e) {
-        setRecallEmpty(recallBodyEl, "加载失败: " + e.message, true);
+        setRecallEmptyAll("加载失败: " + e.message, true);
       }
     }
 
     function renderRecallList(invocations) {
       if (invocations.length === 0) {
-        setRecallEmpty(recallBodyEl, "本会话暂无调用记录");
+        setRecallEmptyAll("本会话暂无调用记录");
         return;
       }
-      recallBodyEl.replaceChildren(...invocations.map((inv) => {
-        const row = document.createElement("div");
-        row.className = "recall-item";
-        row.dataset.invocationId = inv.invocationId;
-        const head = document.createElement("div");
-        head.className = "recall-item-head";
-        const agent = document.createElement("span");
-        agent.className = "recall-item-agent";
-        agent.textContent = agentLabel(inv.agent);
-        const st = document.createElement("span");
-        st.className = `recall-item-state state-${inv.state}`;
-        st.textContent = inv.state;
-        const meta = document.createElement("span");
-        meta.className = "recall-item-meta";
-        meta.textContent = `${inv.eventCount} 事件 · ${fmtTime(inv.startedAt)}`;
-        const caret = document.createElement("span");
-        caret.className = "recall-item-caret";
-        caret.textContent = "▸";
-        head.append(agent, st, meta, caret);
-        row.append(head);
-        row.addEventListener("click", () => toggleRecallItem(row, inv.invocationId));
-        return row;
-      }));
+      for (const target of recallBodyEls) {
+        target.replaceChildren(...invocations.map((inv) => {
+          const row = document.createElement("div");
+          row.className = "recall-item";
+          row.dataset.invocationId = inv.invocationId;
+          const head = document.createElement("div");
+          head.className = "recall-item-head";
+          const agent = document.createElement("span");
+          agent.className = "recall-item-agent";
+          agent.textContent = agentLabel(inv.agent);
+          const st = document.createElement("span");
+          st.className = `recall-item-state state-${inv.state}`;
+          st.textContent = inv.state;
+          const meta = document.createElement("span");
+          meta.className = "recall-item-meta";
+          meta.textContent = `${inv.eventCount} 事件 · ${fmtTime(inv.startedAt)}`;
+          const caret = document.createElement("span");
+          caret.className = "recall-item-caret";
+          caret.textContent = "▸";
+          head.append(agent, st, meta, caret);
+          row.append(head);
+          row.addEventListener("click", () => toggleRecallItem(row, inv.invocationId));
+          return row;
+        }));
+      }
     }
 
     async function toggleRecallItem(row, invocationId) {
@@ -1267,49 +1369,54 @@
       }
     }
 
-    recallSearchInputEl.addEventListener("input", () => {
-      clearTimeout(state.recallSearchDebounce);
-      const q = recallSearchInputEl.value.trim();
-      if (!q) { loadRecallList(); return; }
-      state.recallSearchDebounce = setTimeout(() => runRecallSearch(q), 250);
-    });
+    for (const el of recallSearchInputEls) {
+      if (!el) continue;
+      el.addEventListener("input", () => {
+        clearTimeout(state.recallSearchDebounce);
+        const q = el.value.trim();
+        if (!q) { loadRecallList(); return; }
+        state.recallSearchDebounce = setTimeout(() => runRecallSearch(q), 250);
+      });
+    }
 
     async function runRecallSearch(query) {
-      setRecallEmpty(recallBodyEl, "搜索中…");
+      setRecallEmptyAll("搜索中…");
       const sid = state.currentSessionId;
-      if (!sid) { setRecallEmpty(recallBodyEl, "暂无会话"); return; }
+      if (!sid) { setRecallEmptyAll("暂无会话"); return; }
       try {
         renderRecallHits(await recallApi.searchSession(sid, query, { limit: 30 }));
       } catch (e) {
-        setRecallEmpty(recallBodyEl, "搜索失败: " + e.message, true);
+        setRecallEmptyAll("搜索失败: " + e.message, true);
       }
     }
 
     function renderRecallHits(hits) {
       if (hits.length === 0) {
-        setRecallEmpty(recallBodyEl, "无匹配结果");
+        setRecallEmptyAll("无匹配结果");
         return;
       }
-      recallBodyEl.replaceChildren(...hits.map((hit) => {
-        const row = document.createElement("div");
-        row.className = "recall-hit";
-        row.dataset.invocationId = hit.invocationId;
-        const head = document.createElement("div");
-        head.className = "recall-hit-head";
-        const kind = document.createElement("span");
-        kind.className = "recall-hit-kind";
-        kind.textContent = `${hit.kind} · #${hit.eventNo}`;
-        const time = document.createElement("span");
-        time.className = "recall-hit-time";
-        time.textContent = fmtTime(hit.ts);
-        head.append(kind, time);
-        const snip = document.createElement("div");
-        snip.className = "recall-hit-snippet";
-        snip.textContent = hit.snippet;
-        row.append(head, snip);
-        row.addEventListener("click", () => toggleRecallHit(row, hit.invocationId));
-        return row;
-      }));
+      for (const target of recallBodyEls) {
+        target.replaceChildren(...hits.map((hit) => {
+          const row = document.createElement("div");
+          row.className = "recall-hit";
+          row.dataset.invocationId = hit.invocationId;
+          const head = document.createElement("div");
+          head.className = "recall-hit-head";
+          const kind = document.createElement("span");
+          kind.className = "recall-hit-kind";
+          kind.textContent = `${hit.kind} · #${hit.eventNo}`;
+          const time = document.createElement("span");
+          time.className = "recall-hit-time";
+          time.textContent = fmtTime(hit.ts);
+          head.append(kind, time);
+          const snip = document.createElement("div");
+          snip.className = "recall-hit-snippet";
+          snip.textContent = hit.snippet;
+          row.append(head, snip);
+          row.addEventListener("click", () => toggleRecallHit(row, hit.invocationId));
+          return row;
+        }));
+      }
     }
 
     async function toggleRecallHit(row, invocationId) {
@@ -1390,6 +1497,13 @@
     });
 
     promptEl.addEventListener("keydown", (e) => {
+      // IME (Chinese / Japanese / Korean) composition: don't hijack keys
+      // while the user is mid-typing a candidate. The browser fires
+      // compositionstart/end on the textarea, and the keydown that
+      // confirms a candidate also fires with isComposing=true on some
+      // platforms (e.g. Safari). Skip all shortcuts while composing.
+      if (e.isComposing || e.keyCode === 229) return;
+
       if (state.mentionOpen) {
         if (e.key === "ArrowDown") {
           e.preventDefault();

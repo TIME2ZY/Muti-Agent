@@ -116,6 +116,14 @@
         }
       }
 
+      // Per-session retry slot. Mutates the shared state object directly so
+      // the retry button (in app.js) can read the same per-session record.
+      const sid = state.currentSessionId || "_pending";
+      if (!state.sessions) state.sessions = {};
+      if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "architect" };
+      state.sessions[sid].lastPrompt = prompt;
+      state.sessions[sid].lastAgent = targetAgent.id;
+      // Legacy fields (kept for any other reader; mirror the active session).
       state.lastPrompt = prompt;
       state.lastAgent = targetAgent.id;
       state.selectedAgent = targetAgent.id;

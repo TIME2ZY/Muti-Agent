@@ -64,6 +64,7 @@
         <div class="panel-tabs" role="tablist" aria-label="右侧面板标签">
           <button id="panel-tab-agents" class="panel-tab is-active" type="button" role="tab" aria-selected="true">参与 Agent</button>
           <button id="panel-tab-workspace" class="panel-tab" type="button" role="tab" aria-selected="false">工作区</button>
+          <button id="panel-tab-recall" class="panel-tab" type="button" role="tab" aria-selected="false">回忆</button>
         </div>
 
         <section class="agent-panel" id="agent-panel" role="tabpanel" aria-label="模型列表">
@@ -74,6 +75,13 @@
         </section>
 
         <section class="workspace-panel" id="workspace-panel" role="tabpanel" aria-label="工作区" hidden></section>
+
+        <section class="recall-panel-inline" id="recall-panel-inline" role="tabpanel" aria-label="回忆" hidden>
+          <div class="recall-search">
+            <input id="recall-search-input-inline" type="search" placeholder="搜索历史（关键词）…" autocomplete="off" />
+          </div>
+          <div class="recall-body" id="recall-body-inline"></div>
+        </section>
       </aside>
 
       <section class="composer">
@@ -95,7 +103,9 @@
     </main>
   </div>
 
-  <!-- Recall (memory) panel — lists/searches invocations in the current session -->
+  <!-- Recall (memory) panel — legacy standalone drawer. Kept for backward
+       compat but no longer triggered by the top-bar button. The same
+       content now lives in the right-side panel as a third tab. -->
   <aside class="recall-panel" id="recall-panel" hidden aria-label="回忆面板">
     <div class="recall-head">
       <span class="recall-title">回忆</span>
