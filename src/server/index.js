@@ -289,6 +289,7 @@ function publicAgents() {
     cli: agent.name,
     model: agent.model,
     reasoningEffort: agent.reasoningEffort || "",
+    description: agent.description || "",
   }));
 }
 

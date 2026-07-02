@@ -30,24 +30,43 @@ const AGENTS = {
     name: "codex",
     model: "gpt-5.5",
     reasoningEffort: "high",
+    description: "默认主控 Agent，负责规划与编排。",
   },
-  forge: {
-    id: "forge",
-    label: "小虎鲸",
+  orchestrator: {
+    id: "orchestrator",
+    label: "万事通",
     name: "opencode",
     model: "deepseek-v4-pro",
+    description: "通才型助手，兜底各种杂活与跨领域问题。",
   },
-  sage: {
-    id: "sage",
-    label: "小智",
+  planner: {
+    id: "planner",
+    label: "小谋",
     name: "opencode",
-    model: "glm-5.2",
+    model: "mimo-v2.5-pro",
+    description: "推理与规划专家，擅长任务拆解、方案设计与决策建议。",
   },
-  reviewer: {
-    id: "reviewer",
-    label: "M-M",
+  coder: {
+    id: "coder",
+    label: "小码",
     name: "opencode",
     model: "minimax-m3",
+    reasoningEffort: "high",
+    description: "Coding 主力，负责服务端与通用代码实现与重构。",
+  },
+  frontend: {
+    id: "frontend",
+    label: "小视",
+    name: "opencode",
+    model: "glm-5.2",
+    description: "前端 Coding 专家，专注 UI、样式、交互与可访问性。",
+  },
+  critic: {
+    id: "critic",
+    label: "小评",
+    name: "opencode",
+    model: "qwen3.7-plus",
+    description: "Review 专家，负责代码评审、问题诊断与质量把关。",
   },
 };
 
