@@ -513,7 +513,7 @@
     }
 
     function agentRoleLabel(agent) {
-      return agent.id === "architect" ? "主控 Agent" : "协作 Agent";
+      return agent.description || "";
     }
 
     function resolvePromptAgent(prompt) {
