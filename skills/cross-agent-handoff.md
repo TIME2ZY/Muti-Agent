@@ -46,7 +46,7 @@ BEFORE 发送交接消息:
 ## Block 场景
 
 ```
-❌ "@M-M 我改了三个文件，帮我看看"
+❌ "@小评 我改了三个文件，帮我看看"
    → BLOCK: 没有 What/Why/Tradeoff/Open Questions/Next Action
    → 提示: 请补充五件套信息
 ```
@@ -58,5 +58,5 @@ BEFORE 发送交接消息:
     Why: 高并发下出现数据覆写，需要防竞态
     Tradeoff: 放弃悲观锁方案，因为读多写少
     Open Questions: 锁重试次数是否需要可配置？
-    Next Action: @M-M 请 review 锁的使用是否正确"
+    Next Action: @小评 请 review 锁的使用是否正确"
 ```

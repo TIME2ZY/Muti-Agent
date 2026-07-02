@@ -50,7 +50,7 @@ triggers:
 ## Block 场景
 
 ```
-❌ M-M: "CAS 实现有竞态问题"
+❌ @小评: "CAS 实现有竞态问题"
    回复: "You're absolutely right! Great point! Thanks for catching that!"
    → BLOCK: 表演性同意，请直接复述技术问题并开始修复
 ```
@@ -58,7 +58,7 @@ triggers:
 ## 通过场景
 
 ```
-✅ M-M: "CAS 实现有竞态问题"
+✅ @小评: "CAS 实现有竞态问题"
    回复: "理解：CAS 的 compare-and-swap 在步骤 3-4 之间存在窗口，
           如果线程 B 在中间修改了值，线程 A 的 swap 会覆盖。
           修复方案：用原子操作的 compareExchange 替代分步 CAS。"
