@@ -148,6 +148,8 @@
       return {
         status: null,
         diffText: "",
+        diffTruncated: false,
+        diffTotalChars: 0,
         files: [],
         selectedPath: "",
         loading: false,
@@ -315,6 +317,13 @@
       fileCount.textContent = `共 ${summaryStats.totalFiles} 个改动文件 · 新增 ${summaryStats.untrackedFiles} 个`;
       wrap.append(fileCount);
 
+      if (state.workspace.diffTruncated) {
+        const warning = document.createElement("div");
+        warning.className = "workspace-summary-meta";
+        warning.textContent = `仅显示前 ${state.workspace.diffText.length} 个字符，原始 diff 共 ${state.workspace.diffTotalChars} 个字符`;
+        wrap.append(warning);
+      }
+
       const content = document.createElement("div");
       content.className = "workspace-content";
       content.append(renderWorkspaceFileList(), renderWorkspaceDiff());
@@ -341,7 +350,8 @@
           renderWorkspacePanel();
           return;
         }
-        const diffText = await worktreeApi.readDiff(state.currentSessionId, { allowMissing: true });
+        const diffData = await worktreeApi.readDiff(state.currentSessionId, { allowMissing: true });
+        const diffText = diffData.diff || "";
         const files = window.WorkspaceDiff
           ? window.WorkspaceDiff.parseUnifiedDiff(diffText)
           : [];
@@ -349,6 +359,8 @@
         state.workspace = {
           status,
           diffText,
+          diffTruncated: diffData.truncated === true,
+          diffTotalChars: diffData.totalChars || diffText.length,
           files,
           selectedPath: files[0]?.path || "",
           loading: false,
@@ -1297,9 +1309,20 @@
 
     async function fetchInvocationEvents(invocationId) {
       const sid = state.currentSessionId;
-      if (!sid || !invocationId) return [];
-      const data = await recallApi.readInvocation(sid, invocationId, { from: 0, limit: 500 });
-      return data.events || [];
+      if (!sid || !invocationId) return { events: [], total: 0 };
+      const data = await recallApi.readInvocation(sid, invocationId, { from: 0, limit: 200 });
+      return {
+        events: data.events || [],
+        total: Number(data.total) || 0,
+      };
+    }
+
+    function renderRecallPageMeta(total, shown) {
+      if (!(total > shown)) return null;
+      const note = document.createElement("div");
+      note.className = "workspace-summary-meta";
+      note.textContent = `仅显示前 ${shown} 条事件，完整记录共 ${total} 条`;
+      return note;
     }
 
     // ── Per-message inline expand ────────────────────────────
@@ -1330,8 +1353,12 @@
       wrapper.appendChild(panel);
       btn.classList.add("open");
       try {
-        const events = await fetchInvocationEvents(invocationId);
-        panel.replaceChildren(renderEventList(events));
+        const page = await fetchInvocationEvents(invocationId);
+        const children = [];
+        const meta = renderRecallPageMeta(page.total, page.events.length);
+        if (meta) children.push(meta);
+        children.push(renderEventList(page.events));
+        panel.replaceChildren(...children);
       } catch (e) {
         setRecallEmpty(panel, "加载失败: " + e.message, true);
       }
@@ -1404,8 +1431,12 @@
       setRecallEmpty(body, "加载中…");
       row.append(body);
       try {
-        const events = await fetchInvocationEvents(invocationId);
-        body.replaceChildren(renderEventList(events));
+        const page = await fetchInvocationEvents(invocationId);
+        const children = [];
+        const meta = renderRecallPageMeta(page.total, page.events.length);
+        if (meta) children.push(meta);
+        children.push(renderEventList(page.events));
+        body.replaceChildren(...children);
       } catch (e) {
         setRecallEmpty(body, "加载失败: " + e.message, true);
       }
@@ -1470,8 +1501,12 @@
       setRecallEmpty(body, "加载中…");
       row.append(body);
       try {
-        const events = await fetchInvocationEvents(invocationId);
-        body.replaceChildren(renderEventList(events));
+        const page = await fetchInvocationEvents(invocationId);
+        const children = [];
+        const meta = renderRecallPageMeta(page.total, page.events.length);
+        if (meta) children.push(meta);
+        children.push(renderEventList(page.events));
+        body.replaceChildren(...children);
       } catch (e) {
         setRecallEmpty(body, "加载失败: " + e.message, true);
       }

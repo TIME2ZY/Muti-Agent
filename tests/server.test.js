@@ -881,6 +881,68 @@ test("chat endpoint reuses the session worktree on later turns", async () => {
   );
 });
 
+test("chat endpoint treats useWorktree as a per-run permission gate after a worktree already exists", async () => {
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-toggle-"));
+  const worktreeDir = path.join(os.tmpdir(), "server-worktree-toggle-session");
+  const runs = [];
+
+  await withServer(
+    {
+      worktreeManager: {
+        ensureWorktree({ sessionId }) {
+          return {
+            sessionId,
+            baseDir,
+            worktreeDir,
+            branch: `codex/session-${sessionId}`,
+            status: "active",
+            createdAt: "2026-06-30T00:00:00.000Z",
+          };
+        },
+      },
+      spawnRunner(command, args, options) {
+        runs.push({ cwd: options.cwd, env: options.env });
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write("ok");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const { session } = await created.json();
+
+      const first = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "planner", prompt: "first", sessionId: session.id, projectDir: baseDir, useWorktree: true }),
+      });
+      assert.equal(first.status, 200);
+      await first.text();
+
+      const second = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "planner", prompt: "second", sessionId: session.id, projectDir: baseDir, useWorktree: false }),
+      });
+      assert.equal(second.status, 200);
+      await second.text();
+
+      assert.equal(runs.length, 2);
+      assert.equal(runs[0].cwd, worktreeDir);
+      assert.equal(runs[0].env.CAT_CAFE_WORKTREE, "1");
+      assert.equal(runs[0].env.CAT_CAFE_WORKTREE_DIR, worktreeDir);
+
+      assert.equal(runs[1].cwd, baseDir);
+      assert.equal(runs[1].env.CAT_CAFE_WORKTREE, "0");
+      assert.equal(runs[1].env.CAT_CAFE_WORKTREE_DIR, baseDir);
+      assert.equal(runs[1].env.CAT_CAFE_BRANCH, "");
+    }
+  );
+});
+
 test("worktree status, diff, and discard endpoints delegate to manager", async () => {
   const calls = [];
   await withServer(
@@ -921,6 +983,39 @@ test("worktree status, diff, and discard endpoints delegate to manager", async (
         ["diff", session.id],
         ["discard", session.id],
       ]);
+    }
+  );
+});
+
+test("worktree diff endpoint truncates oversized payloads", async () => {
+  const hugeDiff = `diff --git a/a.txt b/a.txt\n${"+x\n".repeat(90000)}`;
+
+  await withServer(
+    {
+      worktreeManager: {
+        getStatus(sessionId) {
+          return { sessionId, branch: "codex/session-x", clean: false, porcelain: [" M a.txt"] };
+        },
+        getDiff() {
+          return hugeDiff;
+        },
+        discardWorktree(sessionId) {
+          return { ok: true, sessionId };
+        },
+      },
+    },
+    async (baseUrl) => {
+      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const { session } = await created.json();
+
+      const diffResponse = await fetch(`${baseUrl}/api/sessions/${session.id}/worktree/diff`);
+      const body = await diffResponse.json();
+
+      assert.equal(diffResponse.status, 200);
+      assert.equal(body.truncated, true);
+      assert.equal(body.totalChars, hugeDiff.length);
+      assert.ok(body.diff.length < hugeDiff.length);
+      assert.match(body.diff, /\[workspace diff truncated/i);
     }
   );
 });
@@ -1928,6 +2023,12 @@ test("frontend app.js renders semantic recall event bodies for structured events
   assert.match(js, /evt\.kind === "tool\.finished"/);
   assert.match(js, /evt\.kind === "file\.changed"/);
   assert.match(js, /evt\.kind === "progress\.update"/);
+});
+
+test("frontend caps recall page size and surfaces truncation state", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /readInvocation\(sid,\s*invocationId,\s*\{\s*from:\s*0,\s*limit:\s*200\s*\}\)/);
+  assert.match(js, /仅显示前/);
 });
 
 test("frontend styles.css gives stderr messages a separate debug appearance", () => {

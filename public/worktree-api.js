@@ -29,10 +29,14 @@
       async readDiff(sessionId, options = {}) {
         const res = await request(`/api/sessions/${encodeURIComponent(sessionId)}/worktree/diff`);
         if (options.allowMissing && (res.status === 400 || res.status === 404)) {
-          return "";
+          return { diff: "", truncated: false, totalChars: 0 };
         }
         const data = await jsonOrThrow(res);
-        return data.diff || "";
+        return {
+          diff: data.diff || "",
+          truncated: data.truncated === true,
+          totalChars: Number(data.totalChars) || 0,
+        };
       },
       async discard(sessionId) {
         return jsonOrThrow(await request(`/api/sessions/${encodeURIComponent(sessionId)}/worktree/discard`, {

@@ -13,6 +13,22 @@ function createSessionRoutes({
   validateProjectDir,
   setSessionProjectDir,
 }) {
+  const MAX_WORKTREE_DIFF_CHARS = 200 * 1024;
+
+  function buildWorktreeDiffPayload(sessionId, diffText) {
+    const diff = typeof diffText === "string" ? diffText : "";
+    if (diff.length <= MAX_WORKTREE_DIFF_CHARS) {
+      return { sessionId, diff, truncated: false, totalChars: diff.length };
+    }
+    const marker = `\n\n[workspace diff truncated to ${MAX_WORKTREE_DIFF_CHARS} chars]\n`;
+    return {
+      sessionId,
+      diff: diff.slice(0, MAX_WORKTREE_DIFF_CHARS - marker.length) + marker,
+      truncated: true,
+      totalChars: diff.length,
+    };
+  }
+
   return async function handleSessionRoutes(req, res, url) {
     if (req.method === "GET" && url.pathname === "/api/messages") {
       const sessionId = url.searchParams.get("sessionId");
@@ -86,7 +102,7 @@ function createSessionRoutes({
           return true;
         }
         if (req.method === "GET" && action === "diff") {
-          sendJson(res, 200, { sessionId, diff: worktreeManager.getDiff(sessionId) });
+          sendJson(res, 200, buildWorktreeDiffPayload(sessionId, worktreeManager.getDiff(sessionId)));
           return true;
         }
         if (req.method === "POST" && action === "discard") {

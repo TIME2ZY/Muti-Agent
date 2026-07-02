@@ -20,13 +20,17 @@ test("createWorktreeApi reads worktree status and diff", async () => {
       return makeResponse(200, JSON.stringify({ exists: true, branch: "codex/s1" }));
     }
     if (url === "/api/sessions/s1/worktree/diff") {
-      return makeResponse(200, JSON.stringify({ sessionId: "s1", diff: "diff --git a/a b/a" }));
+      return makeResponse(200, JSON.stringify({ sessionId: "s1", diff: "diff --git a/a b/a", truncated: true, totalChars: 4096 }));
     }
     throw new Error(`unexpected url: ${url}`);
   });
 
   assert.deepEqual(await client.readStatus("s1"), { exists: true, branch: "codex/s1" });
-  assert.equal(await client.readDiff("s1"), "diff --git a/a b/a");
+  assert.deepEqual(await client.readDiff("s1"), {
+    diff: "diff --git a/a b/a",
+    truncated: true,
+    totalChars: 4096,
+  });
   assert.deepEqual(calls, [
     "/api/sessions/s1/worktree/status",
     "/api/sessions/s1/worktree/diff",
