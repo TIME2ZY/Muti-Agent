@@ -40,6 +40,14 @@ function createCodexRuntime(cli) {
         return text ? [makeEvent("text.delta", { ...base, text })] : [];
       }
 
+      const content = event.content || (event.properties && event.properties.content);
+      if (content && content.type === "text" && typeof content.text === "string") {
+        return [makeEvent("text.delta", {
+          ...base,
+          text: content.text,
+        })];
+      }
+
       if (event.type === "item.completed" && event.item && event.item.type === "todo_list") {
         return [makeEvent("progress.update", {
           ...base,

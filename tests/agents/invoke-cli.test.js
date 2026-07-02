@@ -312,6 +312,42 @@ test("opencode runtime emits incremental text deltas from repeated parts", () =>
   assert.deepEqual(second.map((event) => event.text), [" world"]);
 });
 
+test("opencode runtime reads text deltas from properties.part fallback", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-3", agent: "planner" };
+
+  const events = runtime.transform({
+    type: "message.part.updated",
+    properties: {
+      part: { id: "p2", type: "text", text: "fallback text" },
+    },
+  }, ctx);
+
+  assert.deepEqual(events.map((event) => event.text), ["fallback text"]);
+});
+
+test("codex runtime reads text from content and properties.content fallbacks", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const ctx = { invocationId: "inv-4", agent: "architect" };
+
+  const direct = runtime.transform({
+    type: "response.output_text.delta",
+    content: { type: "text", text: "direct content" },
+  }, ctx);
+
+  const nested = runtime.transform({
+    type: "response.output_text.delta",
+    properties: {
+      content: { type: "text", text: "nested content" },
+    },
+  }, ctx);
+
+  assert.deepEqual(direct.map((event) => event.text), ["direct content"]);
+  assert.deepEqual(nested.map((event) => event.text), ["nested content"]);
+});
+
 test("extracts codex agent message events", () => {
   const text = extractAssistantText(
     {

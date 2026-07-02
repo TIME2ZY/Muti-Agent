@@ -15,9 +15,10 @@ function createOpencodeRuntime(cli) {
         invocationId: ctx.invocationId,
       };
 
-      if (event.type === "message.part.updated" && event.part && event.part.type === "text") {
-        const id = event.part.id || "_default";
-        const next = typeof event.part.text === "string" ? event.part.text : "";
+      const part = event.part || (event.properties && event.properties.part);
+      if (event.type === "message.part.updated" && part && part.type === "text") {
+        const id = part.id || "_default";
+        const next = typeof part.text === "string" ? part.text : "";
         const prev = parts.get(id) || "";
         parts.set(id, next);
         if (!next.startsWith(prev)) {
