@@ -226,6 +226,60 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.critic.model, "qwen3.7-plus");
 });
 
+test("codex runtime maps agent_message and todo_list into normalized events", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const invocationId = "inv-1";
+
+  const started = runtime.transform({
+    type: "thread.started",
+    thread_id: "codex-session-1",
+  }, { invocationId, agent: "architect" });
+
+  const todo = runtime.transform({
+    type: "item.completed",
+    item: {
+      type: "todo_list",
+      items: [
+        { text: "Inspect parser", done: true },
+        { text: "Render timeline", done: false },
+      ],
+    },
+  }, { invocationId, agent: "architect" });
+
+  const text = runtime.transform({
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: "Hello from Codex",
+    },
+  }, { invocationId, agent: "architect" });
+
+  assert.equal(started[0].type, "run.started");
+  assert.equal(todo[0].type, "progress.update");
+  assert.equal(text[0].type, "text.delta");
+  assert.equal(text[0].text, "Hello from Codex");
+});
+
+test("opencode runtime emits incremental text deltas from repeated parts", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-2", agent: "planner" };
+
+  const first = runtime.transform({
+    type: "message.part.updated",
+    part: { id: "p1", type: "text", text: "hello" },
+  }, ctx);
+
+  const second = runtime.transform({
+    type: "message.part.updated",
+    part: { id: "p1", type: "text", text: "hello world" },
+  }, ctx);
+
+  assert.deepEqual(first.map((event) => event.text), ["hello"]);
+  assert.deepEqual(second.map((event) => event.text), [" world"]);
+});
+
 test("extracts codex agent message events", () => {
   const text = extractAssistantText(
     {
