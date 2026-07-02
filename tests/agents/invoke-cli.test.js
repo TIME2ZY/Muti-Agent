@@ -158,14 +158,23 @@ function runScriptWithHook(args, hookSource) {
   return result;
 }
 
+function parseOutputEvents(stdout) {
+  return String(stdout || "")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
 test("uses architect agent by default", () => {
   const result = runScript(["hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "codex:-s danger-full-access -a never -c model_reasoning_effort=\"high\" -m gpt-5.5 exec --json hello:undefined\n"
+  assert.deepEqual(
+    parseOutputEvents(result.stdout).map((event) => event.type),
+    ["run.started", "text.delta", "run.finished"]
   );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /codex:-s danger-full-access/);
   assert.equal(result.stderr, "");
 });
 
@@ -173,10 +182,11 @@ test("uses orchestrator agent for deepseek v4 pro", () => {
   const result = runScript(["--agent", "orchestrator", "hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "opencode.exe:run --format json --model opencode-go/deepseek-v4-pro hello:undefined\n"
+  assert.deepEqual(
+    parseOutputEvents(result.stdout).map((event) => event.type),
+    ["run.started", "text.delta", "run.finished"]
   );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --model opencode-go\/deepseek-v4-pro hello:undefined/);
   assert.equal(result.stderr, "");
 });
 
@@ -184,10 +194,11 @@ test("uses frontend agent for glm 5.2", () => {
   const result = runScript(["--agent=frontend", "hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "opencode.exe:run --format json --model opencode-go/glm-5.2 hello:undefined\n"
+  assert.deepEqual(
+    parseOutputEvents(result.stdout).map((event) => event.type),
+    ["run.started", "text.delta", "run.finished"]
   );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --model opencode-go\/glm-5.2 hello:undefined/);
   assert.equal(result.stderr, "");
 });
 
@@ -195,11 +206,32 @@ test("uses planner agent for mimo v2.5 pro", () => {
   const result = runScript(["--agent", "planner", "hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "opencode.exe:run --format json --model opencode-go/mimo-v2.5-pro hello:undefined\n"
+  assert.deepEqual(
+    parseOutputEvents(result.stdout).map((event) => event.type),
+    ["run.started", "text.delta", "run.finished"]
   );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --model opencode-go\/mimo-v2\.5-pro hello:undefined/);
   assert.equal(result.stderr, "");
+});
+
+test("invoke-cli writes normalized NDJSON events instead of plain assistant text", () => {
+  const result = runScript(["hello"]);
+
+  assert.equal(result.status, 0);
+  const lines = parseOutputEvents(result.stdout);
+  assert.equal(lines[0].type, "run.started");
+  assert.equal(lines[1].type, "text.delta");
+  assert.equal(lines[1].text.includes("codex:-s danger-full-access"), true);
+});
+
+test("invoke-cli persists provider session IDs while emitting NDJSON", () => {
+  const result = runScript(["--agent", "orchestrator", "hello"]);
+
+  assert.equal(result.status, 0);
+  const events = parseOutputEvents(result.stdout);
+  assert.ok(events.some((event) => event.type === "text.delta"));
+  const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
+  assert.equal(sessionFile.orchestrator.sessionId, "opencode-session-1");
 });
 
 test("rejects unknown agent", () => {
@@ -301,10 +333,9 @@ test("resumes remembered codex session", () => {
   });
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "codex:-s danger-full-access -a never -c model_reasoning_effort=\"high\" -m gpt-5.5 exec resume --json codex-session-previous hello again\n"
-  );
+  const events = parseOutputEvents(result.stdout);
+  assert.equal(events[0].type, "text.delta");
+  assert.match(events[0].text, /exec resume --json codex-session-previous hello again/);
   assert.equal(result.stderr, "");
 });
 
@@ -314,10 +345,9 @@ test("resumes remembered opencode session", () => {
   });
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "opencode.exe:run --format json --model opencode-go/deepseek-v4-pro --session opencode-session-previous hello again\n"
-  );
+  const events = parseOutputEvents(result.stdout);
+  assert.equal(events[0].type, "text.delta");
+  assert.match(events[0].text, /opencode\.exe:run --format json --model opencode-go\/deepseek-v4-pro --session opencode-session-previous hello again/);
   assert.equal(result.stderr, "");
 });
 
@@ -351,10 +381,7 @@ test("supports configurable proxy", () => {
   const result = runScript(["--proxy", "http://127.0.0.1:9999", "hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "codex:-s danger-full-access -a never -c model_reasoning_effort=\"high\" -m gpt-5.5 exec --json hello:http://127.0.0.1:9999\n"
-  );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /hello:http:\/\/127\.0\.0\.1:9999/);
   assert.equal(result.stderr, "");
 });
 
@@ -419,7 +446,9 @@ childProcess.spawn = function spawn() {
   );
 
   assert.equal(result.status, 0);
-  assert.equal(result.stdout, "done\n");
+  const events = parseOutputEvents(result.stdout);
+  assert.equal(events[0].type, "text.delta");
+  assert.equal(events[0].text, "done");
   assert.match(result.stderr, /thinking/);
   assert.doesNotMatch(result.stderr, /unexpected-kill/);
 });
@@ -464,7 +493,9 @@ childProcess.spawn = function spawn() {
   );
 
   assert.equal(result.status, 0);
-  assert.equal(result.stdout, "retry-success\n");
+  const events = parseOutputEvents(result.stdout);
+  assert.equal(events[0].type, "text.delta");
+  assert.equal(events[0].text, "retry-success");
   assert.match(result.stderr, /temporary failure/);
   assert.match(result.stderr, /retrying 1\/1/);
 });

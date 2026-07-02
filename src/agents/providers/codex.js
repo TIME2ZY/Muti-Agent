@@ -29,6 +29,17 @@ function createCodexRuntime(cli) {
         })];
       }
 
+      if (event.type === "assistant") {
+        const content = event.message && Array.isArray(event.message.content)
+          ? event.message.content
+          : [];
+        const text = content
+          .filter((item) => item.type === "text" && typeof item.text === "string")
+          .map((item) => item.text)
+          .join("");
+        return text ? [makeEvent("text.delta", { ...base, text })] : [];
+      }
+
       if (event.type === "item.completed" && event.item && event.item.type === "todo_list") {
         return [makeEvent("progress.update", {
           ...base,
