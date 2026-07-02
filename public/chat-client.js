@@ -24,6 +24,7 @@
       renderSkillTags,
       showThinking,
       appendLive,
+      applyAgentEvent,
       addDebug,
       finishStream,
       agentLabel,
@@ -61,7 +62,12 @@
           if (data.invocationId) state.liveInvocations.set(data.agent, data.invocationId);
           showThinking(data.agent);
           break;
+        case "agent-event":
+          state.hasStructuredEvents = true;
+          applyAgentEvent(data);
+          break;
         case "message":
+          if (state.hasStructuredEvents) break;
           appendLive(data.agent, data.text);
           break;
         case "stderr":
@@ -128,8 +134,10 @@
       state.lastAgent = targetAgent.id;
       state.selectedAgent = targetAgent.id;
       state.doneReceived = false;
+      state.hasStructuredEvents = false;
       state.liveMessages.clear();
       state.liveInvocations.clear();
+      if (state.liveRuns) state.liveRuns.clear();
 
       createMessage({ role: "user", agent: targetAgent.id, content: prompt });
       promptEl.value = "";

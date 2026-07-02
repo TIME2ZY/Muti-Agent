@@ -2,6 +2,7 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
+const { createProviderRuntime } = require("./providers");
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_KILL_GRACE_MS = 5000;
@@ -334,6 +335,7 @@ function persistSessionId(cli, sessionId) {
 
 function invoke(cli, prompt, options = {}) {
   const config = typeof cli === "string" ? { name: cli } : cli;
+  const provider = createProviderRuntime(config);
   // Read session ID from env (set by server). If present, resume the previous
   // CLI session; if absent, cold start.
   const resumeSessionId = process.env.INVOKE_SESSION_ID || "";
@@ -346,12 +348,14 @@ function invoke(cli, prompt, options = {}) {
     retries: options.retries || 0,
   };
 
-  const state = {
-    opencodeParts: new Map(),
-  };
+  const invocationId = process.env.CAT_CAFE_INVOCATION_ID || "standalone";
 
   let firstChild;
   let attempt = 0;
+
+  const emitEvent = (event) => {
+    process.stdout.write(`${JSON.stringify(event)}\n`);
+  };
 
   const startAttempt = () => {
     attempt += 1;
@@ -446,11 +450,14 @@ function invoke(cli, prompt, options = {}) {
         return;
       }
 
-      const sessionId = extractSessionId(event);
+      const sessionId = provider.extractSessionId(event);
       if (sessionId) persistSessionId(config, sessionId);
 
-      const text = extractAssistantText(event, state);
-      if (text) process.stdout.write(text);
+      const events = provider.transform(event, {
+        agent: config.id || config.name,
+        invocationId,
+      });
+      for (const outEvent of events) emitEvent(outEvent);
     });
 
     child.stderr.on("data", (chunk) => {
@@ -498,7 +505,13 @@ function invoke(cli, prompt, options = {}) {
 
       if (timedOut) return;
 
-      process.stdout.write("\n");
+      emitEvent({
+        type: "run.finished",
+        agent: config.id || config.name,
+        invocationId,
+        exitCode: 0,
+        signal: null,
+      });
     });
 
     return child;

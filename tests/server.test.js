@@ -145,8 +145,8 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
         calls.push({ command, args });
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write("partial ");
-          child.stdout.write("answer");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-test", text: "partial " }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-test", text: "answer" }) + "\n");
           child.emit("close", 0, null);
         });
         return child;
@@ -186,15 +186,109 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
   );
 });
 
+test("chat endpoint emits canonical agent-event SSE frames", async () => {
+  await withServer(
+    {
+      spawnRunner() {
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write(JSON.stringify({
+            type: "run.started",
+            agent: "planner",
+            invocationId: "inv-1",
+            provider: "opencode",
+          }) + "\n");
+          child.stdout.write(JSON.stringify({
+            type: "text.delta",
+            agent: "planner",
+            invocationId: "inv-1",
+            text: "hello ",
+          }) + "\n");
+          child.stdout.write(JSON.stringify({
+            type: "progress.update",
+            agent: "planner",
+            invocationId: "inv-1",
+            items: [{ text: "done", done: true }],
+          }) + "\n");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "planner", prompt: "hello" }),
+      });
+      const text = await response.text();
+      assert.match(text, /event: agent-event/);
+      assert.match(text, /"type":"text.delta"/);
+      assert.match(text, /"type":"progress.update"/);
+    }
+  );
+});
+
+test("chat history stores only assistant text reconstructed from text.delta", async () => {
+  await withServer(
+    {
+      spawnRunner() {
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write(JSON.stringify({
+            type: "run.started",
+            agent: "planner",
+            invocationId: "inv-2",
+            provider: "opencode",
+          }) + "\n");
+          child.stdout.write(JSON.stringify({
+            type: "thinking.delta",
+            agent: "planner",
+            invocationId: "inv-2",
+            text: "inspect",
+          }) + "\n");
+          child.stdout.write(JSON.stringify({
+            type: "text.delta",
+            agent: "planner",
+            invocationId: "inv-2",
+            text: "final answer",
+          }) + "\n");
+          child.stdout.write(JSON.stringify({
+            type: "run.finished",
+            agent: "planner",
+            invocationId: "inv-2",
+            exitCode: 0,
+            signal: null,
+          }) + "\n");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "planner", prompt: "hello" }),
+      });
+      const sse = await response.text();
+      const sid = sse.match(/"sessionId":"([^"]+)"/)[1];
+      const history = await (await fetch(`${baseUrl}/api/messages?sessionId=${sid}`)).json();
+      const assistant = history.messages.find((msg) => msg.role === "assistant");
+      assert.equal(assistant.content, "final answer");
+    }
+  );
+});
+
 test("chat endpoint preserves raw stdout chunk boundaries in SSE message events", async () => {
   await withServer(
     {
       spawnRunner() {
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write("line 1\n\n");
-          child.stdout.write("    code-ish indent\n");
-          child.stdout.write("- list item");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-chunks", text: "line 1\n\n" }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-chunks", text: "    code-ish indent\n" }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-chunks", text: "- list item" }) + "\n");
           child.emit("close", 0, null);
         });
         return child;
@@ -249,7 +343,7 @@ test("chat endpoint suppresses benign codex startup stderr", async () => {
         process.nextTick(() => {
           child.stderr.write("Reading additional input from stdin...\n");
           child.stderr.write("2026-06-28T13:52:47.421934Z WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported\n");
-          child.stdout.write("answer");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "inv-answer", text: "answer" }) + "\n");
           child.emit("close", 0, null);
         });
         return child;
@@ -282,9 +376,9 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
         const child = createMockChild();
         process.nextTick(() => {
           if (args[2] === "architect") {
-            child.stdout.write("@小谋\n请继续实现。\narchitect result");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "inv-a2a-1", text: "@小谋\n请继续实现。\narchitect result" }) + "\n");
           } else {
-            child.stdout.write("planner received");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-a2a-2", text: "planner received" }) + "\n");
           }
           child.emit("close", 0, null);
         });
@@ -1256,8 +1350,8 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
         spawnRunner(command, args) {
           const child = createMockChild();
           process.nextTick(() => {
-            child.stdout.write("partial ");
-            child.stdout.write("answer");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-transcript", text: "partial " }) + "\n");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-transcript", text: "answer" }) + "\n");
             child.emit("close", 0, null);
           });
           return child;
@@ -1299,10 +1393,10 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
     const events = await transcript.readInvocation(capturedSessionId, agentInv);
     const kinds = events.map((e) => e.kind);
     assert.ok(kinds.includes("invocation-start"), `kinds: ${kinds.join(",")}`);
-    assert.ok(kinds.includes("stdout"), `kinds: ${kinds.join(",")}`);
+    assert.ok(kinds.includes("text.delta"), `kinds: ${kinds.join(",")}`);
     assert.ok(kinds.includes("invocation-end"), `kinds: ${kinds.join(",")}`);
-    const stdoutEvents = events.filter((e) => e.kind === "stdout");
-    assert.equal(stdoutEvents.length, 2, "two stdout chunks (partial + answer)");
+    const stdoutEvents = events.filter((e) => e.kind === "text.delta");
+    assert.equal(stdoutEvents.length, 2, "two text.delta chunks (partial + answer)");
     assert.equal(stdoutEvents[0].payload.text, "partial ");
     assert.equal(stdoutEvents[1].payload.text, "answer");
 
@@ -1339,7 +1433,7 @@ test("chat endpoint emits context-warning when fillRatio crosses warn threshold"
             // 25 chars output → ratio 25/80 = 0.31 (under warn)
             // 60 chars output → ratio 60/80 = 0.75 (under warn, since warn is 0.85)
             // 80 chars output → ratio 80/80 = 1.0 (above action 0.90, triggers seal)
-            child.stdout.write("x".repeat(80));
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-warn", text: "x".repeat(80) }) + "\n");
             child.emit("close", 0, null);
           });
           return child;
@@ -1376,8 +1470,8 @@ test("chat endpoint terminates the chain with sealed event when action threshold
           const child = createMockChild();
           process.nextTick(() => {
             // 80 chars × 4 chars/token / 20 tokens capacity = ratio 4.0, well past 0.90
-            child.stdout.write("x".repeat(80));
-            child.stdout.write("\n@sage please continue");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "inv-seal", text: "x".repeat(80) }) + "\n");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "inv-seal", text: "\n@sage please continue" }) + "\n");
             child.emit("close", 0, null);
           });
           return child;
@@ -1729,6 +1823,15 @@ test("frontend app.js defines unified display helpers for user and agent identit
   assert.match(js, /metaRole\.textContent = roleBadgeLabel\(role\)/);
 });
 
+test("frontend app.js defines invocation-level live run state and renderer hooks", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /liveRuns:\s*new Map\(\)/);
+  assert.match(js, /function applyAgentEvent\(event\)/);
+  assert.match(js, /function ensureLiveRun\(event\)/);
+  assert.match(js, /progressItems/);
+  assert.match(js, /fileChanges/);
+});
+
 test("frontend app.js loads workspace status and diff for the workspace tab", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   assert.match(js, /rightPanelTab:\s*"agents"/);
@@ -1816,6 +1919,15 @@ test("frontend routes stderr SSE into a separate system stderr message", () => {
   assert.match(appJs, /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/);
   assert.match(chatJs, /addDebug\(data\.agent, data\.text\)/);
   assert.doesNotMatch(appJs, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
+});
+
+test("frontend app.js renders semantic recall event bodies for structured events", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /evt\.kind === "thinking\.delta"/);
+  assert.match(js, /evt\.kind === "tool\.started"/);
+  assert.match(js, /evt\.kind === "tool\.finished"/);
+  assert.match(js, /evt\.kind === "file\.changed"/);
+  assert.match(js, /evt\.kind === "progress\.update"/);
 });
 
 test("frontend styles.css gives stderr messages a separate debug appearance", () => {
@@ -1911,9 +2023,9 @@ test("A2A-routed agents do NOT get bootstrap packet (handoff block instead)", as
         const child = createMockChild();
         process.nextTick(() => {
           if (args[2] === "architect") {
-            child.stdout.write("@小谋\nhandoff please\narchitect result");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "bootstrap-a2a-1", text: "@小谋\nhandoff please\narchitect result" }) + "\n");
           } else {
-            child.stdout.write("planner received");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "bootstrap-a2a-2", text: "planner received" }) + "\n");
           }
           child.emit("close", 0, null);
         });
@@ -2029,7 +2141,7 @@ test("chat records invocation events and recall routes expose them (no token = f
       spawnRunner() {
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write("hello recall");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "recall-1", text: "hello recall" }) + "\n");
           child.stderr.write("a stderr line\n");
           child.emit("close", 0, null);
         });
@@ -2057,7 +2169,7 @@ test("chat records invocation events and recall routes expose them (no token = f
       assert.equal(list.invocations[0].invocationId, invId);
       assert.equal(list.invocations[0].agent, "planner");
       assert.equal(list.invocations[0].state, "completed");
-      assert.ok(list.invocations[0].eventCount >= 3, "should have start + stdout + stderr + end events");
+      assert.ok(list.invocations[0].eventCount >= 3, "should have start + text.delta + stderr + end events");
 
       const readRes = await fetch(`${baseUrl}/api/callbacks/read-invocation?sessionId=${sid}&targetInvocationId=${invId}`);
       const read = await readRes.json();
@@ -2066,7 +2178,7 @@ test("chat records invocation events and recall routes expose them (no token = f
       assert.equal(read.total, read.events.length);
       const kinds = read.events.map((e) => e.kind);
       assert.ok(kinds.includes("invocation-start"));
-      assert.ok(kinds.includes("stdout"));
+      assert.ok(kinds.includes("text.delta"));
       assert.ok(kinds.includes("stderr"));
       assert.ok(kinds.includes("invocation-end"));
 

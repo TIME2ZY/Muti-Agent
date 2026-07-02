@@ -158,14 +158,23 @@ function runScriptWithHook(args, hookSource) {
   return result;
 }
 
+function parseOutputEvents(stdout) {
+  return String(stdout || "")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
 test("uses architect agent by default", () => {
   const result = runScript(["hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "codex:-s danger-full-access -a never -c model_reasoning_effort=\"high\" -m gpt-5.5 exec --json hello:undefined\n"
+  assert.deepEqual(
+    parseOutputEvents(result.stdout).map((event) => event.type),
+    ["run.started", "text.delta", "run.finished"]
   );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /codex:-s danger-full-access/);
   assert.equal(result.stderr, "");
 });
 
@@ -173,10 +182,11 @@ test("uses orchestrator agent for deepseek v4 pro", () => {
   const result = runScript(["--agent", "orchestrator", "hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "opencode.exe:run --format json --model opencode-go/deepseek-v4-pro hello:undefined\n"
+  assert.deepEqual(
+    parseOutputEvents(result.stdout).map((event) => event.type),
+    ["run.started", "text.delta", "run.finished"]
   );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --model opencode-go\/deepseek-v4-pro hello:undefined/);
   assert.equal(result.stderr, "");
 });
 
@@ -184,10 +194,11 @@ test("uses frontend agent for glm 5.2", () => {
   const result = runScript(["--agent=frontend", "hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "opencode.exe:run --format json --model opencode-go/glm-5.2 hello:undefined\n"
+  assert.deepEqual(
+    parseOutputEvents(result.stdout).map((event) => event.type),
+    ["run.started", "text.delta", "run.finished"]
   );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --model opencode-go\/glm-5.2 hello:undefined/);
   assert.equal(result.stderr, "");
 });
 
@@ -195,11 +206,32 @@ test("uses planner agent for mimo v2.5 pro", () => {
   const result = runScript(["--agent", "planner", "hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "opencode.exe:run --format json --model opencode-go/mimo-v2.5-pro hello:undefined\n"
+  assert.deepEqual(
+    parseOutputEvents(result.stdout).map((event) => event.type),
+    ["run.started", "text.delta", "run.finished"]
   );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --model opencode-go\/mimo-v2\.5-pro hello:undefined/);
   assert.equal(result.stderr, "");
+});
+
+test("invoke-cli writes normalized NDJSON events instead of plain assistant text", () => {
+  const result = runScript(["hello"]);
+
+  assert.equal(result.status, 0);
+  const lines = parseOutputEvents(result.stdout);
+  assert.equal(lines[0].type, "run.started");
+  assert.equal(lines[1].type, "text.delta");
+  assert.equal(lines[1].text.includes("codex:-s danger-full-access"), true);
+});
+
+test("invoke-cli persists provider session IDs while emitting NDJSON", () => {
+  const result = runScript(["--agent", "orchestrator", "hello"]);
+
+  assert.equal(result.status, 0);
+  const events = parseOutputEvents(result.stdout);
+  assert.ok(events.some((event) => event.type === "text.delta"));
+  const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
+  assert.equal(sessionFile.orchestrator.sessionId, "opencode-session-1");
 });
 
 test("rejects unknown agent", () => {
@@ -226,6 +258,121 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.critic.model, "qwen3.7-plus");
 });
 
+test("codex runtime maps agent_message and todo_list into normalized events", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const invocationId = "inv-1";
+
+  const started = runtime.transform({
+    type: "thread.started",
+    thread_id: "codex-session-1",
+  }, { invocationId, agent: "architect" });
+
+  const todo = runtime.transform({
+    type: "item.completed",
+    item: {
+      type: "todo_list",
+      items: [
+        { text: "Inspect parser", done: true },
+        { text: "Render timeline", done: false },
+      ],
+    },
+  }, { invocationId, agent: "architect" });
+
+  const text = runtime.transform({
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: "Hello from Codex",
+    },
+  }, { invocationId, agent: "architect" });
+
+  assert.equal(started[0].type, "run.started");
+  assert.equal(todo[0].type, "progress.update");
+  assert.equal(text[0].type, "text.delta");
+  assert.equal(text[0].text, "Hello from Codex");
+});
+
+test("opencode runtime emits incremental text deltas from repeated parts", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-2", agent: "planner" };
+
+  const first = runtime.transform({
+    type: "message.part.updated",
+    part: { id: "p1", type: "text", text: "hello" },
+  }, ctx);
+
+  const second = runtime.transform({
+    type: "message.part.updated",
+    part: { id: "p1", type: "text", text: "hello world" },
+  }, ctx);
+
+  assert.deepEqual(first.map((event) => event.text), ["hello"]);
+  assert.deepEqual(second.map((event) => event.text), [" world"]);
+});
+
+test("opencode runtime reads text deltas from properties.part fallback", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-3", agent: "planner" };
+
+  const events = runtime.transform({
+    type: "message.part.updated",
+    properties: {
+      part: { id: "p2", type: "text", text: "fallback text" },
+    },
+  }, ctx);
+
+  assert.deepEqual(events.map((event) => event.text), ["fallback text"]);
+});
+
+test("opencode runtime extracts sessionID and text events from current cli schema", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-3b", agent: "planner" };
+
+  const rawStart = {
+    type: "step_start",
+    sessionID: "ses_current_schema",
+    part: { id: "prt1", type: "step-start" },
+  };
+  const rawText = {
+    type: "text",
+    sessionID: "ses_current_schema",
+    part: { id: "prt2", type: "text", text: "Hello from current schema" },
+  };
+
+  assert.equal(runtime.extractSessionId(rawStart), "ses_current_schema");
+  const started = runtime.transform(rawStart, ctx);
+  const text = runtime.transform(rawText, ctx);
+
+  assert.equal(started[0].type, "run.started");
+  assert.equal(started[0].sessionId, "ses_current_schema");
+  assert.deepEqual(text.map((event) => event.text), ["Hello from current schema"]);
+});
+
+test("codex runtime reads text from content and properties.content fallbacks", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const ctx = { invocationId: "inv-4", agent: "architect" };
+
+  const direct = runtime.transform({
+    type: "response.output_text.delta",
+    content: { type: "text", text: "direct content" },
+  }, ctx);
+
+  const nested = runtime.transform({
+    type: "response.output_text.delta",
+    properties: {
+      content: { type: "text", text: "nested content" },
+    },
+  }, ctx);
+
+  assert.deepEqual(direct.map((event) => event.text), ["direct content"]);
+  assert.deepEqual(nested.map((event) => event.text), ["nested content"]);
+});
+
 test("extracts codex agent message events", () => {
   const text = extractAssistantText(
     {
@@ -247,10 +394,9 @@ test("resumes remembered codex session", () => {
   });
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "codex:-s danger-full-access -a never -c model_reasoning_effort=\"high\" -m gpt-5.5 exec resume --json codex-session-previous hello again\n"
-  );
+  const events = parseOutputEvents(result.stdout);
+  assert.equal(events[0].type, "text.delta");
+  assert.match(events[0].text, /exec resume --json codex-session-previous hello again/);
   assert.equal(result.stderr, "");
 });
 
@@ -260,10 +406,9 @@ test("resumes remembered opencode session", () => {
   });
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "opencode.exe:run --format json --model opencode-go/deepseek-v4-pro --session opencode-session-previous hello again\n"
-  );
+  const events = parseOutputEvents(result.stdout);
+  assert.equal(events[0].type, "text.delta");
+  assert.match(events[0].text, /opencode\.exe:run --format json --model opencode-go\/deepseek-v4-pro --session opencode-session-previous hello again/);
   assert.equal(result.stderr, "");
 });
 
@@ -297,10 +442,7 @@ test("supports configurable proxy", () => {
   const result = runScript(["--proxy", "http://127.0.0.1:9999", "hello"]);
 
   assert.equal(result.status, 0);
-  assert.equal(
-    result.stdout,
-    "codex:-s danger-full-access -a never -c model_reasoning_effort=\"high\" -m gpt-5.5 exec --json hello:http://127.0.0.1:9999\n"
-  );
+  assert.match(parseOutputEvents(result.stdout)[1].text, /hello:http:\/\/127\.0\.0\.1:9999/);
   assert.equal(result.stderr, "");
 });
 
@@ -365,7 +507,9 @@ childProcess.spawn = function spawn() {
   );
 
   assert.equal(result.status, 0);
-  assert.equal(result.stdout, "done\n");
+  const events = parseOutputEvents(result.stdout);
+  assert.equal(events[0].type, "text.delta");
+  assert.equal(events[0].text, "done");
   assert.match(result.stderr, /thinking/);
   assert.doesNotMatch(result.stderr, /unexpected-kill/);
 });
@@ -410,7 +554,9 @@ childProcess.spawn = function spawn() {
   );
 
   assert.equal(result.status, 0);
-  assert.equal(result.stdout, "retry-success\n");
+  const events = parseOutputEvents(result.stdout);
+  assert.equal(events[0].type, "text.delta");
+  assert.equal(events[0].text, "retry-success");
   assert.match(result.stderr, /temporary failure/);
   assert.match(result.stderr, /retrying 1\/1/);
 });
