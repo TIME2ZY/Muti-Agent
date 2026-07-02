@@ -5,9 +5,13 @@ function createOpencodeRuntime(cli) {
 
   return {
     extractSessionId(event) {
-      return event && event.type === "session.updated" && event.session && typeof event.session.id === "string"
-        ? event.session.id
-        : "";
+      if (event && event.type === "session.updated" && event.session && typeof event.session.id === "string") {
+        return event.session.id;
+      }
+      if (event && typeof event.sessionID === "string") {
+        return event.sessionID;
+      }
+      return "";
     },
     transform(event, ctx) {
       const base = {
@@ -37,6 +41,15 @@ function createOpencodeRuntime(cli) {
         })];
       }
 
+      if (event.type === "step_start") {
+        return [makeEvent("run.started", {
+          ...base,
+          sessionId: typeof event.sessionID === "string" ? event.sessionID : "",
+          provider: cli.name,
+          model: cli.model || "",
+        })];
+      }
+
       if (event.type === "assistant") {
         const content = event.message && Array.isArray(event.message.content)
           ? event.message.content
@@ -46,6 +59,13 @@ function createOpencodeRuntime(cli) {
           .map((item) => item.text)
           .join("");
         return text ? [makeEvent("text.delta", { ...base, text })] : [];
+      }
+
+      if (event.type === "text" && part && part.type === "text" && typeof part.text === "string") {
+        return [makeEvent("text.delta", {
+          ...base,
+          text: part.text,
+        })];
       }
 
       return [];

@@ -327,6 +327,31 @@ test("opencode runtime reads text deltas from properties.part fallback", () => {
   assert.deepEqual(events.map((event) => event.text), ["fallback text"]);
 });
 
+test("opencode runtime extracts sessionID and text events from current cli schema", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-3b", agent: "planner" };
+
+  const rawStart = {
+    type: "step_start",
+    sessionID: "ses_current_schema",
+    part: { id: "prt1", type: "step-start" },
+  };
+  const rawText = {
+    type: "text",
+    sessionID: "ses_current_schema",
+    part: { id: "prt2", type: "text", text: "Hello from current schema" },
+  };
+
+  assert.equal(runtime.extractSessionId(rawStart), "ses_current_schema");
+  const started = runtime.transform(rawStart, ctx);
+  const text = runtime.transform(rawText, ctx);
+
+  assert.equal(started[0].type, "run.started");
+  assert.equal(started[0].sessionId, "ses_current_schema");
+  assert.deepEqual(text.map((event) => event.text), ["Hello from current schema"]);
+});
+
 test("codex runtime reads text from content and properties.content fallbacks", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
