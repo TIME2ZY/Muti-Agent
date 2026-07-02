@@ -1256,7 +1256,12 @@
 
     function eventBodyText(evt) {
       const p = evt.payload || {};
-      if (evt.kind === "stdout" || evt.kind === "stderr") return p.text || "";
+      if (evt.kind === "stdout" || evt.kind === "stderr" || evt.kind === "text.delta" || evt.kind === "text.final") return p.text || "";
+      if (evt.kind === "thinking.delta" || evt.kind === "thinking.final") return p.text || "";
+      if (evt.kind === "tool.started") return `${p.toolName || "tool"} ${JSON.stringify(p.args || {})}`;
+      if (evt.kind === "tool.finished") return `${p.toolName || "tool"} -> ${JSON.stringify(p.result || {})}`;
+      if (evt.kind === "file.changed") return `${p.changeType || "modified"} ${p.path || ""}`.trim();
+      if (evt.kind === "progress.update") return JSON.stringify(p.items || [], null, 2);
       if (evt.kind === "invocation-start") return `agent: ${p.agent || "?"}${p.shouldResume ? " · resume" : ""}`;
       if (evt.kind === "invocation-end") return `code: ${p.code ?? "?"}${p.signal ? ` · signal: ${p.signal}` : ""}`;
       return JSON.stringify(p, null, 2);

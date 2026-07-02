@@ -1921,6 +1921,15 @@ test("frontend routes stderr SSE into a separate system stderr message", () => {
   assert.doesNotMatch(appJs, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
 });
 
+test("frontend app.js renders semantic recall event bodies for structured events", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /evt\.kind === "thinking\.delta"/);
+  assert.match(js, /evt\.kind === "tool\.started"/);
+  assert.match(js, /evt\.kind === "tool\.finished"/);
+  assert.match(js, /evt\.kind === "file\.changed"/);
+  assert.match(js, /evt\.kind === "progress\.update"/);
+});
+
 test("frontend styles.css gives stderr messages a separate debug appearance", () => {
   const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
   assert.match(css, /\.system\.stderr \.msg-bubble/);
