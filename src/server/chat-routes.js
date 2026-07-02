@@ -299,11 +299,16 @@ function createChatRoutes({
           timeoutMs: options.timeoutMs,
           signal: invocationController.signal,
           env: invocationEnv,
-          onStdout(text) {
-            assistantContent += text;
-            transcript.appendEvent(sessionId, invocationId, "stdout", { agent, text });
-            recordInvocationEvent(invocationEvents, invocationId, "stdout", { text });
-            sendSse(res, "message", { agent, role: "assistant", text });
+          onEvent(event) {
+            transcript.appendEvent(sessionId, invocationId, event.type, event);
+            recordInvocationEvent(invocationEvents, invocationId, event.type, event);
+            sendSse(res, "agent-event", event);
+
+            if (event.type === "text.delta") {
+              const text = typeof event.text === "string" ? event.text : "";
+              assistantContent += text;
+              sendSse(res, "message", { agent, role: "assistant", text });
+            }
           },
           onStderr(text) {
             transcript.appendEvent(sessionId, invocationId, "stderr", { agent, text });

@@ -416,7 +416,7 @@ function buildChatArgs(agent, prompt, augmentedPrompt) {
   return buildInvokeArgs({ agent, prompt }, augmentedPrompt);
 }
 
-function runChildStream({ spawnRunner, args, res, cwd, onStdout, onStderr, onHealth, shouldStop, killGraceMs, signal, timeoutMs, env }) {
+function runChildStream({ spawnRunner, args, res, cwd, onStdout, onEvent, onStderr, onHealth, shouldStop, killGraceMs, signal, timeoutMs, env }) {
   const graceMs = killGraceMs || DEFAULT_KILL_GRACE_MS;
   const workDir = cwd || ROOT;
   const serverTimeoutMs = timeoutMs || DEFAULT_SERVER_TIMEOUT_MS;
@@ -431,6 +431,7 @@ function runChildStream({ spawnRunner, args, res, cwd, onStdout, onStderr, onHea
     let closed = false;
     let killTimer;
     let lastActivity = Date.now();
+    let stdoutBuffer = "";
 
     const stopChild = (reason) => {
       if (closed) return;
@@ -481,6 +482,27 @@ function runChildStream({ spawnRunner, args, res, cwd, onStdout, onStderr, onHea
         return;
       }
       const text = chunk.toString();
+      if (typeof onEvent === "function") {
+        stdoutBuffer += text;
+        let idx;
+        while ((idx = stdoutBuffer.indexOf("\n")) !== -1) {
+          const line = stdoutBuffer.slice(0, idx).trim();
+          stdoutBuffer = stdoutBuffer.slice(idx + 1);
+          if (!line) continue;
+          let event;
+          try {
+            event = JSON.parse(line);
+          } catch (error) {
+            sendSse(res, "error", { message: `Invalid agent event: ${error.message}` });
+            continue;
+          }
+          onEvent(event);
+          if (onHealth && event.type === "text.delta") {
+            onHealth(String(event.text || "").length);
+          }
+        }
+        return;
+      }
       onStdout(text);
       if (onHealth) onHealth(text.length);
     });
