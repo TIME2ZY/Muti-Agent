@@ -169,8 +169,8 @@ test("uses architect agent by default", () => {
   assert.equal(result.stderr, "");
 });
 
-test("uses forge agent for deepseek v4 pro", () => {
-  const result = runScript(["--agent", "forge", "hello"]);
+test("uses orchestrator agent for deepseek v4 pro", () => {
+  const result = runScript(["--agent", "orchestrator", "hello"]);
 
   assert.equal(result.status, 0);
   assert.equal(
@@ -180,13 +180,24 @@ test("uses forge agent for deepseek v4 pro", () => {
   assert.equal(result.stderr, "");
 });
 
-test("uses sage agent for glm 5.2", () => {
-  const result = runScript(["--agent=sage", "hello"]);
+test("uses frontend agent for glm 5.2", () => {
+  const result = runScript(["--agent=frontend", "hello"]);
 
   assert.equal(result.status, 0);
   assert.equal(
     result.stdout,
     "opencode.exe:run --format json --model opencode-go/glm-5.2 hello:undefined\n"
+  );
+  assert.equal(result.stderr, "");
+});
+
+test("uses planner agent for mimo v2.5 pro", () => {
+  const result = runScript(["--agent", "planner", "hello"]);
+
+  assert.equal(result.status, 0);
+  assert.equal(
+    result.stdout,
+    "opencode.exe:run --format json --model opencode-go/mimo-v2.5-pro hello:undefined\n"
   );
   assert.equal(result.stderr, "");
 });
@@ -204,12 +215,15 @@ test("exports invoke function", () => {
 });
 
 test("exports the fixed agents", () => {
-  assert.deepEqual(Object.keys(AGENTS).sort(), ["architect", "forge", "reviewer", "sage"]);
+  assert.deepEqual(Object.keys(AGENTS).sort(), ["architect", "coder", "critic", "frontend", "orchestrator", "planner"]);
   assert.equal(AGENTS.architect.model, "gpt-5.5");
   assert.equal(AGENTS.architect.reasoningEffort, "high");
-  assert.equal(AGENTS.forge.model, "deepseek-v4-pro");
-  assert.equal(AGENTS.sage.model, "glm-5.2");
-  assert.equal(AGENTS.reviewer.model, "minimax-m3");
+  assert.equal(AGENTS.orchestrator.model, "deepseek-v4-pro");
+  assert.equal(AGENTS.planner.model, "mimo-v2.5-pro");
+  assert.equal(AGENTS.coder.model, "minimax-m3");
+  assert.equal(AGENTS.coder.reasoningEffort, "high");
+  assert.equal(AGENTS.frontend.model, "glm-5.2");
+  assert.equal(AGENTS.critic.model, "qwen3.7-plus");
 });
 
 test("extracts codex agent message events", () => {
@@ -241,8 +255,8 @@ test("resumes remembered codex session", () => {
 });
 
 test("resumes remembered opencode session", () => {
-  const result = runScriptWithSession(["--agent", "forge", "hello again"], {
-    forge: { sessionId: "opencode-session-previous" },
+  const result = runScriptWithSession(["--agent", "orchestrator", "hello again"], {
+    orchestrator: { sessionId: "opencode-session-previous" },
   });
 
   assert.equal(result.status, 0);
@@ -262,11 +276,11 @@ test("remembers sessions from stream events", () => {
 });
 
 test("remembers opencode sessions from stream events", () => {
-  const result = runScript(["--agent", "forge", "hello"]);
+  const result = runScript(["--agent", "orchestrator", "hello"]);
 
   assert.equal(result.status, 0);
   const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
-  assert.equal(sessionFile.forge.sessionId, "opencode-session-1");
+  assert.equal(sessionFile.orchestrator.sessionId, "opencode-session-1");
 });
 
 test("cold starts when no saved session", () => {
