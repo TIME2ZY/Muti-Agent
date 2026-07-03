@@ -1,8 +1,45 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const LOCK_RETRY_MS = 25;
+const LOCK_TIMEOUT_MS = 5000;
+
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function getLockDir(sessionsFile) {
+  return `${sessionsFile}.lock`;
+}
+
+function withFileLock(sessionsFile, fn) {
+  const lockDir = getLockDir(sessionsFile);
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+
+  while (true) {
+    try {
+      fs.mkdirSync(lockDir);
+      break;
+    } catch (error) {
+      if (error && error.code !== "EEXIST") throw error;
+      if (Date.now() > deadline) {
+        throw new Error(`Timed out waiting for session lock: ${lockDir}`);
+      }
+      sleep(LOCK_RETRY_MS);
+    }
+  }
+
+  try {
+    return fn();
+  } finally {
+    try {
+      fs.rmdirSync(lockDir);
+    } catch {}
+  }
 }
 
 function makeSession(id) {
@@ -43,21 +80,29 @@ function readSessions(sessionsFile) {
   }
 }
 
-function writeSessions(sessionsFile, data) {
+function writeSessionsUnlocked(sessionsFile, data) {
   fs.mkdirSync(path.dirname(sessionsFile), { recursive: true });
-  const tempFile = `${sessionsFile}.tmp`;
+  const tempFile = `${sessionsFile}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
   fs.writeFileSync(tempFile, `${JSON.stringify(data, null, 2)}\n`, "utf8");
   fs.renameSync(tempFile, sessionsFile);
 }
 
+function writeSessions(sessionsFile, data) {
+  return withFileLock(sessionsFile, () => {
+    writeSessionsUnlocked(sessionsFile, data);
+  });
+}
+
 function createSession(sessionsFile) {
-  const data = readSessions(sessionsFile);
-  const id = generateId();
-  const session = makeSession(id);
-  data.sessions[id] = session;
-  data.lastSessionId = id;
-  writeSessions(sessionsFile, data);
-  return session;
+  return withFileLock(sessionsFile, () => {
+    const data = readSessions(sessionsFile);
+    const id = generateId();
+    const session = makeSession(id);
+    data.sessions[id] = session;
+    data.lastSessionId = id;
+    writeSessionsUnlocked(sessionsFile, data);
+    return session;
+  });
 }
 
 function listSessions(sessionsFile) {
@@ -78,74 +123,84 @@ function getSession(sessionsFile, sessionId) {
 }
 
 function ensureSession(sessionsFile, sessionId) {
-  const data = readSessions(sessionsFile);
-  let session = data.sessions[sessionId];
-  if (!session) {
-    session = makeSession(sessionId);
-    data.sessions[sessionId] = session;
-    data.lastSessionId = sessionId;
-    writeSessions(sessionsFile, data);
-  }
-  return session;
+  return withFileLock(sessionsFile, () => {
+    const data = readSessions(sessionsFile);
+    let session = data.sessions[sessionId];
+    if (!session) {
+      session = makeSession(sessionId);
+      data.sessions[sessionId] = session;
+      data.lastSessionId = sessionId;
+      writeSessionsUnlocked(sessionsFile, data);
+    }
+    return session;
+  });
 }
 
 function setSessionProjectDir(sessionsFile, sessionId, projectDir) {
-  const data = readSessions(sessionsFile);
-  const session = data.sessions[sessionId];
-  if (!session) return null;
-  session.projectDir = projectDir || "";
-  data.lastSessionId = sessionId;
-  writeSessions(sessionsFile, data);
-  return session;
+  return withFileLock(sessionsFile, () => {
+    const data = readSessions(sessionsFile);
+    const session = data.sessions[sessionId];
+    if (!session) return null;
+    session.projectDir = projectDir || "";
+    data.lastSessionId = sessionId;
+    writeSessionsUnlocked(sessionsFile, data);
+    return session;
+  });
 }
 
 function setSessionWorktree(sessionsFile, sessionId, worktree) {
-  const data = readSessions(sessionsFile);
-  const session = data.sessions[sessionId];
-  if (!session) return null;
-  session.worktree = worktree || null;
-  data.lastSessionId = sessionId;
-  writeSessions(sessionsFile, data);
-  return session;
+  return withFileLock(sessionsFile, () => {
+    const data = readSessions(sessionsFile);
+    const session = data.sessions[sessionId];
+    if (!session) return null;
+    session.worktree = worktree || null;
+    data.lastSessionId = sessionId;
+    writeSessionsUnlocked(sessionsFile, data);
+    return session;
+  });
 }
 
 function deleteSession(sessionsFile, sessionId) {
-  const data = readSessions(sessionsFile);
-  if (!data.sessions[sessionId]) return false;
-  delete data.sessions[sessionId];
-  if (data.lastSessionId === sessionId) {
-    const remaining = Object.keys(data.sessions);
-    data.lastSessionId = remaining.length > 0 ? remaining[remaining.length - 1] : null;
-  }
-  writeSessions(sessionsFile, data);
-  return true;
+  return withFileLock(sessionsFile, () => {
+    const data = readSessions(sessionsFile);
+    if (!data.sessions[sessionId]) return false;
+    delete data.sessions[sessionId];
+    if (data.lastSessionId === sessionId) {
+      const remaining = Object.keys(data.sessions);
+      data.lastSessionId = remaining.length > 0 ? remaining[remaining.length - 1] : null;
+    }
+    writeSessionsUnlocked(sessionsFile, data);
+    return true;
+  });
 }
 
 function appendToSession(sessionsFile, sessionId, message, options = {}) {
-  const allowCreate = options.allowCreate !== false;
-  const data = readSessions(sessionsFile);
-  let session = data.sessions[sessionId];
+  return withFileLock(sessionsFile, () => {
+    const allowCreate = options.allowCreate !== false;
+    const data = readSessions(sessionsFile);
+    let session = data.sessions[sessionId];
 
-  if (!session) {
-    if (!allowCreate) return null;
-    session = makeSession(sessionId);
-    data.sessions[sessionId] = session;
-  }
+    if (!session) {
+      if (!allowCreate) return null;
+      session = makeSession(sessionId);
+      data.sessions[sessionId] = session;
+    }
 
-  const msg = {
-    id: generateId(),
-    createdAt: new Date().toISOString(),
-    ...message,
-  };
-  session.messages.push(msg);
+    const msg = {
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+      ...message,
+    };
+    session.messages.push(msg);
 
-  if (!session.title && message.role === "user" && message.content) {
-    session.title = message.content.slice(0, 40).replace(/\n/g, " ");
-  }
+    if (!session.title && message.role === "user" && message.content) {
+      session.title = message.content.slice(0, 40).replace(/\n/g, " ");
+    }
 
-  data.lastSessionId = sessionId;
-  writeSessions(sessionsFile, data);
-  return session;
+    data.lastSessionId = sessionId;
+    writeSessionsUnlocked(sessionsFile, data);
+    return session;
+  });
 }
 
 module.exports = {

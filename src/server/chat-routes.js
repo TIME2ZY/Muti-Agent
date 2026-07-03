@@ -143,7 +143,8 @@ function createChatRoutes({
       }
     }
 
-    const runWorkspace = sessionWorktree || {
+    const activeWorktree = useWorktree ? sessionWorktree : null;
+    const runWorkspace = activeWorktree || {
       sessionId,
       baseDir: sessionProjectDir,
       worktreeDir: sessionProjectDir,
@@ -275,7 +276,7 @@ function createChatRoutes({
           CAT_CAFE_THREAD_ID: sessionId,
           CAT_CAFE_INVOCATION_ID: invocationId,
           CAT_CAFE_CALLBACK_TOKEN: callbackToken,
-          CAT_CAFE_WORKTREE: sessionWorktree ? "1" : "0",
+          CAT_CAFE_WORKTREE: activeWorktree ? "1" : "0",
           CAT_CAFE_BASE_DIR: runWorkspace.baseDir,
           CAT_CAFE_WORKTREE_DIR: runWorkspace.worktreeDir,
           CAT_CAFE_BRANCH: runWorkspace.branch || "",
