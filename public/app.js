@@ -93,6 +93,7 @@
     agentMention,
     agentMeta,
     agentRoleSummary,
+    agentColorIndex,
     roleDisplayName,
     roleBadgeLabel,
     fmtTime,
@@ -241,6 +242,7 @@
     writeClipboard,
     roleDisplayName,
     roleBadgeLabel,
+    agentColorIndex,
     attachRecallToggle: recallPanel.attachRecallToggle,
     fetchInvocationEvents: recallPanel.fetchInvocationEvents,
     onRuntimeStatusChange,
@@ -370,7 +372,9 @@
       btn.tabIndex = active ? 0 : -1;
     }
 
-    // Mobile: expand side panel for workspace/recall density.
+    // Mobile-only height boost for workspace/recall (CSS gated @media max-width 700px).
+    // Do not apply a desktop max-height via this class — that was a regression that
+    // capped workspace/recall to ~360px while the agents tab stayed full height.
     if (sidePanelEl) {
       sidePanelEl.classList.toggle("is-expanded", nextTab === "workspace" || nextTab === "recall");
     }
@@ -409,14 +413,22 @@
   }
 
   function renderSkillTags(active) {
+    if (!skillsBarEl) return;
     const set = new Set(active || []);
-    const tags = state.skillsMetadata.map((s) => {
+    const meta = Array.isArray(state.skillsMetadata) ? state.skillsMetadata : [];
+    if (meta.length === 0) {
+      skillsBarEl.hidden = true;
+      skillsBarEl.replaceChildren(skillsLabel);
+      return;
+    }
+    const tags = meta.map((s) => {
       const tag = document.createElement("span");
       tag.className = "skill-tag" + (set.has(s.name) ? "" : " inactive");
       tag.textContent = s.name;
       tag.title = s.description;
       return tag;
     });
+    skillsBarEl.hidden = false;
     skillsBarEl.replaceChildren(skillsLabel, ...tags);
   }
 
@@ -469,12 +481,24 @@
     agentMention,
     agentMeta,
     agentRoleSummary,
+    agentColorIndex,
     setDefaultAgent,
     insertAgentMention,
     promptEl,
   });
   renderAgentTabs = agentPanelView.renderAgentTabs;
   renderCurrentAgent = agentPanelView.renderCurrentAgent;
+
+  if (currentAgentEl) {
+    currentAgentEl.addEventListener("click", () => {
+      activateRightTab("agents").then(() => {
+        if (agentTabsEl) {
+          const selected = agentTabsEl.querySelector(".agent-tab.is-selected");
+          if (selected && typeof selected.focus === "function") selected.focus();
+        }
+      });
+    });
+  }
 
   async function loadAgents() {
     try {
@@ -574,6 +598,22 @@
   setRightPanelTab("agents");
   loadProjectDir();
   workspacePanel.renderWorkspacePanel();
+  renderSkillTags([]);
+
+  const emptyChipsEl = $("#empty-state-chips");
+  if (emptyChipsEl) {
+    emptyChipsEl.addEventListener("click", (e) => {
+      const chip = e.target && e.target.closest ? e.target.closest(".empty-chip") : null;
+      if (!chip || !promptEl) return;
+      const text = chip.getAttribute("data-prompt") || chip.textContent || "";
+      if (!text.trim()) return;
+      promptEl.value = text.trim();
+      promptEl.focus();
+      updateActiveSkills(promptEl.value);
+      const len = promptEl.value.length;
+      try { promptEl.setSelectionRange(len, len); } catch { /* ignore */ }
+    });
+  }
 
   apiFetch("/api/skills")
     .then(jsonOrThrow)

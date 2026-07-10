@@ -44,6 +44,26 @@
     return cls;
   }
 
+  /** Compact status badge: M / A / D / ? */
+  function fileStatusMark(status) {
+    const st = String(status || "").toLowerCase();
+    if (st === "modified" || st === "changed") return "M";
+    if (st === "untracked" || st === "added" || st === "new") return "A";
+    if (st === "deleted" || st === "removed") return "D";
+    if (st === "renamed") return "R";
+    if (!st) return "?";
+    return st.charAt(0).toUpperCase();
+  }
+
+  function fileStatusClass(status) {
+    const st = String(status || "").toLowerCase();
+    if (st === "untracked" || st === "added" || st === "new") return "status-untracked";
+    if (st === "deleted" || st === "removed") return "status-deleted";
+    if (st === "modified" || st === "changed") return "status-modified";
+    if (st === "renamed") return "status-renamed";
+    return st ? `status-${st}` : "status-unknown";
+  }
+
   function createWorkspacePanel(deps) {
     const {
       panelEl,
@@ -216,10 +236,13 @@
         const filePath = document.createElement("span");
         filePath.className = "workspace-file-path";
         filePath.textContent = path;
+        filePath.title = path;
 
         const fileStatus = document.createElement("span");
-        fileStatus.className = `workspace-file-status status-${file.status}`;
-        fileStatus.textContent = file.status;
+        fileStatus.className = `workspace-file-status ${fileStatusClass(file.status)}`;
+        fileStatus.textContent = fileStatusMark(file.status);
+        fileStatus.title = file.status || "unknown";
+        fileStatus.setAttribute("aria-label", file.status || "unknown");
 
         item.append(filePath, fileStatus);
         list.appendChild(item);
@@ -495,6 +518,8 @@
     emptyWorkspaceState,
     shouldRebuildFileList,
     filesSignature,
+    fileStatusMark,
+    fileStatusClass,
     DIFF_VIRTUAL_THRESHOLD,
     DIFF_COLLAPSE_THRESHOLD,
   };

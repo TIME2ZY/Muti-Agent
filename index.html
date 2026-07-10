@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="cat-cafe-ui-token" content="__CAT_CAFE_UI_TOKEN__">
   <title>多 Agent 协作台</title>
+  <link rel="icon" href="/public/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/public/styles.css">
   <!-- Prism.js (vendored for offline use) -->
   <link rel="stylesheet" href="/public/vendor/prism/prism-tomorrow.min.css">
@@ -42,44 +43,51 @@
     <main class="main">
       <div class="main-header">
         <div class="main-identity">
-          <span class="main-eyebrow">Workspace Console</span>
-          <div class="main-title-row">
-            <span class="main-title">多 Agent 协作台</span>
-            <span class="current-agent" id="current-agent" title="当前默认 Agent；右侧卡片点击切换，消息行首 @ 可单次覆盖">
-              当前 Agent：<strong id="current-agent-name">architect</strong>
-            </span>
-            <span class="main-status" id="status" style="display:none"></span>
-          </div>
+          <span class="main-title">多 Agent 协作台</span>
+          <button type="button" class="current-agent" id="current-agent"
+            title="当前默认 Agent；点击打开 Agents，消息行首 @ 可单次覆盖"
+            aria-label="当前默认 Agent">
+            <span class="current-agent-label">@</span><strong id="current-agent-name">architect</strong>
+          </button>
+          <span class="main-status" id="status" style="display:none"></span>
         </div>
 
         <div class="main-header-tools">
-          <span class="project-dir" id="project-dir" title="点击修改项目目录">
-            <span class="project-dir-icon" aria-hidden="true">
-              <svg class="icon-svg" width="14" height="14" viewBox="0 0 16 16" focusable="false">
-                <path fill="currentColor" d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3.2l1.2 1.5H13A1.5 1.5 0 0 1 14.5 5v7A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z"/>
-              </svg>
+          <div class="header-tool-group" aria-label="项目与工作区">
+            <span class="project-dir" id="project-dir" title="点击修改项目目录">
+              <span class="project-dir-icon" aria-hidden="true">
+                <svg class="icon-svg" width="14" height="14" viewBox="0 0 16 16" focusable="false">
+                  <path fill="currentColor" d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3.2l1.2 1.5H13A1.5 1.5 0 0 1 14.5 5v7A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z"/>
+                </svg>
+              </span>
+              <span class="project-dir-path" id="project-dir-path"></span>
+              <span class="project-dir-edit" aria-hidden="true">
+                <svg class="icon-svg" width="12" height="12" viewBox="0 0 16 16" focusable="false">
+                  <path fill="currentColor" d="M11.7 1.3a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4L6.4 12.6 3 13.5l.9-3.4z"/>
+                </svg>
+              </span>
             </span>
-            <span class="project-dir-path" id="project-dir-path"></span>
-            <span class="project-dir-edit" aria-hidden="true">
-              <svg class="icon-svg" width="12" height="12" viewBox="0 0 16 16" focusable="false">
-                <path fill="currentColor" d="M11.7 1.3a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4L6.4 12.6 3 13.5l.9-3.4z"/>
-              </svg>
-            </span>
-          </span>
-          <span class="worktree-status" id="worktree-status" title="当前对话的修改 worktree"></span>
-          <button class="theme-toggle" id="theme-toggle" type="button" aria-label="切换亮暗模式" title="切换亮暗模式">◐</button>
+            <span class="worktree-status" id="worktree-status" title="当前对话的修改 worktree"></span>
+          </div>
+          <button class="theme-toggle header-icon-btn" id="theme-toggle" type="button"
+            aria-label="切换主题" title="切换主题"></button>
         </div>
       </div>
 
-      <div class="skills-bar" id="skills-bar">
+      <div class="skills-bar" id="skills-bar" hidden>
         <span class="skills-bar-label">已激活能力</span>
       </div>
 
       <section class="messages" id="messages" aria-live="polite" aria-label="消息列表">
         <div class="empty-state" id="empty-state">
           <div class="empty-state-icon" aria-hidden="true">✦</div>
-          选择默认 Agent 后直接发送，或用 @ 单次指定模型
-          <small>Enter 发送 · Shift + Enter 换行 · 右侧卡片切换默认 Agent</small>
+          <p class="empty-state-title">选择默认 Agent 后直接发送，或用 @ 单次指定模型</p>
+          <p class="empty-state-hint">Enter 发送 · Shift + Enter 换行 · 右侧卡片切换默认 Agent</p>
+          <div class="empty-state-chips" id="empty-state-chips" role="group" aria-label="示例提示">
+            <button type="button" class="empty-chip" data-prompt="帮我梳理当前项目结构，并给出优先改进点。">梳理项目</button>
+            <button type="button" class="empty-chip" data-prompt="审查最近改动的 diff，指出风险与可改进处。">审查 diff</button>
+            <button type="button" class="empty-chip" data-prompt="把任务拆成可并行的子任务，并建议合适的 Agent 分工。">并行分工</button>
+          </div>
         </div>
         <div class="messages-spacer"></div>
       </section>
@@ -87,7 +95,7 @@
       <aside class="side-panel" id="side-panel" aria-label="右侧面板">
         <div class="panel-tabs" role="tablist" aria-label="右侧面板标签">
           <button id="panel-tab-agents" class="panel-tab is-active" type="button" role="tab"
-            aria-selected="true" aria-controls="agent-panel" tabindex="0">参与 Agent</button>
+            aria-selected="true" aria-controls="agent-panel" tabindex="0">Agents</button>
           <button id="panel-tab-workspace" class="panel-tab" type="button" role="tab"
             aria-selected="false" aria-controls="workspace-panel" tabindex="-1">工作区</button>
           <button id="panel-tab-recall" class="panel-tab" type="button" role="tab"
@@ -95,10 +103,7 @@
         </div>
 
         <section class="agent-panel" id="agent-panel" role="tabpanel" aria-labelledby="panel-tab-agents">
-          <div class="agent-panel-head">
-            <div class="agent-panel-title">参与 Agent</div>
-          </div>
-          <div class="agent-tabs" id="agent-tabs" aria-label="可用模型"></div>
+          <div class="agent-tabs" id="agent-tabs" aria-label="可用 Agents"></div>
         </section>
 
         <section class="workspace-panel" id="workspace-panel" role="tabpanel" aria-labelledby="panel-tab-workspace" hidden></section>
@@ -112,19 +117,21 @@
       </aside>
 
       <section class="composer">
-        <div class="composer-input">
-          <div class="mention-menu" id="mention-menu" role="listbox" aria-label="Agent 提及" hidden></div>
-          <textarea id="prompt" placeholder="直接输入消息，或用 @Agent 单次指定模型…" rows="2"
-            aria-autocomplete="list" aria-controls="mention-menu" aria-expanded="false"></textarea>
-        </div>
-        <div class="composer-actions">
-          <label class="worktree-mode" title="为本次对话创建或复用隔离 worktree">
-            <input id="use-worktree" type="checkbox">
-            <span>改代码</span>
-          </label>
-          <div class="composer-actions-right">
-            <button id="btn-clear" class="btn-cmd" type="button">清空</button>
-            <button id="btn-send" class="btn-cmd primary" type="button" aria-label="发送" aria-busy="false">发送</button>
+        <div class="composer-shell">
+          <div class="composer-input">
+            <div class="mention-menu" id="mention-menu" role="listbox" aria-label="Agent 提及" hidden></div>
+            <textarea id="prompt" placeholder="直接输入消息，或用 @Agent 单次指定模型…" rows="2"
+              aria-autocomplete="list" aria-controls="mention-menu" aria-expanded="false"></textarea>
+          </div>
+          <div class="composer-actions">
+            <label class="worktree-mode" title="为本次对话创建或复用隔离 worktree">
+              <input id="use-worktree" type="checkbox">
+              <span class="worktree-mode-chip">改代码</span>
+            </label>
+            <div class="composer-actions-right">
+              <button id="btn-clear" class="btn-cmd" type="button">清空</button>
+              <button id="btn-send" class="btn-cmd primary" type="button" aria-label="发送" aria-busy="false">发送</button>
+            </div>
           </div>
         </div>
       </section>

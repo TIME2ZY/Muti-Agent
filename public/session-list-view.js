@@ -31,6 +31,49 @@
     }
   }
 
+  const GROUP_ORDER = ["today", "yesterday", "earlier"];
+  const GROUP_LABEL = {
+    today: "今天",
+    yesterday: "昨天",
+    earlier: "更早",
+  };
+
+  function startOfLocalDay(ms) {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  }
+
+  function dayBucket(iso, nowMs) {
+    if (!iso) return "earlier";
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return "earlier";
+    const now = typeof nowMs === "number" ? nowMs : Date.now();
+    const today = startOfLocalDay(now);
+    const yesterday = today - 24 * 60 * 60 * 1000;
+    if (t >= today) return "today";
+    if (t >= yesterday) return "yesterday";
+    return "earlier";
+  }
+
+  /**
+   * Group sessions into today / yesterday / earlier while preserving
+   * relative order within each group (expects newest-first input).
+   */
+  function groupSessions(sessions, nowMs) {
+    const buckets = { today: [], yesterday: [], earlier: [] };
+    const list = Array.isArray(sessions) ? sessions : [];
+    for (const s of list) {
+      buckets[dayBucket(s && s.createdAt, nowMs)].push(s);
+    }
+    return GROUP_ORDER
+      .filter((key) => buckets[key].length > 0)
+      .map((key) => ({
+        key,
+        label: GROUP_LABEL[key],
+        items: buckets[key],
+      }));
+  }
+
   function createSessionListView(deps) {
     const {
       sessionListEl,
@@ -40,10 +83,68 @@
       onDelete,
       fmtTime,
       escHtml,
+      now,
     } = deps;
 
     /** @type {Map<string, HTMLElement>} */
     const itemById = new Map();
+    const nowOf = typeof now === "function" ? now : () => Date.now();
+
+    function buildItem(s, currentId) {
+      const runStatus = typeof getRuntimeStatus === "function" ? getRuntimeStatus(s.id) : "idle";
+      const statusText = runStatusLabel(runStatus);
+      const item = document.createElement("div");
+      item.dataset.sessionId = s.id;
+      item.className = "session-item"
+        + (s.id === currentId ? " active" : "")
+        + (runStatus === "running" ? " is-running" : "");
+
+      const dot = document.createElement("span");
+      applyDot(dot, runStatus);
+
+      const info = document.createElement("div");
+      info.className = "session-info";
+
+      const title = document.createElement("div");
+      title.className = "session-title";
+      title.textContent = s.title || "(空对话)";
+
+      const meta = document.createElement("div");
+      meta.className = "session-meta";
+      const time = typeof fmtTime === "function" ? fmtTime(s.createdAt) : "";
+      meta.append(`${s.messageCount || 0} 条 · ${time}`);
+      if (statusText) {
+        meta.append(" · ");
+        const statusEl = document.createElement("span");
+        statusEl.className = `session-run-status status-${runStatus}`;
+        statusEl.textContent = statusText;
+        meta.appendChild(statusEl);
+      }
+
+      info.append(title, meta);
+      item.append(dot, info);
+
+      item.addEventListener("click", (e) => {
+        if (e.target.closest(".btn-delete-session")) return;
+        if (typeof onSelect === "function") onSelect(s.id);
+      });
+
+      const del = document.createElement("button");
+      del.className = "btn-delete-session";
+      del.type = "button";
+      del.textContent = "×";
+      del.title = "删除对话";
+      del.setAttribute("aria-label", "删除对话");
+      del.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (typeof onDelete === "function") onDelete(s.id);
+      });
+      item.appendChild(del);
+
+      void escHtml;
+      itemById.set(s.id, item);
+      return item;
+    }
 
     function render(sessions) {
       if (!sessionListEl) return;
@@ -56,59 +157,21 @@
       }
 
       const currentId = typeof getCurrentSessionId === "function" ? getCurrentSessionId() : null;
-      sessionListEl.replaceChildren(...list.map((s) => {
-        const runStatus = typeof getRuntimeStatus === "function" ? getRuntimeStatus(s.id) : "idle";
-        const statusText = runStatusLabel(runStatus);
-        const item = document.createElement("div");
-        item.dataset.sessionId = s.id;
-        item.className = "session-item"
-          + (s.id === currentId ? " active" : "")
-          + (runStatus === "running" ? " is-running" : "");
+      const groups = groupSessions(list, nowOf());
+      const nodes = [];
 
-        const dot = document.createElement("span");
-        applyDot(dot, runStatus);
-
-        const info = document.createElement("div");
-        info.className = "session-info";
-
-        const title = document.createElement("div");
-        title.className = "session-title";
-        title.textContent = s.title || "(空对话)";
-
-        const meta = document.createElement("div");
-        meta.className = "session-meta";
-        const time = typeof fmtTime === "function" ? fmtTime(s.createdAt) : "";
-        meta.append(`${s.messageCount || 0} 条 · ${time}`);
-        if (statusText) {
-          meta.append(" · ");
-          const statusEl = document.createElement("span");
-          statusEl.className = `session-run-status status-${runStatus}`;
-          statusEl.textContent = statusText;
-          meta.appendChild(statusEl);
+      for (const group of groups) {
+        const heading = document.createElement("div");
+        heading.className = "session-group-label";
+        heading.textContent = group.label;
+        heading.setAttribute("role", "presentation");
+        nodes.push(heading);
+        for (const s of group.items) {
+          nodes.push(buildItem(s, currentId));
         }
+      }
 
-        info.append(title, meta);
-        item.append(dot, info);
-
-        item.addEventListener("click", (e) => {
-          if (e.target.closest(".btn-delete-session")) return;
-          if (typeof onSelect === "function") onSelect(s.id);
-        });
-
-        const del = document.createElement("button");
-        del.className = "btn-delete-session";
-        del.textContent = "×";
-        del.title = "删除对话";
-        del.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (typeof onDelete === "function") onDelete(s.id);
-        });
-        item.appendChild(del);
-
-        void escHtml;
-        itemById.set(s.id, item);
-        return item;
-      }));
+      sessionListEl.replaceChildren(...nodes);
     }
 
     /**
@@ -132,7 +195,6 @@
       const label = runStatusLabel(st);
       if (!label) {
         if (statusEl) statusEl.remove();
-        // Clean trailing " · " text node if present after removal is hard; full re-render preferred.
         return;
       }
       if (!statusEl) {
@@ -147,7 +209,13 @@
     return { render, updateStatus, runStatusLabel };
   }
 
-  const api = { createSessionListView, runStatusLabel };
+  const api = {
+    createSessionListView,
+    runStatusLabel,
+    dayBucket,
+    groupSessions,
+    GROUP_LABEL,
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   globalScope.SessionListView = api;
 })(typeof window !== "undefined" ? window : globalThis);

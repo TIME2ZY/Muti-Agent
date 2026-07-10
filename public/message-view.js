@@ -19,6 +19,7 @@
       getClipboard,
       roleDisplayName,
       roleBadgeLabel,
+      agentColorIndex,
       attachRecallToggle,
       fetchInvocationEvents,
       onRuntimeStatusChange,
@@ -109,6 +110,10 @@
 
       const wrapper = document.createElement("article");
       wrapper.className = ["message", role, variant].filter(Boolean).join(" ");
+      if (role === "assistant" && agent && typeof agentColorIndex === "function") {
+        wrapper.dataset.agentColor = String(agentColorIndex(agent));
+        wrapper.dataset.agentId = String(agent);
+      }
 
       const meta = document.createElement("div");
       meta.className = "msg-meta";
@@ -120,6 +125,12 @@
       metaRole.className = "msg-role-label";
       metaRole.textContent = roleBadgeLabel(role);
       meta.appendChild(metaRole);
+      if (role === "assistant" && agent) {
+        const metaAgent = document.createElement("span");
+        metaAgent.className = "msg-agent-id";
+        metaAgent.textContent = agent;
+        meta.appendChild(metaAgent);
+      }
 
       const badge = document.createElement("span");
       badge.className = "msg-badge";
