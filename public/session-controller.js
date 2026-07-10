@@ -98,23 +98,21 @@
 
       const rt = store() ? store().get(id) : null;
       if (rt && rt.status === "running" && typeof remountLiveMessages === "function") {
-        // Rebuild live bubbles for an in-flight background stream.
-        // Detached placeholders are upgraded by remount helpers / later events.
+        // Rebuild live bubbles for an in-flight background stream only.
+        // Completed turns rely on hydrateProcessTrace() from transcript so we
+        // do not duplicate history assistant bubbles.
         for (const [agent, item] of rt.liveMessages) {
           if (item && item.detached) {
             rt.liveMessages.delete(agent);
           }
         }
-        // Re-create live UI from accumulated text when we only had placeholders.
         for (const [agent, item] of [...rt.liveMessages.entries()]) {
           if (item && item.wrapper) continue;
-          // Drop empty placeholders; showThinking will recreate if events continue.
           if (!item || !item.rawText) {
             rt.liveMessages.delete(agent);
             continue;
           }
         }
-        // Create visible live nodes for any remaining text buffers without wrappers.
         for (const [agent, item] of [...rt.liveMessages.entries()]) {
           if (item && !item.wrapper && item.rawText) {
             const rebuilt = createMessage({ role: "assistant", agent, content: "" });
