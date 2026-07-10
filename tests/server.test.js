@@ -12,6 +12,16 @@ const callbacks = require("../src/agents/callbacks");
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
 
+/** Resolve @import-based public/styles.css aggregator for contract tests. */
+function readFrontendCss() {
+  const root = path.join(__dirname, "../public");
+  const main = fs.readFileSync(path.join(root, "styles.css"), "utf8");
+  if (!main.includes("@import")) return main;
+  return main.replace(/@import url\("\.\/styles\/([^"]+)"\);/g, (_, name) =>
+    fs.readFileSync(path.join(root, "styles", name), "utf8")
+  );
+}
+
 function fetch(input, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("X-Cat-Cafe-UI-Token", TEST_UI_TOKEN);
@@ -2200,6 +2210,15 @@ test("frontend exposes agent and workspace panel tabs", () => {
   assert.match(html, /src="\/public\/recall-api\.js"/);
   assert.match(html, /src="\/public\/chat-client\.js"/);
   assert.match(html, /src="\/public\/workspace-diff\.js"/);
+  assert.match(html, /src="\/public\/display-helpers\.js"/);
+  assert.match(html, /src="\/public\/theme\.js"/);
+  assert.match(html, /src="\/public\/mention-composer\.js"/);
+  assert.match(html, /src="\/public\/session-list-view\.js"/);
+  assert.match(html, /src="\/public\/workspace-panel\.js"/);
+  assert.match(html, /src="\/public\/recall-panel\.js"/);
+  assert.match(html, /src="\/public\/message-view\.js"/);
+  assert.match(html, /src="\/public\/project-header\.js"/);
+  assert.match(html, /src="\/public\/agent-panel-view\.js"/);
 });
 
 test("frontend keeps session-level recall entry only inside the right-side tabs", () => {
@@ -2247,38 +2266,45 @@ test("frontend app.js guards active skills rendering with latest-only requests",
 });
 
 test("frontend app.js defines unified display helpers for user and agent identities", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /function roleDisplayName\(role, agentId\)/);
-  assert.match(js, /return role === "user" \? "用户" : agentLabel\(agentId\);/);
-  assert.match(js, /function roleBadgeLabel\(role\)/);
-  assert.match(js, /metaLabel\.textContent = roleDisplayName\(role, agent\)/);
-  assert.match(js, /metaRole\.textContent = roleBadgeLabel\(role\)/);
+  const helpers = fs.readFileSync(path.join(__dirname, "../public", "display-helpers.js"), "utf8");
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(helpers, /function roleDisplayName\(role, agentId/);
+  assert.match(helpers, /return role === "user" \? "用户" : agentLabelFromList\(agents, agentId\)/);
+  assert.match(helpers, /function roleBadgeLabel\(role\)/);
+  assert.match(messageView, /metaLabel\.textContent = roleDisplayName\(role, agent\)/);
+  assert.match(messageView, /metaRole\.textContent = roleBadgeLabel\(role\)/);
+  assert.match(appJs, /createDisplayHelpers/);
 });
 
 test("frontend app.js defines invocation-level live run state and renderer hooks", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.match(js, /rt\.liveRuns\.set\(invocationId/);
   assert.match(js, /function applyAgentEvent\(event,\s*sessionId\)/);
   assert.match(js, /function ensureLiveRun\(event,\s*sessionId\)/);
   assert.match(js, /progressItems/);
   assert.match(js, /fileChanges/);
-  assert.match(js, /createRuntimeStore\(\)/);
+  assert.match(appJs, /createRuntimeStore\(\)/);
+  assert.match(appJs, /createMessageView/);
   assert.match(html, /src="\/public\/session-runtime\.js"/);
 });
 
 test("frontend app.js loads workspace status and diff for the workspace tab", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /rightPanelTab:\s*"agents"/);
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
+  assert.match(appJs, /rightPanelTab:\s*"agents"/);
+  assert.match(appJs, /createWorkspacePanel/);
+  assert.match(appJs, /window\.WorktreeApi\.createWorktreeApi/);
   assert.match(js, /async function loadWorkspaceState\(\)/);
-  assert.match(js, /window\.WorktreeApi\.createWorktreeApi/);
   assert.match(js, /worktreeApi\.readStatus\(state\.currentSessionId,\s*\{\s*allowMissing:\s*true\s*\}\)/);
   assert.match(js, /worktreeApi\.readDiff\(state\.currentSessionId,\s*\{\s*allowMissing:\s*true\s*\}\)/);
   assert.match(js, /function renderWorkspacePanel\(\)/);
 });
 
 test("frontend app.js handles missing worktree and discard actions", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
   assert.match(js, /当前会话尚未创建 worktree/);
   assert.match(js, /当前无改动/);
   assert.match(js, /async function discardWorkspace\(\)/);
@@ -2286,7 +2312,7 @@ test("frontend app.js handles missing worktree and discard actions", () => {
 });
 
 test("frontend app.js renders workspace file selection and diff output", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
   assert.match(js, /function renderWorkspaceFileList\(\)/);
   assert.match(js, /function renderWorkspaceDiff\(\)/);
   assert.match(js, /workspace\.selectedPath = path/);
@@ -2295,34 +2321,36 @@ test("frontend app.js renders workspace file selection and diff output", () => {
 });
 
 test("frontend treats sealed SSE event as an expected terminal state", () => {
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
   assert.match(chatJs, /case "sealed":/);
   assert.match(chatJs, /context overflow/);
-  assert.match(appJs, /rt\.doneReceived = true/);
-  assert.match(appJs, /function finishStream\(statusText,\s*sessionId\)/);
+  assert.match(messageView, /rt\.doneReceived = true/);
+  assert.match(messageView, /function finishStream\(statusText,\s*sessionId\)/);
 });
 
 test("frontend keeps per-session runtime status and does not abort on switch", () => {
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const sessionList = fs.readFileSync(path.join(__dirname, "../public", "session-list-view.js"), "utf8");
   const controllerJs = fs.readFileSync(path.join(__dirname, "../public", "session-controller.js"), "utf8");
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(controllerJs, /Do not abort the previous session's background run/);
   assert.doesNotMatch(controllerJs, /if \(state\.controller\) \{\s*state\.controller\.abort\(\)/);
-  assert.match(appJs, /function remountLiveMessages\(sessionId\)/);
-  assert.match(appJs, /session-run-status/);
+  assert.match(messageView, /function remountLiveMessages\(sessionId\)/);
+  assert.match(sessionList, /session-run-status/);
   assert.match(css, /\.session-run-status\.status-running/);
 });
 
 test("frontend agent cards set the default agent and support shift-click mention insert", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const agentPanel = fs.readFileSync(path.join(__dirname, "../public", "agent-panel-view.js"), "utf8");
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.match(js, /function setDefaultAgent/);
   assert.match(js, /function resolvePromptAgent/);
   assert.match(js, /agentRouting\.resolvePromptAgent/);
-  assert.match(js, /e\.shiftKey/);
   assert.match(js, /function insertAgentMention/);
-  assert.match(js, /item\.className = "agent-tab" \+ \(isSelected \? " is-selected" : ""\)/);
+  assert.match(agentPanel, /e\.shiftKey/);
+  assert.match(agentPanel, /item\.className = "agent-tab" \+ \(isSelected \? " is-selected" : ""\)/);
   assert.match(html, /id="current-agent"/);
   assert.match(html, /src="\/public\/agent-routing\.js"/);
 });
@@ -2331,17 +2359,51 @@ test("frontend keeps right-side agent and workspace surfaces in a shared tab sys
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   assert.match(js, /panelTabAgentsEl\.addEventListener\("click"/);
   assert.match(js, /panelTabWorkspaceEl\.addEventListener\("click"/);
-  assert.match(js, /state\.rightPanelTab = "workspace"/);
-  assert.match(js, /loadWorkspaceState\(\)/);
+  assert.match(js, /function setRightPanelTab\(nextTab\)/);
+  assert.match(js, /activateRightTab\("workspace"\)|loadWorkspaceState\(\)/);
+});
+
+test("frontend workspace panel supports selection-only file list updates", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
+  assert.match(js, /function shouldRebuildFileList/);
+  assert.match(js, /function updateFileList/);
+  assert.match(js, /function updateDiff/);
+  assert.match(js, /DIFF_VIRTUAL_THRESHOLD/);
+});
+
+test("frontend virtual-list is loaded for large workspace diffs", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "virtual-list.js"), "utf8");
+  assert.match(html, /src="\/public\/virtual-list\.js"/);
+  assert.match(js, /function visibleRange/);
+  assert.match(js, /function createVirtualList/);
+});
+
+test("frontend session list exposes runtime status dots and updateStatus", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "session-list-view.js"), "utf8");
+  const css = readFrontendCss();
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /session-run-dot/);
+  assert.match(js, /function updateStatus/);
+  assert.match(js, /is-running/);
+  assert.match(css, /\.session-run-dot\.is-running/);
+  assert.match(appJs, /sessionListView\.updateStatus/);
+});
+
+test("frontend chunks process-trace hydrate for long histories", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  assert.match(js, /MESSAGE_VIRTUAL_THRESHOLD/);
+  assert.match(js, /scheduleHydrateProcessTrace/);
+  assert.match(js, /_hydrateQueue/);
 });
 
 test("frontend exposes delete session button on keyboard focus", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.btn-delete-session:focus-visible/);
 });
 
 test("frontend app.js uses plain-text live streaming instead of segmented markdown streaming", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   assert.match(js, /liveText\.className = "stream-live-text"/);
   assert.match(js, /item\._liveTextEl\.textContent = raw/);
   assert.doesNotMatch(js, /function splitIntoSegments/);
@@ -2349,24 +2411,30 @@ test("frontend app.js uses plain-text live streaming instead of segmented markdo
 });
 
 test("frontend styles.css defines plain-text live streaming style", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.stream-live-text\s*\{/);
   assert.doesNotMatch(css, /\.stream-suffix\s*\{/);
 });
 
-test("frontend keeps thinking and writing as badge-only live states", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+test("frontend surfaces thinking in a collapsed details block and keeps writing badges", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const css = readFrontendCss();
   assert.match(js, /function showThinking\(agent,\s*sessionId\)/);
   assert.match(js, /item\.setBadge\("thinking"\)/);
   assert.match(js, /bubble\.classList\.add\("msg-bubble-live-pending"\)/);
   assert.match(js, /function appendLive\(agent, text,\s*sessionId\)/);
   assert.match(js, /item\.bubble\.classList\.remove\("msg-bubble-live-pending"\)/);
   assert.match(js, /item\.setBadge\("writing"\)/);
-  assert.doesNotMatch(js, /thinking-text/);
+  assert.match(js, /msg-thinking/);
+  assert.match(js, /thinking\.delta/);
+  assert.match(js, /msg-progress/);
+  assert.match(js, /progress\.update/);
+  assert.match(css, /\.msg-thinking/);
+  assert.match(css, /\.msg-progress/);
 });
 
 test("frontend app.js surfaces Codex progress before first text delta", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   assert.match(js, /function setLivePending\(agent,\s*text,\s*sessionId\)/);
   assert.match(js, /function pendingTextForEvent\(event\)/);
   assert.match(js, /event\.type === "command\.started"/);
@@ -2375,21 +2443,27 @@ test("frontend app.js surfaces Codex progress before first text delta", () => {
   assert.match(js, /event\.type === "tool\.started"/);
   assert.match(js, /event\.type === "subagent\.started"/);
   assert.match(js, /function upsertLiveSubagent/);
+  assert.match(js, /live-process-status/);
+  assert.match(js, /function buildProcessTraceFromRun/);
+  assert.match(js, /function buildProcessPanelFromTranscriptEvents/);
+  assert.match(js, /function hydrateProcessTrace/);
+  assert.match(js, /function upsertLiveTool/);
+  assert.match(js, /preservedSubagents/);
   assert.match(js, /setLivePending\(event\.agent,\s*pendingTextForEvent\(event\),\s*sid\)/);
 });
 
 test("frontend routes stderr SSE into a separate system stderr message", () => {
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
   assert.match(chatJs, /case "stderr":/);
-  assert.match(appJs, /function addDebug\(agent, text\)/);
-  assert.match(appJs, /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/);
+  assert.match(messageView, /function addDebug\(agent, text\)/);
+  assert.match(messageView, /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/);
   assert.match(chatJs, /addDebug\(data\.agent, data\.text\)/);
-  assert.doesNotMatch(appJs, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
+  assert.doesNotMatch(messageView, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
 });
 
 test("frontend app.js renders semantic recall event bodies for structured events", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
   assert.match(js, /evt\.kind === "thinking\.delta"/);
   assert.match(js, /evt\.kind === "tool\.started"/);
   assert.match(js, /evt\.kind === "tool\.finished"/);
@@ -2403,26 +2477,93 @@ test("frontend app.js renders semantic recall event bodies for structured events
 });
 
 test("frontend styles define live subagent cards", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.live-subagents/);
   assert.match(css, /\.live-subagent-status\.status-running/);
   assert.match(css, /\.live-subagent\.status-error/);
 });
 
 test("frontend caps recall page size and surfaces truncation state", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
   assert.match(js, /readInvocation\(sid,\s*invocationId,\s*\{\s*from:\s*0,\s*limit:\s*200\s*\}\)/);
   assert.match(js, /仅显示前/);
 });
 
+test("app.js stays an orchestrator under line budget after P0 split", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const lines = js.split(/\r?\n/).length;
+  assert.ok(lines <= 650, `app.js has ${lines} lines; expected <= 650 after P0/P2 wiring`);
+  assert.match(js, /createMessageView/);
+  assert.match(js, /createWorkspacePanel/);
+  assert.match(js, /createRecallPanel/);
+  assert.match(js, /createMentionComposer/);
+  assert.match(js, /createSessionListView/);
+  assert.match(js, /createThemeController/);
+  assert.match(js, /UiConfirm\.createConfirm|createConfirm\(/);
+});
+
+test("frontend styles are split into domain sheets via @import aggregator", () => {
+  const main = fs.readFileSync(path.join(__dirname, "../public/styles.css"), "utf8");
+  assert.match(main, /@import url\("\.\/styles\/tokens\.css"\)/);
+  assert.match(main, /@import url\("\.\/styles\/messages\.css"\)/);
+  assert.match(main, /@import url\("\.\/styles\/workspace\.css"\)/);
+  assert.match(main, /@import url\("\.\/styles\/a11y\.css"\)/);
+  const css = readFrontendCss();
+  assert.match(css, /--density/);
+  assert.match(css, /\.ui-confirm-dialog/);
+  assert.match(css, /\.side-panel\.is-expanded/);
+});
+
+test("frontend vendors Prism offline and drops jsDelivr CDN", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  assert.doesNotMatch(html, /cdn\.jsdelivr\.net\/npm\/prismjs/);
+  assert.match(html, /\/public\/vendor\/prism\//);
+  assert.ok(fs.existsSync(path.join(__dirname, "../public/vendor/prism/prism.min.js")));
+  assert.ok(fs.existsSync(path.join(__dirname, "../public/vendor/prism/prism-tomorrow.min.css")));
+});
+
+test("frontend a11y: tab controls, mention listbox, send busy wiring", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const mentionJs = fs.readFileSync(path.join(__dirname, "../public", "mention-composer.js"), "utf8");
+  assert.match(html, /aria-controls="agent-panel"/);
+  assert.match(html, /role="listbox"/);
+  assert.match(html, /aria-busy="false"/);
+  assert.match(appJs, /aria-busy/);
+  assert.match(appJs, /aria-label.*停止生成|停止生成/);
+  assert.match(appJs, /ArrowLeft|ArrowRight/);
+  assert.match(mentionJs, /role", "option"|role='option'|setAttribute\("role", "option"\)/);
+  assert.match(mentionJs, /aria-activedescendant/);
+  assert.match(mentionJs, /is-active/);
+});
+
+test("frontend uses ui-confirm for destructive actions", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const workspaceJs = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
+  assert.match(html, /src="\/public\/ui-confirm\.js"/);
+  assert.match(appJs, /confirmImpl/);
+  assert.match(appJs, /删除对话|确认删除/);
+  assert.match(workspaceJs, /confirmFn|confirmImpl/);
+  assert.match(workspaceJs, /await Promise\.resolve\(confirmFn/);
+});
+
+test("frontend distinguishes copy message vs copy code labels", () => {
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const md = fs.readFileSync(path.join(__dirname, "../public", "markdown-lite.js"), "utf8");
+  assert.match(messageView, /复制消息/);
+  assert.match(messageView, /复制代码|code\.textContent/);
+  assert.match(md, /复制代码/);
+});
+
 test("frontend styles.css gives stderr messages a separate debug appearance", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.system\.stderr \.msg-bubble/);
   assert.match(css, /\.system\.stderr \.msg-meta/);
 });
 
 test("frontend styles define a shared card system for messages and agent roles", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.msg-card/);
   assert.match(css, /\.message\.user \.msg-card/);
   assert.match(css, /\.message\.assistant \.msg-card/);
@@ -2430,7 +2571,7 @@ test("frontend styles define a shared card system for messages and agent roles",
 });
 
 test("frontend styles.css defines workspace panel layout and diff colors", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.panel-tabs/);
   assert.match(css, /\.workspace-panel/);
   assert.match(css, /\.workspace-file-list/);
@@ -2440,9 +2581,13 @@ test("frontend styles.css defines workspace panel layout and diff colors", () =>
 });
 
 test("frontend styles.css gives the recall panel a full-height scroll layout", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.agent-panel,\s*\.workspace-panel,\s*\.recall-panel-inline\s*\{[\s\S]*flex:\s*1 1 auto;/);
   assert.match(css, /\.recall-body\s*\{[\s\S]*flex:\s*1;[\s\S]*overflow-y:\s*auto;/);
+  assert.match(css, /\.recall-panel-inline\s*\{[\s\S]*overflow:\s*hidden;/);
+  assert.match(css, /\.recall-item-body\s*\{[\s\S]*overflow-y:\s*auto;/);
+  assert.match(css, /\.recall-event-body\s*\{[\s\S]*overflow-y:\s*auto;/);
+  assert.doesNotMatch(css, /\.recall-event-body\s*\{[^}]*overflow:\s*hidden;/);
 });
 
 // ── Phase 4: Session Bootstrap ──────────────────────────────────
