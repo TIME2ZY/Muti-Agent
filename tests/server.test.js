@@ -2430,8 +2430,12 @@ test("frontend surfaces thinking in a collapsed details block and keeps writing 
   assert.match(js, /thinking\.delta/);
   assert.match(js, /msg-progress/);
   assert.match(js, /progress\.update/);
+  assert.match(js, /msg-process/);
+  assert.match(js, /wrapProcessDetails/);
+  assert.match(js, /thinkingEl\.open = false/);
   assert.match(css, /\.msg-thinking/);
   assert.match(css, /\.msg-progress/);
+  assert.match(css, /\.msg-process/);
 });
 
 test("frontend app.js surfaces Codex progress before first text delta", () => {

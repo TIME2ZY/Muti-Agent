@@ -362,16 +362,80 @@
       return "";
     }
 
+    function countProcessSteps(panel) {
+      if (!panel || !panel.children) return 0;
+      return panel.querySelectorAll
+        ? panel.querySelectorAll(".live-tool-row, .live-subagent").length
+        : panel.children.length;
+    }
+
+    function updateProcessDetailsLabel(details) {
+      if (!details) return;
+      const summary = details.querySelector(":scope > .msg-process-summary")
+        || details.querySelector(".msg-process-summary");
+      if (!summary) return;
+      const panel = details.querySelector(".live-subagents");
+      const n = countProcessSteps(panel);
+      summary.textContent = n > 0 ? `执行过程 · ${n} 步` : "执行过程";
+    }
+
+    /**
+     * Wrap a process-trace panel in <details>. Default collapsed when final;
+     * open while live so the user can watch steps without losing the answer below.
+     */
+    function wrapProcessDetails(panel, { open = false, live = false } = {}) {
+      if (!panel) return null;
+      if (panel.classList && panel.classList.contains("msg-process")) {
+        panel.open = open;
+        if (!live) panel.removeAttribute("data-live");
+        else panel.dataset.live = "true";
+        updateProcessDetailsLabel(panel);
+        return panel;
+      }
+      const details = document.createElement("details");
+      details.className = "msg-process";
+      details.open = open;
+      if (live) details.dataset.live = "true";
+      const summary = document.createElement("summary");
+      summary.className = "msg-process-summary";
+      summary.textContent = "执行过程";
+      // Move existing panel inside details.
+      if (panel.parentNode) panel.parentNode.insertBefore(details, panel);
+      details.append(summary, panel);
+      updateProcessDetailsLabel(details);
+      return details;
+    }
+
     function ensureSubagentPanel(liveItem) {
       if (!liveItem || !liveItem.bubble) return null;
-      let panel = liveItem.bubble.querySelector(".live-subagents");
-      if (panel) return panel;
+      let details = liveItem.bubble.querySelector(".msg-process");
+      let panel = details
+        ? details.querySelector(".live-subagents")
+        : liveItem.bubble.querySelector(".live-subagents");
+      if (panel) {
+        if (!details) {
+          wrapProcessDetails(panel, { open: true, live: true });
+        }
+        return panel;
+      }
+
       panel = document.createElement("div");
       panel.className = "live-subagents";
+      details = document.createElement("details");
+      details.className = "msg-process";
+      details.open = true;
+      details.dataset.live = "true";
+      const summary = document.createElement("summary");
+      summary.className = "msg-process-summary";
+      summary.textContent = "执行过程";
+      details.append(summary, panel);
+
       if (liveItem._liveTextEl && liveItem._liveTextEl.parentNode === liveItem.bubble) {
-        liveItem.bubble.insertBefore(panel, liveItem._liveTextEl);
+        liveItem.bubble.insertBefore(details, liveItem._liveTextEl);
       } else {
-        liveItem.bubble.appendChild(panel);
+        const content = liveItem.bubble.querySelector(".msg-final-content");
+        if (content) liveItem.bubble.insertBefore(details, content);
+        else liveItem.bubble.appendChild(details);
       }
       return panel;
     }
@@ -412,23 +476,57 @@
       return truncateDisplay(preferred, 140);
     }
 
+    function isContentDumpTool(event) {
+      const name = String((event && event.toolName) || "").toLowerCase();
+      // These tools often return full file/dir bodies — never dump into the card.
+      return /^(read|glob|grep|list|search|find|cat|ls|dir|view|get)\b/.test(name)
+        || name.includes("read")
+        || name.includes("glob")
+        || name.includes("grep")
+        || name.includes("list_dir")
+        || name.includes("list-dir");
+    }
+
     function processSummaryFromEvent(event) {
       if (!event) return "";
-      if (typeof event.summary === "string" && event.summary.trim()) {
-        return truncateDisplay(cleanProcessOutput(event.summary), 180);
-      }
       if (typeof event.error === "string" && event.error.trim()) {
-        return truncateDisplay(cleanProcessOutput(event.error), 180);
+        return truncateDisplay(cleanProcessOutput(event.error), 120);
+      }
+      if (event.status === "error") {
+        if (typeof event.output === "string" && event.output.trim()) {
+          return truncateDisplay(cleanProcessOutput(event.output), 120);
+        }
+        if (event.result != null) {
+          const raw = typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+          return truncateDisplay(cleanProcessOutput(raw), 120);
+        }
+      }
+      // Explicit short summary from provider is ok when tiny.
+      if (typeof event.summary === "string" && event.summary.trim()) {
+        const cleaned = cleanProcessOutput(event.summary);
+        if (cleaned.length <= 80) return cleaned;
+        return truncateDisplay(cleaned, 80);
+      }
+      // Successful tool/command results: keep the card compact.
+      // Path/command already lives in the task line — do not paste bodies.
+      if (
+        event.type === "tool.finished"
+        || event.type === "command.finished"
+        || event.type === "tool.started"
+        || event.type === "command.started"
+        || isContentDumpTool(event)
+      ) {
+        return "";
       }
       if (typeof event.output === "string" && event.output.trim()) {
-        return truncateDisplay(cleanProcessOutput(event.output), 180);
+        return truncateDisplay(cleanProcessOutput(event.output), 80);
       }
       if (event.result != null) {
         const raw = typeof event.result === "string" ? event.result : JSON.stringify(event.result);
-        return truncateDisplay(cleanProcessOutput(raw), 180);
+        return truncateDisplay(cleanProcessOutput(raw), 80);
       }
       if (typeof event.text === "string" && event.text.trim()) {
-        return truncateDisplay(cleanProcessOutput(event.text), 180);
+        return truncateDisplay(cleanProcessOutput(event.text), 80);
       }
       return "";
     }
@@ -489,6 +587,8 @@
       row.className = `live-subagent live-tool-row status-${status}`;
       taskEl.textContent = fields.task || "";
       summaryEl.textContent = fields.summary || "";
+      const details = panel.closest && panel.closest(".msg-process");
+      if (details) updateProcessDetailsLabel(details);
       scrollDown();
     }
 
@@ -776,7 +876,7 @@
       panel.appendChild(row);
     }
 
-    function renderProcessPanel(subById, toolById, commandByKey) {
+    function renderProcessPanel(subById, toolById, commandByKey, options = {}) {
       if (subById.size === 0 && toolById.size === 0 && commandByKey.size === 0) return null;
 
       const panel = document.createElement("div");
@@ -792,7 +892,7 @@
           name: evt.name || evt.toolName || "subagent",
           status: failed ? "error" : (done ? "done" : "running"),
           statusText: failed ? "失败" : (done ? "成功" : "运行中"),
-          task: truncateDisplay(evt.task || "", 120),
+          task: truncateDisplay(evt.task || "", 100),
           summary: processSummaryFromEvent(evt),
         });
       }
@@ -808,7 +908,8 @@
           status: failed ? "error" : (done ? "done" : "running"),
           statusText: failed ? "失败" : (done ? "完成" : "运行中"),
           task: detail,
-          summary: processSummaryFromEvent(evt),
+          // Final cards stay compact: only errors get a summary line.
+          summary: failed ? processSummaryFromEvent(evt) : "",
         });
       }
 
@@ -820,12 +921,15 @@
           name: "command",
           status: failed ? "error" : "done",
           statusText: failed ? "失败" : "完成",
-          task: truncateDisplay(evt.command, 140),
-          summary: processSummaryFromEvent(evt),
+          task: truncateDisplay(evt.command, 120),
+          summary: failed ? processSummaryFromEvent(evt) : "",
         });
       }
 
-      return panel.childNodes.length ? panel : null;
+      if (!panel.childNodes.length) return null;
+      const open = options.open === true;
+      const live = options.live === true;
+      return wrapProcessDetails(panel, { open, live });
     }
 
     function buildProcessTraceFromRun(agent, sid) {
@@ -906,14 +1010,15 @@
 
     async function hydrateProcessTrace(bubble, invocationId) {
       if (!bubble || !invocationId) return;
-      if (bubble.querySelector(".live-subagents")) return;
+      if (bubble.querySelector(".msg-process, .live-subagents")) return;
       if (typeof fetchInvocationEvents !== "function") return;
       try {
         const page = await fetchInvocationEvents(invocationId);
         if (!page.events || page.events.length === 0) return;
+        // History hydrate: always collapsed so the answer is primary.
         const panel = buildProcessPanelFromTranscriptEvents(page.events);
         if (!panel) return;
-        if (bubble.querySelector(".live-subagents")) return;
+        if (bubble.querySelector(".msg-process, .live-subagents")) return;
         const content = bubble.querySelector(".msg-final-content");
         if (content) bubble.insertBefore(panel, content);
         else bubble.insertBefore(panel, bubble.firstChild);
@@ -966,6 +1071,28 @@
       drainHydrateQueue();
     }
 
+    function collapseProgressIntoDetails(progressEl) {
+      if (!progressEl) return null;
+      if (progressEl.classList && progressEl.classList.contains("msg-progress-wrap")) {
+        progressEl.open = false;
+        return progressEl;
+      }
+      const items = progressEl.querySelectorAll ? progressEl.querySelectorAll("li") : [];
+      const n = items.length;
+      if (n === 0) return null;
+      const details = document.createElement("details");
+      details.className = "msg-progress-wrap";
+      details.open = false;
+      const summary = document.createElement("summary");
+      summary.className = "msg-progress-summary";
+      const done = progressEl.querySelectorAll
+        ? progressEl.querySelectorAll("li.is-done").length
+        : 0;
+      summary.textContent = done === n ? `进度 · ${n} 步已完成` : `进度 · ${done}/${n}`;
+      details.append(summary, progressEl);
+      return details;
+    }
+
     function finalizeLiveMessages(sessionId) {
       const sid = sessionId || state.currentSessionId || "_pending";
       flushPendingLiveRender(sid);
@@ -973,8 +1100,14 @@
       for (const [agent, item] of rt.liveMessages) {
         if (!item || item.detached || !item.bubble || !item.wrapper) continue;
 
+        // Drop ephemeral live status chips — they don't belong on the final card.
+        item.bubble.querySelectorAll(".live-process-status, .live-process-chips").forEach((el) => el.remove());
+
+        const preservedProcess = item.bubble.querySelector(".msg-process");
         const preservedSubagents = item.bubble.querySelector(".live-subagents");
-        if (preservedSubagents) preservedSubagents.remove();
+        if (preservedProcess) preservedProcess.remove();
+        else if (preservedSubagents) preservedSubagents.remove();
+
         const preservedThinking = item.bubble.querySelector(".msg-thinking");
         if (preservedThinking) {
           preservedThinking.remove();
@@ -989,29 +1122,51 @@
           updateThinkingPanel(item, item.thinkingText);
         }
         const thinkingEl = preservedThinking || item.bubble.querySelector(".msg-thinking");
-        if (thinkingEl) thinkingEl.removeAttribute("data-live");
+        if (thinkingEl) {
+          thinkingEl.removeAttribute("data-live");
+          thinkingEl.open = false;
+        }
 
         if (!preservedProgress && item.progressItems && item.progressItems.length) {
           updateProgressList(item, item.progressItems);
         }
-        const progressEl = preservedProgress || item.bubble.querySelector(".msg-progress");
+        let progressEl = preservedProgress || item.bubble.querySelector(".msg-progress");
+        if (progressEl) progressEl = collapseProgressIntoDetails(progressEl);
 
         const rendered = renderMd(item.rawText || "");
         const content = document.createElement("div");
         content.className = "msg-final-content";
         content.innerHTML = rendered;
 
+        // Prefer a compact rebuilt process panel (collapsed) over the live expanded dump.
+        let processEl = buildProcessTraceFromRun(agent, sid);
+        if (!processEl && preservedProcess) {
+          processEl = wrapProcessDetails(
+            preservedProcess.classList.contains("msg-process")
+              ? (preservedProcess.querySelector(".live-subagents") || preservedProcess)
+              : preservedProcess,
+            { open: false, live: false }
+          );
+        } else if (!processEl && preservedSubagents) {
+          // Strip verbose summaries that may have been attached while live.
+          preservedSubagents.querySelectorAll(".live-subagent-summary").forEach((el) => {
+            el.textContent = "";
+          });
+          processEl = wrapProcessDetails(preservedSubagents, { open: false, live: false });
+        }
+        if (processEl && processEl.classList && processEl.classList.contains("msg-process")) {
+          processEl.open = false;
+          processEl.removeAttribute("data-live");
+          updateProcessDetailsLabel(processEl);
+        }
+
         item.bubble.replaceChildren();
         if (thinkingEl) item.bubble.appendChild(thinkingEl);
         if (progressEl) item.bubble.appendChild(progressEl);
-        if (preservedSubagents) {
-          item.bubble.appendChild(preservedSubagents);
-        } else {
-          const rebuilt = buildProcessTraceFromRun(agent, sid);
-          if (rebuilt) item.bubble.appendChild(rebuilt);
-        }
+        if (processEl) item.bubble.appendChild(processEl);
         item.bubble.appendChild(content);
         item.bubble.classList.remove("msg-bubble-live-pending");
+        item.bubble.classList.remove("msg-bubble-live");
 
         if (!item.wrapper.querySelector(".msg-copy")) {
           const copy = document.createElement("button");

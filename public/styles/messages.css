@@ -468,6 +468,9 @@
 .md-h1 { font-size: 1.4em; border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); }
 .md-h2 { font-size: 1.2em; }
 .md-h3 { font-size: 1.05em; }
+.md-h4 { font-size: 1em; }
+.md-h5 { font-size: 0.95em; color: var(--text-secondary); }
+.md-h6 { font-size: 0.9em; color: var(--text-tertiary); }
 
 /* ── Lists ───────────────────────────────────── */
 
@@ -657,7 +660,9 @@
   display: none;
 }
 
-.msg-thinking {
+.msg-thinking,
+.msg-process,
+.msg-progress-wrap {
   margin: 0 0 var(--space-3);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -666,20 +671,44 @@
   font-size: 12px;
 }
 
-.msg-thinking[data-live="true"] {
+.msg-thinking[data-live="true"],
+.msg-process[data-live="true"] {
   border-color: color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
 }
 
-.msg-thinking-summary {
+.msg-thinking-summary,
+.msg-process-summary,
+.msg-progress-summary {
   cursor: pointer;
   padding: 6px 10px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-secondary);
   list-style: none;
+  user-select: none;
 }
 
-.msg-thinking-summary::-webkit-details-marker { display: none; }
+.msg-thinking-summary::-webkit-details-marker,
+.msg-process-summary::-webkit-details-marker,
+.msg-progress-summary::-webkit-details-marker {
+  display: none;
+}
+
+.msg-thinking-summary::before,
+.msg-process-summary::before,
+.msg-progress-summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+  color: var(--text-tertiary);
+  transition: transform 0.12s ease;
+}
+
+.msg-thinking[open] > .msg-thinking-summary::before,
+.msg-process[open] > .msg-process-summary::before,
+.msg-progress-wrap[open] > .msg-progress-summary::before {
+  transform: rotate(90deg);
+}
 
 .msg-thinking-body {
   margin: 0;
@@ -694,6 +723,17 @@
   color: var(--text-tertiary);
 }
 
+.msg-process .live-subagents {
+  margin: 0;
+  padding: 0 8px 8px;
+  max-height: min(40vh, 320px);
+  overflow: auto;
+}
+
+.msg-process:not([open]) .live-subagents {
+  display: none;
+}
+
 .msg-progress {
   list-style: none;
   margin: 0 0 var(--space-3);
@@ -701,6 +741,15 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.msg-progress-wrap .msg-progress {
+  margin: 0;
+  padding: 0 8px 8px;
+}
+
+.msg-progress-wrap:not([open]) .msg-progress {
+  display: none;
 }
 
 .msg-progress li {
@@ -768,11 +817,32 @@
 }
 
 .live-subagents-final {
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 
 .msg-final-content {
   min-width: 0;
+}
+
+.msg-final-content > *:first-child { margin-top: 0; }
+.msg-final-content > *:last-child { margin-bottom: 0; }
+
+/* Compact tool rows: one-line head + optional short task, no bulky dumps */
+.msg-process .live-subagent,
+.msg-process .live-tool-row {
+  padding: 6px 8px;
+}
+
+.msg-process .live-subagent-task {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg-process .live-subagent-summary:empty {
+  display: none;
 }
 
 /* ── Empty state ─────────────────────────────────── */
