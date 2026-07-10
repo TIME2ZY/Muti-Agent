@@ -8,7 +8,6 @@ function makeState(overrides = {}) {
   const runtimeStore = createRuntimeStore();
   return {
     currentSessionId: null,
-    runtimeStore,
     selectedAgent: "architect",
     rightPanelTab: "workspace",
     worktreeStatus: { branch: "x" },

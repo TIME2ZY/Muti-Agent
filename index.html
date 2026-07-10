@@ -141,29 +141,7 @@
   <!-- Recall now lives as the third tab inside the right-side panel;
        the legacy standalone drawer and overlay have been removed. -->
 
-  <script src="/public/api-client.js"></script>
-  <script src="/public/display-helpers.js"></script>
-  <script src="/public/agent-routing.js"></script>
-  <script src="/public/session-runtime.js"></script>
-  <script src="/public/session-api.js"></script>
-  <script src="/public/session-controller.js"></script>
-  <script src="/public/worktree-api.js"></script>
-  <script src="/public/recall-api.js"></script>
-  <script src="/public/chat-client.js"></script>
-  <script src="/public/markdown-lite.js"></script>
-  <script src="/public/clipboard.js"></script>
-  <script src="/public/latest-request.js"></script>
-  <script src="/public/workspace-diff.js"></script>
-  <script src="/public/virtual-list.js"></script>
-  <script src="/public/theme.js"></script>
-  <script src="/public/ui-confirm.js"></script>
-  <script src="/public/mention-composer.js"></script>
-  <script src="/public/session-list-view.js"></script>
-  <script src="/public/project-header.js"></script>
-  <script src="/public/agent-panel-view.js"></script>
-  <script src="/public/workspace-panel.js"></script>
-  <script src="/public/recall-panel.js"></script>
-  <script src="/public/message-view.js"></script>
-  <script src="/public/app.js"></script>
+  <!-- App modules load in order via boot.js (see public/boot.js MODULES). -->
+  <script src="/public/boot.js"></script>
 </body>
 </html>

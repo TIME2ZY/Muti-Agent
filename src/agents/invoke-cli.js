@@ -290,26 +290,6 @@ function extractAssistantText(event, state) {
   return "";
 }
 
-function extractSessionId(event) {
-  if (event.type === "thread.started" && typeof event.thread_id === "string") {
-    return event.thread_id;
-  }
-
-  if (event.session && typeof event.session.id === "string") {
-    return event.session.id;
-  }
-
-  if (typeof event.sessionID === "string") {
-    return event.sessionID;
-  }
-
-  if (typeof event.session_id === "string") {
-    return event.session_id;
-  }
-
-  return "";
-}
-
 /**
  * Write the session ID for this agent to the per-chat-session file so the
  * server can read it back for the next invocation in the same chat session.
