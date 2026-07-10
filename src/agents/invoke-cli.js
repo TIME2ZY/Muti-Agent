@@ -352,12 +352,38 @@ function invoke(cli, prompt, options = {}) {
   };
 
   const invocationId = process.env.CAT_CAFE_INVOCATION_ID || "standalone";
+  const rawEventLogEnabled = /^(1|true|yes|on)$/i.test(String(process.env.INVOKE_RAW_EVENT_LOG || ""));
+  let rawEventLogPath = "";
+  if (rawEventLogEnabled) {
+    try {
+      const { RUNTIME_DATA_DIR } = require("../server/runtime-paths");
+      const rawDir = path.join(RUNTIME_DATA_DIR, "raw-events");
+      fs.mkdirSync(rawDir, { recursive: true });
+      const safeId = String(invocationId).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) || "standalone";
+      rawEventLogPath = path.join(rawDir, `${safeId}.jsonl`);
+    } catch {
+      rawEventLogPath = "";
+    }
+  }
 
   let firstChild;
   let attempt = 0;
 
   const emitEvent = (event) => {
     process.stdout.write(`${JSON.stringify(event)}\n`);
+  };
+
+  const logRawEvent = (raw) => {
+    if (!rawEventLogPath) return;
+    try {
+      fs.appendFileSync(
+        rawEventLogPath,
+        `${JSON.stringify({ ts: new Date().toISOString(), provider: config.name, raw })}\n`,
+        "utf8"
+      );
+    } catch {
+      // ignore logging failures
+    }
   };
 
   const startAttempt = () => {
@@ -450,8 +476,11 @@ function invoke(cli, prompt, options = {}) {
         event = JSON.parse(line);
       } catch (error) {
         console.error("Failed to parse JSON line:", line);
+        logRawEvent({ parseError: true, line });
         return;
       }
+
+      logRawEvent(event);
 
       const sessionId = provider.extractSessionId(event);
       if (sessionId) persistSessionId(config, sessionId);

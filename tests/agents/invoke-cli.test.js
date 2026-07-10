@@ -411,6 +411,120 @@ test("opencode runtime maps tool/task parts into tool and subagent events", () =
   assert.equal(done.some((e) => e.type === "subagent.completed"), true);
 });
 
+test("opencode runtime maps real tool_use events from current CLI schema", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-oc-tool-use", agent: "planner" };
+
+  const events = runtime.transform({
+    type: "tool_use",
+    timestamp: 1783690684796,
+    sessionID: "ses_sample",
+    part: {
+      type: "tool",
+      tool: "task",
+      callID: "call_424f09b8b6e04590b7a594f5",
+      state: {
+        status: "completed",
+        input: {
+          description: "查看git状态和最近提交",
+          subagent_type: "general",
+          prompt: "请执行 git status 与 git log",
+        },
+        output: "<task_result>git status ok</task_result>",
+        title: "查看git状态和最近提交",
+        time: { start: 1, end: 2 },
+      },
+      id: "prt_sample",
+      sessionID: "ses_sample",
+      messageID: "msg_sample",
+    },
+  }, ctx);
+
+  assert.equal(events.some((e) => e.type === "tool.started" && e.toolName === "task"), true);
+  assert.equal(events.some((e) => e.type === "tool.finished" && e.status === "ok"), true);
+  assert.equal(events.some((e) => e.type === "subagent.started" && e.name === "general"), true);
+  assert.equal(events.some((e) => e.type === "subagent.completed"), true);
+  assert.equal(events.find((e) => e.type === "tool.started").toolId, "call_424f09b8b6e04590b7a594f5");
+  assert.match(events.find((e) => e.type === "subagent.completed").summary, /git status ok/);
+});
+
+test("opencode runtime maps read/bash tools and nests state.input", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-oc-tools", agent: "planner" };
+
+  const readStarted = runtime.transform({
+    type: "message.part.updated",
+    part: {
+      id: "t-read",
+      type: "tool",
+      tool: "read",
+      state: {
+        status: "running",
+        input: { path: "public/app.js" },
+      },
+    },
+  }, ctx);
+
+  const bashDone = runtime.transform({
+    type: "message.part.updated",
+    part: {
+      id: "t-bash",
+      type: "tool",
+      tool: "bash",
+      status: "completed",
+      arguments: { command: "npm test" },
+      output: "ok",
+    },
+  }, ctx);
+
+  assert.equal(readStarted.some((e) => e.type === "tool.started" && e.toolName === "read"), true);
+  assert.equal(readStarted.find((e) => e.type === "tool.started").args.path, "public/app.js");
+  assert.equal(bashDone.some((e) => e.type === "tool.started" && e.toolName === "bash"), true);
+  assert.equal(bashDone.some((e) => e.type === "command.started" && e.command === "npm test"), true);
+  assert.equal(bashDone.some((e) => e.type === "command.finished" && e.exitCode === 0), true);
+  assert.equal(bashDone.some((e) => e.type === "tool.finished"), true);
+});
+
+test("opencode runtime emits a single run.started and step progress updates", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-oc-steps", agent: "planner" };
+
+  const firstSession = runtime.transform({
+    type: "session.updated",
+    session: { id: "ses_steps" },
+  }, ctx);
+  const secondSession = runtime.transform({
+    type: "session.updated",
+    session: { id: "ses_steps" },
+  }, ctx);
+  const step0 = runtime.transform({
+    type: "step_start",
+    sessionID: "ses_steps",
+    step: 0,
+  }, ctx);
+  const step1 = runtime.transform({
+    type: "step_start",
+    sessionID: "ses_steps",
+    step: 1,
+  }, ctx);
+  const step1Again = runtime.transform({
+    type: "step_start",
+    sessionID: "ses_steps",
+    step: 1,
+  }, ctx);
+
+  assert.deepEqual(firstSession.map((e) => e.type), ["run.started"]);
+  assert.deepEqual(secondSession, []);
+  assert.equal(step0.some((e) => e.type === "run.started"), false);
+  assert.equal(step0.some((e) => e.type === "progress.update"), true);
+  assert.match(step0.find((e) => e.type === "progress.update").items[0].text, /第 0 步/);
+  assert.equal(step1.find((e) => e.type === "progress.update").items[0].text, "第 1 步");
+  assert.deepEqual(step1Again, []);
+});
+
 test("codex runtime maps command, file, and transport errors into normalized events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
@@ -553,9 +667,18 @@ test("opencode runtime extracts sessionID and text events from current cli schem
   const started = runtime.transform(rawStart, ctx);
   const text = runtime.transform(rawText, ctx);
 
-  assert.equal(started[0].type, "run.started");
-  assert.equal(started[0].sessionId, "ses_current_schema");
+  // First step may also open the run, but subsequent progress is not another run.started.
+  assert.equal(started.filter((e) => e.type === "run.started").length, 1);
+  assert.equal(started.find((e) => e.type === "run.started").sessionId, "ses_current_schema");
+  assert.equal(started.some((e) => e.type === "progress.update"), true);
   assert.deepEqual(text.map((event) => event.text), ["Hello from current schema"]);
+});
+
+test("provider registry lists codex and opencode", () => {
+  const { listSupportedProviders, createProviderRuntime } = require("../../src/agents/providers");
+  assert.deepEqual(listSupportedProviders().sort(), ["codex", "opencode"]);
+  assert.ok(createProviderRuntime({ name: "codex" }));
+  assert.throws(() => createProviderRuntime({ name: "claude" }), /Unsupported provider/);
 });
 
 test("codex runtime reads text from content and properties.content fallbacks", () => {
