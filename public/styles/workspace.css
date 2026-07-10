@@ -1,0 +1,390 @@
+/* ═══════════════════════════════════════════════════════════
+   AGENT PANEL
+   ═══════════════════════════════════════════════════════════ */
+
+.side-panel {
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, transparent) 0%, color-mix(in srgb, var(--surface-raised) 72%, transparent) 100%);
+}
+
+.panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-raised) 78%, transparent);
+}
+
+.panel-tab {
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.panel-tab:hover,
+.panel-tab:focus-visible {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.panel-tab.is-active {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.agent-panel,
+.workspace-panel,
+.recall-panel-inline {
+  flex: 1 1 auto;
+  padding: var(--space-4) var(--space-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Recall keeps a single scroll owner (.recall-body). Nested overflow on
+   the panel itself fights expanded cards and makes long traces feel stuck. */
+.recall-panel-inline {
+  overflow: hidden;
+}
+
+/* The HTML `hidden` attribute must override the display:flex
+   above (and any other display: rule further down). Without this
+   rule, the right-side panel-tab content stacks instead of
+   switching because class selectors beat the UA stylesheet's
+   [hidden] { display: none }. */
+.agent-panel[hidden],
+.workspace-panel[hidden],
+.recall-panel-inline[hidden] {
+  display: none;
+}
+
+.agent-panel-title {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-tertiary);
+}
+
+.agent-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.agent-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.agent-tab {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: var(--space-3);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-subtle);
+  text-align: left;
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface) 100%);
+  border-radius: 12px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.15s;
+  cursor: pointer;
+}
+.agent-tab:hover,
+.agent-tab:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.agent-tab.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 14%, var(--surface-raised)) 0%,
+    color-mix(in srgb, var(--accent) 6%, var(--surface)) 100%
+  );
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.agent-tab.is-selected .agent-tab-name {
+  color: var(--accent);
+}
+
+.agent-tab-role {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-tab-name {
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0;
+  color: var(--text-primary);
+}
+
+.agent-tab-model {
+  display: block;
+  font-size: 11px;
+  margin-top: 1px;
+  opacity: 0.72;
+  overflow-wrap: anywhere;
+}
+
+.workspace-panel {
+  gap: var(--space-3);
+}
+
+.recall-panel-inline .recall-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  padding-bottom: var(--space-2);
+}
+
+.recall-panel-inline .recall-search input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.recall-panel-inline .recall-search input:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.workspace-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.workspace-summary {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface) 100%);
+}
+
+.workspace-summary-branch {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.workspace-summary-meta {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.workspace-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.workspace-action-link {
+  width: fit-content;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.workspace-action-link:hover {
+  color: var(--accent-hover);
+}
+
+.workspace-content {
+  display: grid;
+  grid-template-columns: minmax(0, 144px) minmax(0, 1fr);
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.workspace-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.workspace-file {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface);
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.workspace-file:hover,
+.workspace-file:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: var(--surface-raised);
+  transform: translateY(-1px);
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.workspace-file.selected {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.workspace-file-path {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.workspace-file-status {
+  width: fit-content;
+  min-height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+}
+
+.workspace-file-status.status-untracked {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+
+.workspace-file-status.status-deleted {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.workspace-diff {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-inset);
+  overflow: hidden;
+}
+
+.workspace-diff-title {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.workspace-diff-body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.workspace-diff-line {
+  white-space: pre;
+  min-width: fit-content;
+  color: var(--text-secondary);
+}
+
+.workspace-diff-line-added {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+}
+
+.workspace-diff-line-removed {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.workspace-diff-body-virtual {
+  min-height: 200px;
+  max-height: min(50vh, 420px);
+}
+
+.workspace-diff-expand {
+  display: block;
+  width: 100%;
+  margin: var(--space-2) 0;
+  text-align: center;
+}
+
+.workspace-files-host,
+.workspace-diff-host {
+  min-height: 0;
+  min-width: 0;
+}
+
+.workspace-empty {
+  padding: var(--space-4);
+  border: 1px dashed var(--border-subtle);
+  border-radius: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}

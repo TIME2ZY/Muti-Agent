@@ -1,0 +1,67 @@
+/* ═══════════════════════════════════════════════════════════
+   DESIGN TOKENS
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces */
+  --surface:        light-dark(#f7f7f4, #181a19);
+  --surface-raised: light-dark(#eceee9, #222624);
+  --surface-inset:  light-dark(#f1f3f0, #141615);
+
+  /* Text */
+  --text-primary:   light-dark(#242622, #edf1ed);
+  --text-secondary: light-dark(#636a61, #a7b0a8);
+  --text-tertiary:  light-dark(#8b9388, #68736c);
+
+  /* Borders */
+  --border:         light-dark(#d1d6ce, #39413d);
+  --border-subtle:  light-dark(#e1e5df, #2a302d);
+
+  /* Accent */
+  --accent:         light-dark(#2f7d68, #5bb89f);
+  --accent-hover:   light-dark(#245f50, #72cfb5);
+  --accent-text:    light-dark(#f7f7f4, #101312);
+
+  /* Semantic */
+  --danger:         light-dark(#9b2c2c, #e05555);
+  --danger-hover:   light-dark(#7a2222, #f07070);
+  --stderr:         light-dark(#8a6d3b, #d4a843);
+  --success:        light-dark(#4a7c59, #6ba87a);
+
+  /* Message roles */
+  --user-bg:        light-dark(#e5eee9, #1f2b28);
+  --assistant-line: light-dark(#9ab7ad, #3f5f56);
+
+  /* Typography */
+  --font-body: "Segoe UI Variable", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Code", "IBM Plex Mono", "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+
+  /* Spacing scale (8px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Sizing */
+  --sidebar-w: 260px;
+  --sidebar-w-narrow: 200px;
+  --radius: 14px;
+
+  /* Density (1 = comfortable; compact via data-density) */
+  --density: 1;
+  --row-pad-y: calc(8px * var(--density));
+}
+
+/* Manual theme overrides: flip color-scheme so light-dark() resolves correctly */
+:root[data-theme="dark"]  { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+
+:root[data-density="compact"] {
+  --density: 0.85;
+}

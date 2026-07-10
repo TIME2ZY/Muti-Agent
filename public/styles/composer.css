@@ -1,0 +1,153 @@
+/* ═══════════════════════════════════════════════════════════
+   COMPOSER
+   ═══════════════════════════════════════════════════════════ */
+
+.composer {
+  border-top: 1px solid var(--border-subtle);
+  padding: var(--space-3) var(--space-6) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.composer-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  position: relative;
+}
+
+.mention-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + var(--space-2));
+  width: min(360px, 100%);
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 24px rgba(0,0,0,0.18);
+  padding: var(--space-1);
+  z-index: 40;
+}
+
+.mention-menu[hidden] { display: none; }
+
+.mention-option {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  text-align: left;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.mention-option:hover,
+.mention-option.active {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.mention-option-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mention-option-meta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 56px;
+  max-height: 34vh;
+  resize: vertical;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  padding: var(--space-3) var(--space-4);
+  font-size: 15px;
+  line-height: 1.65;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.composer textarea:focus {
+  border-color: var(--accent);
+}
+
+.composer textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer textarea::placeholder {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.worktree-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 28px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.worktree-mode input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.worktree-mode:hover {
+  color: var(--text-secondary);
+}
+
+.composer-actions-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.btn-cmd {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  padding: 4px 10px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.btn-cmd:hover { color: var(--text-primary); background: var(--surface-raised); }
+
+.btn-cmd.primary {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.btn-cmd.primary:hover { color: var(--accent-text); background: var(--accent); }
+.btn-cmd.danger { color: var(--danger); }
+.btn-cmd.danger:hover { color: var(--danger-hover); background: color-mix(in srgb, var(--danger) 12%, transparent); }

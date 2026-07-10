@@ -195,7 +195,7 @@
             <span class="md-code-lang">${escHtml(langLabel)}</span>
             <span class="md-code-lines">${lineCount} lines</span>
             ${shouldCollapse ? '<button type="button" class="md-code-toggle" data-toggle="1">▼</button>' : ""}
-            <button type="button" class="md-code-copy" data-copy="1">Copy</button>
+            <button type="button" class="md-code-copy" data-copy="1" title="复制代码">复制代码</button>
           </div>
           <pre class="${shouldCollapse ? "md-code-pre-collapsed" : ""}"><code class="language-${escHtml(lang)}">${highlightedCode}</code></pre>
         </div>`;
