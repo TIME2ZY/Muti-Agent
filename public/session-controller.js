@@ -22,6 +22,7 @@
       emptyWorkspaceState,
       setStatus,
     } = deps;
+    let switchToken = 0;
 
     async function refreshSessionList() {
       try {
@@ -34,6 +35,7 @@
     }
 
     async function switchSession(id) {
+      const token = ++switchToken;
       if (id === state.currentSessionId) return;
       if (state.controller) {
         state.controller.abort();
@@ -47,6 +49,7 @@
 
       try {
         const messages = await sessionApi.readMessages(id);
+        if (token !== switchToken || state.currentSessionId !== id) return;
         if (!messages || messages.length === 0) {
           ensureSpacer();
           showEmpty();
@@ -68,9 +71,13 @@
         ensureSpacer();
       }
 
+      if (token !== switchToken || state.currentSessionId !== id) return;
       await refreshSessionList();
+      if (token !== switchToken || state.currentSessionId !== id) return;
       await loadProjectDir(id);
+      if (token !== switchToken || state.currentSessionId !== id) return;
       await loadWorktreeStatus();
+      if (token !== switchToken || state.currentSessionId !== id) return;
       if (state.rightPanelTab === "workspace") {
         await loadWorkspaceState();
       }

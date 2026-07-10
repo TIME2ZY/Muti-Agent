@@ -66,6 +66,21 @@ test("parseSse emits complete frames and preserves trailing partial data", () =>
   assert.equal(rest, "partial");
 });
 
+test("parseSse supports CRLF frames and multi-line data payloads", () => {
+  const client = chatClientModule.createChatClient(makeDeps());
+  const seen = [];
+  const rest = client.parseSse(
+    "event: message\r\ndata: {\"text\":\r\ndata: \"hi\"}\r\n\r\nevent: done\r\ndata: {}\r\n\r\n",
+    (event, data) => seen.push({ event, data })
+  );
+
+  assert.deepEqual(seen, [
+    { event: "message", data: { text: "hi" } },
+    { event: "done", data: {} },
+  ]);
+  assert.equal(rest, "");
+});
+
 test("handleSseEvent session updates state and reloads session-scoped data", () => {
   const calls = [];
   const deps = makeDeps({

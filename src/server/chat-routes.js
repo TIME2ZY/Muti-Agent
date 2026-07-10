@@ -1,3 +1,13 @@
+function resolveResumeSessionId(sessionMap, agent, workspaceKey) {
+  const entry = sessionMap && sessionMap[agent];
+  if (!entry || typeof entry.sessionId !== "string" || !entry.sessionId) return "";
+  if (!workspaceKey) return entry.sessionId;
+  if (typeof entry.workspaceKey === "string" && entry.workspaceKey) {
+    return entry.workspaceKey === workspaceKey ? entry.sessionId : "";
+  }
+  return workspaceKey.startsWith("base:") ? entry.sessionId : "";
+}
+
 function createChatRoutes({
   rootDir,
   selfGitRoot,
@@ -150,6 +160,7 @@ function createChatRoutes({
       worktreeDir: sessionProjectDir,
       branch: "",
     };
+    const workspaceKey = `${activeWorktree ? "worktree" : "base"}:${runWorkspace.worktreeDir}`;
 
     const existing = activeInvocations.get(sessionId);
     if (existing) existing.abort();
@@ -225,7 +236,7 @@ function createChatRoutes({
 
         const agent = worklist[i];
         const sessionMap = readSessionMap(sessionId, sessionMapRoot);
-        const resumeSessionId = sessionMap[agent]?.sessionId || "";
+        const resumeSessionId = resolveResumeSessionId(sessionMap, agent, workspaceKey);
         let assistantContent = "";
         let contextWarned = false;
         let contextSealedSseSent = false;
@@ -282,6 +293,7 @@ function createChatRoutes({
           CAT_CAFE_BRANCH: runWorkspace.branch || "",
           INVOKE_SESSION_ID: resumeSessionId,
           INVOKE_SESSION_FILE: getSessionMapPath(sessionId, sessionMapRoot),
+          INVOKE_WORKSPACE_KEY: workspaceKey,
         };
 
         transcript.appendEvent(sessionId, invocationId, "invocation-start", {

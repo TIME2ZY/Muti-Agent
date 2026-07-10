@@ -130,3 +130,49 @@ test("deleteSession clears the current session UI state when deleting the active
   assert.deepEqual(state.workspace, { empty: true });
   assert.equal(deps.projectDirPath.textContent, "(当前目录)");
 });
+
+test("switchSession ignores stale async loads from an earlier session switch", async () => {
+  const state = makeState();
+  const seenMessages = [];
+  let resolveFirstMessages;
+  const firstMessages = new Promise((resolve) => {
+    resolveFirstMessages = resolve;
+  });
+  const deps = {
+    state,
+    sessionApi: {
+      listSessions: async () => [{ id: "s1" }, { id: "s2" }],
+      readMessages: async (id) => {
+        if (id === "s1") return firstMessages;
+        return [{ role: "assistant", agent: "architect", content: "new" }];
+      },
+    },
+    renderSessionList() {},
+    addSystem() {},
+    ensureSpacer() {},
+    showEmpty() {},
+    createMessage(msg) { seenMessages.push([state.currentSessionId, msg.content]); },
+    messagesEl: { replaceChildren() {} },
+    promptEl: { focus() {} },
+    projectDirPath: { textContent: "" },
+    closeSidebarIfMobile() {},
+    loadProjectDir: async () => {},
+    loadWorktreeStatus: async () => {},
+    loadWorkspaceState: async () => {},
+    renderWorktreeStatus() {},
+    renderWorkspacePanel() {},
+    emptyWorkspaceState: () => ({ empty: true }),
+    setStatus() {},
+  };
+
+  const controller = sessionControllerModule.createSessionController(deps);
+  const firstSwitch = controller.switchSession("s1");
+  const secondSwitch = controller.switchSession("s2");
+
+  await secondSwitch;
+  resolveFirstMessages([{ role: "assistant", agent: "architect", content: "old" }]);
+  await firstSwitch;
+
+  assert.equal(state.currentSessionId, "s2");
+  assert.deepEqual(seenMessages, [["s2", "new"]]);
+});

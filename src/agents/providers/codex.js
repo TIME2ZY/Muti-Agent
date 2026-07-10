@@ -1,6 +1,17 @@
 const { makeEvent } = require("../event-protocol");
 
 function createCodexRuntime(cli) {
+  function fileChangeEvents(base, item) {
+    const changes = item && Array.isArray(item.changes) ? item.changes : [];
+    return changes
+      .filter((change) => change && typeof change.path === "string")
+      .map((change) => makeEvent("file.changed", {
+        ...base,
+        path: change.path,
+        changeType: change.kind || "",
+      }));
+  }
+
   return {
     extractSessionId(event) {
       return event && event.type === "thread.started" && typeof event.thread_id === "string"
@@ -19,6 +30,44 @@ function createCodexRuntime(cli) {
           sessionId: event.thread_id || "",
           provider: cli.name,
           model: cli.model || "",
+        })];
+      }
+
+      if (event.type === "error" && typeof event.message === "string") {
+        return [makeEvent("stderr", {
+          ...base,
+          text: event.message,
+        })];
+      }
+
+      if (event.type === "item.started" && event.item && event.item.type === "command_execution") {
+        return [makeEvent("command.started", {
+          ...base,
+          command: event.item.command || "",
+        })];
+      }
+
+      if (event.type === "item.completed" && event.item && event.item.type === "command_execution") {
+        return [makeEvent("command.finished", {
+          ...base,
+          command: event.item.command || "",
+          output: event.item.aggregated_output || "",
+          exitCode: event.item.exit_code,
+        })];
+      }
+
+      if (
+        (event.type === "item.started" || event.type === "item.completed")
+        && event.item
+        && event.item.type === "file_change"
+      ) {
+        return fileChangeEvents(base, event.item);
+      }
+
+      if (event.type === "item.completed" && event.item && event.item.type === "error" && typeof event.item.message === "string") {
+        return [makeEvent("stderr", {
+          ...base,
+          text: event.item.message,
         })];
       }
 

@@ -32,7 +32,6 @@
     const projectDirPath = $("#project-dir-path");
     const worktreeStatusEl = $("#worktree-status");
     const mentionMenuEl = $("#mention-menu");
-    const recallToggleEl = $("#recall-toggle");
     // The recall UI now lives exclusively inside the right-side panel
     // (third tab). The legacy standalone drawer and overlay were removed.
     const recallPanelInlineEl = $("#recall-panel-inline");
@@ -43,6 +42,8 @@
     const recallApi = window.RecallApi.createRecallApi(window.fetch.bind(window));
     const escHtml = window.MarkdownLite.escHtml;
     const renderMd = window.MarkdownLite.renderMd;
+    const writeClipboard = window.ClipboardUtils.writeClipboard;
+    const runLatestSkillsRequest = window.LatestRequest.createLatestRequestRunner();
 
     /* ═══════════════════════════════════════════════════════════
        THEME
@@ -494,12 +495,13 @@
       // browser's clipboard API lets us mark up rich content without
       // forcing the user to re-paste it as HTML.
       const html = btn && btn.dataset && btn.dataset.copyHtml;
-      const payload = html
-        ? { "text/plain": text, "text/html": html }
-        : text;
-      const write = html
-        ? navigator.clipboard.write(payload)
-        : navigator.clipboard.writeText(text);
+      const write = writeClipboard({
+        clipboard: navigator.clipboard,
+        ClipboardItem: window.ClipboardItem,
+      }, {
+        text,
+        html,
+      });
       return write.then(() => {
         btn.textContent = okText;
         btn.classList.add("copied");
@@ -874,6 +876,37 @@
       item.setBadge("done");
     }
 
+    function trimLiveStatus(text, max = 140) {
+      const singleLine = String(text || "").replace(/\s+/g, " ").trim();
+      if (!singleLine) return "";
+      return singleLine.length > max ? `${singleLine.slice(0, max - 1)}…` : singleLine;
+    }
+
+    function pendingTextForEvent(event) {
+      if (!event || !event.type) return "";
+
+      if (event.type === "run.started") return "正在执行…";
+      if (event.type === "command.started") return `执行命令: ${trimLiveStatus(event.command || "")}`;
+      if (event.type === "command.finished") return `命令完成: ${trimLiveStatus(event.command || "")}`;
+      if (event.type === "file.changed") return `修改文件: ${trimLiveStatus(event.path || "")}`;
+      if (event.type === "stderr") return trimLiveStatus(event.text || "");
+      if (event.type === "progress.update") {
+        const items = Array.isArray(event.items) ? event.items : [];
+        const active = items.find((item) => item && item.done !== true) || items[items.length - 1];
+        return active && active.text ? `进度: ${trimLiveStatus(active.text)}` : "";
+      }
+      return "";
+    }
+
+    function setLivePending(agent, text) {
+      if (!text) return;
+      if (!state.liveMessages.has(agent)) showThinking(agent);
+      const item = state.liveMessages.get(agent);
+      if (!item || !item._liveTextEl || item.rawText) return;
+      item._liveTextEl.textContent = text;
+      scrollDown();
+    }
+
     /* rAF batch — coalesce multiple SSE tokens into one render frame. */
     let _rafId = null;
     let _rafPending = new Map(); // agent → rawText
@@ -946,6 +979,7 @@
 
       if (event.type === "run.started") {
         run.status = "thinking";
+        setLivePending(event.agent, pendingTextForEvent(event));
         return;
       }
 
@@ -963,6 +997,7 @@
 
       if (event.type === "progress.update") {
         run.progressItems = Array.isArray(event.items) ? event.items : [];
+        setLivePending(event.agent, pendingTextForEvent(event));
         return;
       }
 
@@ -973,6 +1008,7 @@
 
       if (event.type === "command.started" || event.type === "command.finished") {
         run.commands.push(event);
+        setLivePending(event.agent, pendingTextForEvent(event));
         return;
       }
 
@@ -981,11 +1017,13 @@
           path: event.path || "",
           changeType: event.changeType || "",
         });
+        setLivePending(event.agent, pendingTextForEvent(event));
         return;
       }
 
       if (event.type === "stderr") {
         run.stderr.push(event.text || "");
+        setLivePending(event.agent, pendingTextForEvent(event));
         return;
       }
 
@@ -1093,10 +1131,17 @@
     function updateActiveSkills(prompt) {
       clearTimeout(state.skillDebounce);
       state.skillDebounce = setTimeout(() => {
-        fetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`)
-          .then(jsonOrThrow)
-          .then((d) => renderSkillTags(d.active))
-          .catch((e) => console.warn("Active skills load failed:", e));
+        runLatestSkillsRequest.run(
+          () => fetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`).then(jsonOrThrow),
+          {
+            onResolve(d) {
+              renderSkillTags(d.active);
+            },
+            onReject(e) {
+              console.warn("Active skills load failed:", e);
+            },
+          }
+        );
       }, 300);
     }
 
@@ -1272,6 +1317,8 @@
       if (evt.kind === "thinking.delta" || evt.kind === "thinking.final") return p.text || "";
       if (evt.kind === "tool.started") return `${p.toolName || "tool"} ${JSON.stringify(p.args || {})}`;
       if (evt.kind === "tool.finished") return `${p.toolName || "tool"} -> ${JSON.stringify(p.result || {})}`;
+      if (evt.kind === "command.started") return p.command || "";
+      if (evt.kind === "command.finished") return `${p.command || ""}${p.exitCode !== undefined ? ` -> exit ${p.exitCode}` : ""}${p.output ? `\n${p.output}` : ""}`;
       if (evt.kind === "file.changed") return `${p.changeType || "modified"} ${p.path || ""}`.trim();
       if (evt.kind === "progress.update") return JSON.stringify(p.items || [], null, 2);
       if (evt.kind === "invocation-start") return `agent: ${p.agent || "?"}${p.shouldResume ? " · resume" : ""}`;
@@ -1366,11 +1413,6 @@
 
     // ── Session-level recall panel ───────────────────────────
 
-    // The recall UI now lives exclusively as the third tab in the
-    // right-side panel. The top-bar button just switches to that tab.
-    recallToggleEl.addEventListener("click", () => {
-      setRightPanelTab("recall");
-    });
     if (panelTabRecallEl) {
       panelTabRecallEl.addEventListener("click", () => setRightPanelTab("recall"));
     }

@@ -31,15 +31,18 @@
     } = deps;
 
     function parseSse(buffer, onEvent) {
-      let rest = buffer;
+      let rest = String(buffer || "").replace(/\r\n/g, "\n");
       let idx;
       while ((idx = rest.indexOf("\n\n")) !== -1) {
         const frame = rest.slice(0, idx);
         rest = rest.slice(idx + 2);
-        const eventLine = frame.split("\n").find((line) => line.startsWith("event: "));
-        const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
-        if (!eventLine || !dataLine) continue;
-        onEvent(eventLine.slice(7), JSON.parse(dataLine.slice(6)));
+        const lines = frame.split("\n");
+        const eventLine = lines.find((line) => line.startsWith("event: "));
+        const dataLines = lines
+          .filter((line) => line.startsWith("data: "))
+          .map((line) => line.slice(6));
+        if (!eventLine || dataLines.length === 0) continue;
+        onEvent(eventLine.slice(7), JSON.parse(dataLines.join("\n")));
       }
       return rest;
     }

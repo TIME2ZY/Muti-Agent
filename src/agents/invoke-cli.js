@@ -317,6 +317,7 @@ function persistSessionId(cli, sessionId) {
   const file = process.env.INVOKE_SESSION_FILE;
   if (!file || !sessionId) return;
   const key = cli.id || cli.name;
+  const workspaceKey = process.env.INVOKE_WORKSPACE_KEY || "";
   let sessions = {};
   try {
     if (fs.existsSync(file)) {
@@ -328,6 +329,7 @@ function persistSessionId(cli, sessionId) {
   sessions[key] = {
     sessionId,
     updatedAt: new Date().toISOString(),
+    ...(workspaceKey ? { workspaceKey } : {}),
   };
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(sessions, null, 2)}\n`, "utf8");

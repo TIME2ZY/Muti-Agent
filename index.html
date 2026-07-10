@@ -35,16 +35,23 @@
     <!-- Main -->
     <main class="main">
       <div class="main-header">
-        <span class="main-title">多 Agent 协作台</span>
-        <span class="project-dir" id="project-dir" title="点击修改项目目录">
-          <span class="project-dir-icon">📁</span>
-          <span class="project-dir-path" id="project-dir-path"></span>
-          <span class="project-dir-edit">✎</span>
-        </span>
-        <span class="worktree-status" id="worktree-status" title="当前对话的修改 worktree"></span>
-        <button class="recall-toggle" id="recall-toggle" aria-label="回忆面板" title="回忆：查看本会话的调用记录">回忆</button>
-        <button class="theme-toggle" id="theme-toggle" aria-label="切换亮暗模式" title="切换亮暗模式">◐</button>
-        <span class="main-status" id="status" style="display:none"></span>
+        <div class="main-identity">
+          <span class="main-eyebrow">Workspace Console</span>
+          <div class="main-title-row">
+            <span class="main-title">多 Agent 协作台</span>
+            <span class="main-status" id="status" style="display:none"></span>
+          </div>
+        </div>
+
+        <div class="main-header-tools">
+          <span class="project-dir" id="project-dir" title="点击修改项目目录">
+            <span class="project-dir-icon">📁</span>
+            <span class="project-dir-path" id="project-dir-path"></span>
+            <span class="project-dir-edit">✎</span>
+          </span>
+          <span class="worktree-status" id="worktree-status" title="当前对话的修改 worktree"></span>
+          <button class="theme-toggle" id="theme-toggle" aria-label="切换亮暗模式" title="切换亮暗模式">◐</button>
+        </div>
       </div>
 
       <div class="skills-bar" id="skills-bar">
@@ -112,6 +119,8 @@
   <script src="/public/recall-api.js"></script>
   <script src="/public/chat-client.js"></script>
   <script src="/public/markdown-lite.js"></script>
+  <script src="/public/clipboard.js"></script>
+  <script src="/public/latest-request.js"></script>
   <script src="/public/workspace-diff.js"></script>
   <script src="/public/app.js"></script>
 </body>

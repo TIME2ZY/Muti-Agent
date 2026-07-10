@@ -7,6 +7,10 @@ const test = require("node:test");
 const { AGENTS, extractAssistantText, invoke } = require("../../src/agents/invoke-cli");
 
 function runScript(args) {
+  return runScriptWithEnv(args, {});
+}
+
+function runScriptWithEnv(args, extraEnv) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "minimal-codex-test-"));
   const hookPath = path.join(tmpDir, "spawn-hook.js");
   const sessionPath = path.join(tmpDir, "sessions.json");
@@ -70,6 +74,7 @@ childProcess.spawn = function spawn(command, args, options = {}) {
       PATH: `${tmpDir}${path.delimiter}${process.env.PATH}`,
       NODE_OPTIONS: `--require ${hookPath}`,
       INVOKE_SESSION_FILE: sessionPath,
+      ...extraEnv,
     },
     encoding: "utf8",
   });
@@ -293,6 +298,94 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
   assert.equal(text[0].text, "Hello from Codex");
 });
 
+test("codex runtime maps command, file, and transport errors into normalized events", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const ctx = { invocationId: "inv-1b", agent: "architect" };
+
+  const commandStarted = runtime.transform({
+    type: "item.started",
+    item: {
+      id: "item-1",
+      type: "command_execution",
+      command: "Get-Content -Raw skill.md",
+      status: "in_progress",
+    },
+  }, ctx);
+
+  const commandFinished = runtime.transform({
+    type: "item.completed",
+    item: {
+      id: "item-1",
+      type: "command_execution",
+      command: "Get-Content -Raw skill.md",
+      aggregated_output: "skill body",
+      exit_code: 0,
+      status: "completed",
+    },
+  }, ctx);
+
+  const fileChanged = runtime.transform({
+    type: "item.completed",
+    item: {
+      id: "item-2",
+      type: "file_change",
+      changes: [
+        { path: "C:\\worktree\\temp.txt", kind: "add" },
+      ],
+      status: "completed",
+    },
+  }, ctx);
+
+  const transportError = runtime.transform({
+    type: "error",
+    message: "Reconnecting... 2/5 (request timed out)",
+  }, ctx);
+
+  const itemError = runtime.transform({
+    type: "item.completed",
+    item: {
+      id: "item-3",
+      type: "error",
+      message: "Falling back from WebSockets to HTTPS transport. request timed out",
+    },
+  }, ctx);
+
+  assert.deepEqual(commandStarted, [{
+    type: "command.started",
+    agent: "architect",
+    invocationId: "inv-1b",
+    command: "Get-Content -Raw skill.md",
+  }]);
+  assert.deepEqual(commandFinished, [{
+    type: "command.finished",
+    agent: "architect",
+    invocationId: "inv-1b",
+    command: "Get-Content -Raw skill.md",
+    output: "skill body",
+    exitCode: 0,
+  }]);
+  assert.deepEqual(fileChanged, [{
+    type: "file.changed",
+    agent: "architect",
+    invocationId: "inv-1b",
+    path: "C:\\worktree\\temp.txt",
+    changeType: "add",
+  }]);
+  assert.deepEqual(transportError, [{
+    type: "stderr",
+    agent: "architect",
+    invocationId: "inv-1b",
+    text: "Reconnecting... 2/5 (request timed out)",
+  }]);
+  assert.deepEqual(itemError, [{
+    type: "stderr",
+    agent: "architect",
+    invocationId: "inv-1b",
+    text: "Falling back from WebSockets to HTTPS transport. request timed out",
+  }]);
+});
+
 test("opencode runtime emits incremental text deltas from repeated parts", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
@@ -426,6 +519,17 @@ test("remembers opencode sessions from stream events", () => {
   assert.equal(result.status, 0);
   const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
   assert.equal(sessionFile.orchestrator.sessionId, "opencode-session-1");
+});
+
+test("remembers workspace key from stream events when provided", () => {
+  const result = runScriptWithEnv(["hello"], {
+    INVOKE_WORKSPACE_KEY: "base:test-workspace",
+  });
+
+  assert.equal(result.status, 0);
+  const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
+  assert.equal(sessionFile.architect.sessionId, "codex-session-1");
+  assert.equal(sessionFile.architect.workspaceKey, "base:test-workspace");
 });
 
 test("cold starts when no saved session", () => {
