@@ -45,6 +45,10 @@
     const renderMd = window.MarkdownLite.renderMd;
     const writeClipboard = window.ClipboardUtils.writeClipboard;
     const runLatestSkillsRequest = window.LatestRequest.createLatestRequestRunner();
+    const agentRouting = window.AgentRouting;
+    const runtimeStore = window.SessionRuntime.createRuntimeStore();
+    const currentAgentEl = $("#current-agent");
+    const currentAgentNameEl = $("#current-agent-name");
 
     /* ═══════════════════════════════════════════════════════════
        THEME
@@ -452,7 +456,7 @@
       agents: [],
       selectedAgent: "architect",
       currentSessionId: null,
-      controller: null,
+      runtimeStore,
       skillsMetadata: [],
       // Per-session retry state. Keyed by currentSessionId so that
       // switching sessions doesn't accidentally replay the previous
@@ -460,10 +464,6 @@
       sessions: {},
       lastPrompt: "",
       lastAgent: "architect",
-      doneReceived: false,
-      hasStructuredEvents: false,
-      liveMessages: new Map(),   // agent → { wrapper, bubble, rawText }
-      liveRuns: new Map(),
       skillDebounce: null,
       projectDir: "",
       worktreeStatus: null,
@@ -471,18 +471,83 @@
       mentionIndex: 0,
       mentionMatches: [],
       mentionRange: null,
-      liveInvocations: new Map(), // agent → invocationId (captured from agent-start)
       recallSearchDebounce: null,
       rightPanelTab: "agents",
       workspace: emptyWorkspaceState(),
     };
 
+    function sessionRuntime(sessionId) {
+      return runtimeStore.getOrCreate(sessionId || state.currentSessionId || "_pending");
+    }
+
+    function isViewingSession(sessionId) {
+      const sid = sessionId || "_pending";
+      return !state.currentSessionId || state.currentSessionId === sid;
+    }
+
+    function syncComposerControls() {
+      const rt = runtimeStore.get(state.currentSessionId || "_pending");
+      const running = !!(rt && rt.controller);
+      promptEl.disabled = running;
+      btnSend.textContent = running ? "停止" : "发送";
+      if (running) btnSend.classList.add("danger");
+      else btnSend.classList.remove("danger");
+    }
+
+    function runStatusLabel(status) {
+      if (status === "running") return "运行中";
+      if (status === "done") return "完成";
+      if (status === "error") return "失败";
+      return "";
+    }
+
     function sessionSlot() {
       const sid = state.currentSessionId || "_pending";
       if (!state.sessions[sid]) {
-        state.sessions[sid] = { lastPrompt: "", lastAgent: "architect" };
+        state.sessions[sid] = { lastPrompt: "", lastAgent: state.selectedAgent || "architect" };
       }
       return state.sessions[sid];
+    }
+
+    function applySessionAgent(sessionId, lastAgent) {
+      const sid = sessionId || state.currentSessionId || "_pending";
+      if (!state.sessions[sid]) {
+        state.sessions[sid] = { lastPrompt: "", lastAgent: "" };
+      }
+      const agentId = lastAgent || state.selectedAgent || "architect";
+      const known = state.agents.find((a) => a.id === agentId);
+      const resolvedId = known ? known.id : (state.agents[0]?.id || "architect");
+      state.sessions[sid].lastAgent = resolvedId;
+      if (sid === state.currentSessionId || !state.currentSessionId) {
+        state.selectedAgent = resolvedId;
+        state.lastAgent = resolvedId;
+        renderAgentTabs();
+        renderCurrentAgent();
+      }
+    }
+
+    function setDefaultAgent(agentId, options = {}) {
+      const known = state.agents.find((a) => a.id === agentId);
+      if (!known) return;
+      state.selectedAgent = known.id;
+      state.lastAgent = known.id;
+      const slot = sessionSlot();
+      slot.lastAgent = known.id;
+      if (options.render !== false) {
+        renderAgentTabs();
+        renderCurrentAgent();
+      }
+    }
+
+    function renderCurrentAgent() {
+      const agent = state.agents.find((a) => a.id === state.selectedAgent)
+        || state.agents[0]
+        || { id: state.selectedAgent || "architect", label: state.selectedAgent || "architect" };
+      const label = agentLabel(agent.id);
+      if (currentAgentNameEl) currentAgentNameEl.textContent = label;
+      if (currentAgentEl) {
+        currentAgentEl.title = `当前默认 Agent：${label}（${agent.id}）。右侧卡片点击切换默认；消息行首 @ 可单次覆盖。`;
+      }
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -600,18 +665,16 @@
     }
 
     function resolvePromptAgent(prompt) {
-      const text = prompt.trimStart();
-      const agents = [...state.agents].sort((a, b) => agentMention(b).length - agentMention(a).length);
-      for (const agent of agents) {
-        const labels = [agentMention(agent), agent.id].filter(Boolean);
-        for (const label of labels) {
-          const token = `@${label}`;
-          if (text === token || text.startsWith(`${token} `) || text.startsWith(`${token}\n`)) {
-            return agent;
-          }
-        }
-      }
-      return null;
+      const slot = sessionSlot();
+      const resolved = agentRouting.resolvePromptAgent({
+        prompt,
+        agents: state.agents,
+        selectedAgent: state.selectedAgent,
+        lastAgent: slot.lastAgent || state.lastAgent,
+        defaultAgent: "architect",
+      });
+      // Chat client accepts either { agent } or a bare agent object.
+      return resolved.agent;
     }
 
     function scrollDown() {
@@ -722,11 +785,17 @@
       }
       sessionListEl.replaceChildren(...sessions.map((s) => {
         const item = document.createElement("div");
-        item.className = "session-item" + (s.id === state.currentSessionId ? " active" : "");
+        const runStatus = runtimeStore.getStatus(s.id);
+        const statusText = runStatusLabel(runStatus);
+        item.className = "session-item"
+          + (s.id === state.currentSessionId ? " active" : "")
+          + (runStatus === "running" ? " is-running" : "");
         item.innerHTML = `
           <div class="session-info">
             <div class="session-title">${escHtml(s.title || "(空对话)")}</div>
-            <div class="session-meta">${s.messageCount || 0} 条 · ${fmtTime(s.createdAt)}</div>
+            <div class="session-meta">${s.messageCount || 0} 条 · ${fmtTime(s.createdAt)}${
+              statusText ? ` · <span class="session-run-status status-${runStatus}">${statusText}</span>` : ""
+            }</div>
           </div>`;
 
         item.addEventListener("click", (e) => {
@@ -748,8 +817,30 @@
         return item;
       }));
     }
+
+    function onRuntimeStatusChange() {
+      // Refresh list badges without forcing a network round-trip when possible.
+      if (typeof sessionController?.refreshSessionList === "function") {
+        sessionController.refreshSessionList();
+      }
+    }
+
+    function remountLiveMessages(sessionId) {
+      const rt = runtimeStore.get(sessionId);
+      if (!rt || rt.liveMessages.size === 0) return;
+      hideEmpty();
+      ensureSpacer();
+      for (const [, item] of rt.liveMessages) {
+        if (item && item.wrapper && !messagesEl.contains(item.wrapper)) {
+          messagesEl.insertBefore(item.wrapper, spacerEl);
+        }
+      }
+      ensureSpacer();
+      scrollDown();
+    }
     sessionController = window.SessionController.createSessionController({
       state,
+      runtimeStore,
       sessionApi,
       renderSessionList,
       addSystem,
@@ -757,6 +848,7 @@
       showEmpty,
       createMessage,
       messagesEl,
+      spacerEl,
       promptEl,
       projectDirPath,
       closeSidebarIfMobile,
@@ -767,6 +859,9 @@
       renderWorkspacePanel,
       emptyWorkspaceState,
       setStatus,
+      applySessionAgent,
+      remountLiveMessages,
+      syncComposerControls,
     });
 
     btnNewChat.addEventListener("click", () => sessionController.newSession());
@@ -860,20 +955,34 @@
       return { wrapper, bubble, meta, setBadge };
     }
 
-    function showThinking(agent) {
-      // Prevent duplicate thinking entries for the same agent.
-      if (state.liveMessages.has(agent)) return;
+    function showThinking(agent, sessionId) {
+      const sid = sessionId || state.currentSessionId || "_pending";
+      const rt = sessionRuntime(sid);
+      // Prevent duplicate thinking entries for the same agent in this session.
+      if (rt.liveMessages.has(agent)) return;
+
+      if (!isViewingSession(sid)) {
+        // Keep a lightweight placeholder until the user reopens the session.
+        rt.liveMessages.set(agent, {
+          rawText: "",
+          invocationId: rt.liveInvocations.get(agent) || null,
+          detached: true,
+          setBadge() {},
+        });
+        return;
+      }
 
       const item = createMessage({ role: "assistant", agent, content: "" });
       item.setBadge("thinking");
       item.rawText = "";
-      state.liveMessages.set(agent, item);
+      item.invocationId = rt.liveInvocations.get(agent) || null;
+      rt.liveMessages.set(agent, item);
     }
 
-    function stopThinking(agent) {
-      const item = state.liveMessages.get(agent);
+    function stopThinking(agent, sessionId) {
+      const rt = sessionRuntime(sessionId);
+      const item = rt.liveMessages.get(agent);
       if (!item) return;
-      // Transition: thinking → done (will be overwritten if message arrives)
       item.setBadge("done");
     }
 
@@ -891,6 +1000,23 @@
       if (event.type === "command.finished") return `命令完成: ${trimLiveStatus(event.command || "")}`;
       if (event.type === "file.changed") return `修改文件: ${trimLiveStatus(event.path || "")}`;
       if (event.type === "stderr") return trimLiveStatus(event.text || "");
+      if (event.type === "tool.started") return `工具: ${trimLiveStatus(event.toolName || "tool")}`;
+      if (event.type === "tool.finished") {
+        const status = event.status === "error" ? "失败" : "完成";
+        return `工具${status}: ${trimLiveStatus(event.toolName || "tool")}`;
+      }
+      if (event.type === "subagent.started") {
+        return `子 Agent 启动: ${trimLiveStatus(event.name || event.toolName || "subagent")}`;
+      }
+      if (event.type === "subagent.progress") {
+        return `子 Agent: ${trimLiveStatus(event.text || event.name || "运行中")}`;
+      }
+      if (event.type === "subagent.completed") {
+        return `子 Agent 完成: ${trimLiveStatus(event.name || event.summary || "subagent")}`;
+      }
+      if (event.type === "subagent.failed") {
+        return `子 Agent 失败: ${trimLiveStatus(event.error || event.name || "subagent")}`;
+      }
       if (event.type === "progress.update") {
         const items = Array.isArray(event.items) ? event.items : [];
         const active = items.find((item) => item && item.done !== true) || items[items.length - 1];
@@ -899,22 +1025,117 @@
       return "";
     }
 
-    function setLivePending(agent, text) {
+    function ensureSubagentPanel(liveItem) {
+      if (!liveItem || !liveItem.bubble) return null;
+      let panel = liveItem.bubble.querySelector(".live-subagents");
+      if (panel) return panel;
+      panel = document.createElement("div");
+      panel.className = "live-subagents";
+      // Prefer placing before streaming text so status stays visible.
+      if (liveItem._liveTextEl && liveItem._liveTextEl.parentNode === liveItem.bubble) {
+        liveItem.bubble.insertBefore(panel, liveItem._liveTextEl);
+      } else {
+        liveItem.bubble.appendChild(panel);
+      }
+      return panel;
+    }
+
+    function upsertLiveSubagent(agent, event, sessionId) {
+      const sid = sessionId || state.currentSessionId || "_pending";
+      if (!isViewingSession(sid)) return;
+      const rt = sessionRuntime(sid);
+      if (!rt.liveMessages.has(agent)) showThinking(agent, sid);
+      const liveItem = rt.liveMessages.get(agent);
+      if (!liveItem || liveItem.detached || !liveItem.bubble) return;
+
+      const panel = ensureSubagentPanel(liveItem);
+      if (!panel) return;
+
+      const id = String(event.subagentId || event.toolId || event.name || "subagent");
+      let row = null;
+      for (const child of panel.children) {
+        if (child && child.dataset && child.dataset.subagentId === id) {
+          row = child;
+          break;
+        }
+      }
+      if (!row) {
+        row = document.createElement("div");
+        row.className = "live-subagent";
+        row.dataset.subagentId = id;
+        row.innerHTML = `
+          <div class="live-subagent-head">
+            <span class="live-subagent-name"></span>
+            <span class="live-subagent-status"></span>
+          </div>
+          <div class="live-subagent-task"></div>
+          <div class="live-subagent-summary"></div>`;
+        panel.appendChild(row);
+      }
+
+      const nameEl = row.querySelector(".live-subagent-name");
+      const statusEl = row.querySelector(".live-subagent-status");
+      const taskEl = row.querySelector(".live-subagent-task");
+      const summaryEl = row.querySelector(".live-subagent-summary");
+
+      const name = event.name || event.toolName || "subagent";
+      nameEl.textContent = name;
+
+      let status = "running";
+      let statusText = "运行中";
+      if (event.type === "subagent.completed") {
+        status = "done";
+        statusText = "成功";
+      } else if (event.type === "subagent.failed") {
+        status = "error";
+        statusText = "失败";
+      } else if (event.type === "subagent.progress") {
+        status = "running";
+        statusText = "运行中";
+      } else if (event.type === "subagent.started") {
+        status = "running";
+        statusText = "已创建";
+      }
+      statusEl.textContent = statusText;
+      statusEl.className = `live-subagent-status status-${status}`;
+      row.className = `live-subagent status-${status}`;
+
+      if (event.task) taskEl.textContent = event.task;
+      if (event.type === "subagent.progress" && event.text) {
+        summaryEl.textContent = event.text;
+      } else if (event.type === "subagent.completed" && event.summary) {
+        summaryEl.textContent = event.summary;
+      } else if (event.type === "subagent.failed" && event.error) {
+        summaryEl.textContent = event.error;
+      }
+      scrollDown();
+    }
+
+    function setLivePending(agent, text, sessionId) {
       if (!text) return;
-      if (!state.liveMessages.has(agent)) showThinking(agent);
-      const item = state.liveMessages.get(agent);
-      if (!item || !item._liveTextEl || item.rawText) return;
+      const sid = sessionId || state.currentSessionId || "_pending";
+      const rt = sessionRuntime(sid);
+      if (!rt.liveMessages.has(agent)) showThinking(agent, sid);
+      const item = rt.liveMessages.get(agent);
+      if (!item) return;
+      if (!item.rawText) item.pendingStatus = text;
+      if (!isViewingSession(sid)) return;
+      if (!item._liveTextEl || item.rawText) return;
       item._liveTextEl.textContent = text;
       scrollDown();
     }
 
     /* rAF batch — coalesce multiple SSE tokens into one render frame. */
     let _rafId = null;
-    let _rafPending = new Map(); // agent → rawText
+    let _rafPending = new Map(); // `${sessionId}::${agent}` → rawText
 
     function _flushRaf() {
-      for (const [agent, raw] of _rafPending) {
-        const item = state.liveMessages.get(agent);
+      for (const [key, raw] of _rafPending) {
+        const sep = key.indexOf("::");
+        const sid = sep === -1 ? state.currentSessionId : key.slice(0, sep);
+        const agent = sep === -1 ? key : key.slice(sep + 2);
+        if (!isViewingSession(sid)) continue;
+        const item = sessionRuntime(sid).liveMessages.get(agent);
         if (!item || !item._liveTextEl) continue;
         item._liveTextEl.textContent = raw;
       }
@@ -923,71 +1144,91 @@
       scrollDown();
     }
 
-    function flushPendingLiveRender() {
+    function flushPendingLiveRender(sessionId) {
       if (_rafId) {
         cancelAnimationFrame(_rafId);
         _flushRaf();
       }
+      // sessionId kept for API compatibility with chat-client
+      void sessionId;
     }
 
-    function appendLive(agent, text) {
+    function appendLive(agent, text, sessionId) {
+      const sid = sessionId || state.currentSessionId || "_pending";
+      const rt = sessionRuntime(sid);
+      const viewing = isViewingSession(sid);
+
+      if (!rt.liveMessages.has(agent) || rt.liveMessages.get(agent)?.detached) {
+        if (viewing) {
+          const item = createMessage({ role: "assistant", agent });
+          item.rawText = rt.liveMessages.get(agent)?.rawText || "";
+          item.invocationId = rt.liveInvocations.get(agent) || null;
+          item.setBadge("writing");
+          rt.liveMessages.set(agent, item);
+        } else {
+          const prev = rt.liveMessages.get(agent);
+          rt.liveMessages.set(agent, {
+            rawText: (prev && prev.rawText) || "",
+            invocationId: rt.liveInvocations.get(agent) || null,
+            detached: true,
+            setBadge() {},
+          });
+        }
+      }
+
+      const item = rt.liveMessages.get(agent);
+      item.rawText = (item.rawText || "") + (text || "");
+
+      if (!viewing) return;
+
       hideEmpty();
       ensureSpacer();
+      if (item.bubble) item.bubble.classList.remove("msg-bubble-live-pending");
+      if (item.setBadge) item.setBadge("writing");
 
-      if (!state.liveMessages.has(agent)) {
-        // Defensive: message arrived before agent-start (shouldn't happen, but handle gracefully)
-        const item = createMessage({ role: "assistant", agent });
-        item.rawText = "";
-        item.invocationId = state.liveInvocations.get(agent) || null;
-        item.setBadge("writing");
-        state.liveMessages.set(agent, item);
-      }
-      const item = state.liveMessages.get(agent);
-      item.rawText += text;
-
-      // Switch from thinking to writing on first text
-      item.bubble.classList.remove("msg-bubble-live-pending");
-      item.setBadge("writing");
-
-      // Batch renders: at most one renderMd per animation frame
-      _rafPending.set(agent, item.rawText);
+      _rafPending.set(`${sid}::${agent}`, item.rawText);
       if (!_rafId) _rafId = requestAnimationFrame(_flushRaf);
       scrollDown();
     }
 
-    function ensureLiveRun(event) {
-      const invocationId = event && event.invocationId ? event.invocationId : state.liveInvocations.get(event.agent) || event.agent;
-      if (!state.liveRuns.has(invocationId)) {
-        state.liveRuns.set(invocationId, {
+    function ensureLiveRun(event, sessionId) {
+      const rt = sessionRuntime(sessionId);
+      const invocationId = event && event.invocationId
+        ? event.invocationId
+        : rt.liveInvocations.get(event.agent) || event.agent;
+      if (!rt.liveRuns.has(invocationId)) {
+        rt.liveRuns.set(invocationId, {
           invocationId,
           agent: event.agent,
           text: "",
           thinking: "",
           progressItems: [],
           tools: [],
+          subagents: [],
           commands: [],
           fileChanges: [],
           stderr: [],
           status: "thinking",
         });
       }
-      return state.liveRuns.get(invocationId);
+      return rt.liveRuns.get(invocationId);
     }
 
-    function applyAgentEvent(event) {
+    function applyAgentEvent(event, sessionId) {
       if (!event || !event.type || !event.agent) return;
-      const run = ensureLiveRun(event);
+      const sid = sessionId || state.currentSessionId || "_pending";
+      const run = ensureLiveRun(event, sid);
 
       if (event.type === "run.started") {
         run.status = "thinking";
-        setLivePending(event.agent, pendingTextForEvent(event));
+        setLivePending(event.agent, pendingTextForEvent(event), sid);
         return;
       }
 
       if (event.type === "text.delta") {
         run.text += event.text || "";
         run.status = "writing";
-        appendLive(event.agent, event.text || "");
+        appendLive(event.agent, event.text || "", sid);
         return;
       }
 
@@ -998,18 +1239,32 @@
 
       if (event.type === "progress.update") {
         run.progressItems = Array.isArray(event.items) ? event.items : [];
-        setLivePending(event.agent, pendingTextForEvent(event));
+        setLivePending(event.agent, pendingTextForEvent(event), sid);
         return;
       }
 
       if (event.type === "tool.started" || event.type === "tool.finished") {
         run.tools.push(event);
+        setLivePending(event.agent, pendingTextForEvent(event), sid);
+        return;
+      }
+
+      if (
+        event.type === "subagent.started"
+        || event.type === "subagent.progress"
+        || event.type === "subagent.completed"
+        || event.type === "subagent.failed"
+      ) {
+        if (!Array.isArray(run.subagents)) run.subagents = [];
+        run.subagents.push(event);
+        setLivePending(event.agent, pendingTextForEvent(event), sid);
+        upsertLiveSubagent(event.agent, event, sid);
         return;
       }
 
       if (event.type === "command.started" || event.type === "command.finished") {
         run.commands.push(event);
-        setLivePending(event.agent, pendingTextForEvent(event));
+        setLivePending(event.agent, pendingTextForEvent(event), sid);
         return;
       }
 
@@ -1018,24 +1273,28 @@
           path: event.path || "",
           changeType: event.changeType || "",
         });
-        setLivePending(event.agent, pendingTextForEvent(event));
+        setLivePending(event.agent, pendingTextForEvent(event), sid);
         return;
       }
 
       if (event.type === "stderr") {
         run.stderr.push(event.text || "");
-        setLivePending(event.agent, pendingTextForEvent(event));
+        setLivePending(event.agent, pendingTextForEvent(event), sid);
         return;
       }
 
       if (event.type === "run.finished") {
         run.status = event.exitCode === 0 ? "done" : "error";
+        if (run.status === "error") sessionRuntime(sid).status = "error";
       }
     }
 
-    function finalizeLiveMessages() {
-      flushPendingLiveRender();
-      for (const [, item] of state.liveMessages) {
+    function finalizeLiveMessages(sessionId) {
+      const sid = sessionId || state.currentSessionId || "_pending";
+      flushPendingLiveRender(sid);
+      const rt = sessionRuntime(sid);
+      for (const [, item] of rt.liveMessages) {
+        if (!item || item.detached || !item.bubble || !item.wrapper) continue;
         const rendered = renderMd(item.rawText || "");
         item.bubble.innerHTML = rendered;
         if (!item.wrapper.querySelector(".msg-copy")) {
@@ -1051,19 +1310,25 @@
           if (meta) meta.appendChild(copy);
         }
         if (item.invocationId) attachRecallToggle(item.wrapper, item.invocationId);
-        // Clear the status badge (fade out)
         item.setBadge("done");
       }
     }
 
-    function finishStream(statusText) {
-      state.doneReceived = true;
-      finalizeLiveMessages();
+    function finishStream(statusText, sessionId) {
+      const sid = sessionId || state.currentSessionId || "_pending";
+      const rt = sessionRuntime(sid);
+      rt.doneReceived = true;
+      if (rt.status !== "error") rt.status = "done";
+      finalizeLiveMessages(sid);
+      onRuntimeStatusChange(sid);
+      if (!isViewingSession(sid)) return;
+      if (statusText) setStatus(statusText);
       sessionController.loadSessions();
       loadWorktreeStatus();
       if (state.rightPanelTab === "workspace") {
         loadWorkspaceState();
       }
+      syncComposerControls();
     }
 
     function addSystem(text, variant = "") {
@@ -1150,12 +1415,14 @@
     function renderAgentTabs() {
       agentTabsEl.replaceChildren(...state.agents.map((a) => {
         const item = document.createElement("article");
-        item.className = "agent-tab";
+        const isSelected = a.id === state.selectedAgent;
+        item.className = "agent-tab" + (isSelected ? " is-selected" : "");
         item.setAttribute("role", "button");
         item.tabIndex = 0;
+        item.setAttribute("aria-pressed", isSelected ? "true" : "false");
         item.title = a.description
-          ? `${a.label} (${a.id}) — ${a.description}\n点击插入 @${agentMention(a)}`
-          : `插入 @${agentMention(a)}`;
+          ? `${a.label} (${a.id}) — ${a.description}\n点击设为默认 Agent · Shift+点击插入 @${agentMention(a)}`
+          : `点击设为默认 Agent · Shift+点击插入 @${agentMention(a)}`;
         item.innerHTML = `
           <span class="agent-tab-role"></span>
           <span class="agent-tab-name"></span>
@@ -1163,21 +1430,33 @@
         item.querySelector(".agent-tab-role").textContent = agentRoleSummary(a);
         item.querySelector(".agent-tab-name").textContent = agentLabel(a.id);
         item.querySelector(".agent-tab-model").textContent = agentMeta(a);
-        item.addEventListener("click", () => insertAgentMention(a));
+        item.addEventListener("click", (e) => {
+          if (e.shiftKey) {
+            insertAgentMention(a);
+            return;
+          }
+          setDefaultAgent(a.id);
+          promptEl.focus();
+        });
         item.addEventListener("keydown", (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            insertAgentMention(a);
+            if (e.shiftKey) insertAgentMention(a);
+            else {
+              setDefaultAgent(a.id);
+              promptEl.focus();
+            }
           }
         });
         return item;
       }));
+      renderCurrentAgent();
     }
 
     function insertAgentMention(agent) {
       const mention = `@${agentMention(agent)} `;
       const current = promptEl.value;
-      const leadingAgent = resolvePromptAgent(current);
+      const leadingAgent = agentRouting.findExplicitLeadingAgent(current, state.agents);
 
       if (!current.trim()) {
         promptEl.value = mention;
@@ -1193,7 +1472,7 @@
         promptEl.value = mention + current;
       }
 
-      state.selectedAgent = agent.id;
+      setDefaultAgent(agent.id, { render: true });
       promptEl.setSelectionRange(promptEl.value.length, promptEl.value.length);
       updateActiveSkills(promptEl.value);
       hideMentionMenu();
@@ -1271,6 +1550,7 @@
       promptEl.value = before + insert + after;
       const cursor = (before + insert).length;
       promptEl.setSelectionRange(cursor, cursor);
+      setDefaultAgent(agent.id);
       hideMentionMenu();
       updateActiveSkills(promptEl.value);
       promptEl.focus();
@@ -1284,7 +1564,9 @@
         if (!state.agents.find(a => a.id === state.selectedAgent)) {
           state.selectedAgent = state.agents[0]?.id || "architect";
         }
+        state.lastAgent = state.selectedAgent;
         renderAgentTabs();
+        renderCurrentAgent();
       } catch (e) {
         addSystem("加载 Agent 列表失败: " + e.message, "error");
         setStatus("加载 Agent 失败", "error");
@@ -1315,6 +1597,10 @@
       if (evt.kind === "thinking.delta" || evt.kind === "thinking.final") return p.text || "";
       if (evt.kind === "tool.started") return `${p.toolName || "tool"} ${JSON.stringify(p.args || {})}`;
       if (evt.kind === "tool.finished") return `${p.toolName || "tool"} -> ${JSON.stringify(p.result || {})}`;
+      if (evt.kind === "subagent.started") return `${p.name || p.toolName || "subagent"} · ${p.task || "started"}`;
+      if (evt.kind === "subagent.progress") return `${p.name || "subagent"} · ${p.text || "running"}`;
+      if (evt.kind === "subagent.completed") return `${p.name || "subagent"} · ${p.summary || "done"}`;
+      if (evt.kind === "subagent.failed") return `${p.name || "subagent"} · ${p.error || "failed"}`;
       if (evt.kind === "command.started") return p.command || "";
       if (evt.kind === "command.finished") return `${p.command || ""}${p.exitCode !== undefined ? ` -> exit ${p.exitCode}` : ""}${p.output ? `\n${p.output}` : ""}`;
       if (evt.kind === "file.changed") return `${p.changeType || "modified"} ${p.path || ""}`.trim();
@@ -1558,13 +1844,13 @@
 
     const chatClient = window.ChatClient.createChatClient({
       state,
+      runtimeStore,
       promptEl,
       btnSend,
       useWorktreeInput,
       resolvePromptAgent,
       addSystem,
       setStatus,
-      updateMentionMenu,
       sessionApi,
       createMessage,
       hideMentionMenu,
@@ -1582,6 +1868,8 @@
       addDebug,
       finishStream,
       agentLabel,
+      syncComposerControls,
+      onRuntimeStatusChange,
     });
 
     /* ═══════════════════════════════════════════════════════════
@@ -1589,14 +1877,15 @@
        ═══════════════════════════════════════════════════════════ */
 
     btnSend.addEventListener("click", () => {
-      if (state.controller) { state.controller.abort(); return; }
+      const rt = runtimeStore.get(state.currentSessionId || "_pending");
+      if (rt && rt.controller) {
+        runtimeStore.abort(state.currentSessionId);
+        return;
+      }
       chatClient.sendPrompt();
     });
 
     btnClear.addEventListener("click", async () => {
-      if (state.controller) {
-        state.controller.abort();
-      }
       await sessionController.newSession();
       renderSkillTags([]);
     });

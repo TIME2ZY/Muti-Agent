@@ -199,6 +199,34 @@
       margin-top: 2px;
     }
 
+    .session-run-status {
+      display: inline-flex;
+      align-items: center;
+      padding: 0 6px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      line-height: 1.4;
+    }
+
+    .session-run-status.status-running {
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--border-subtle));
+      background: color-mix(in srgb, var(--accent) 10%, transparent);
+    }
+
+    .session-run-status.status-done {
+      color: var(--text-secondary);
+    }
+
+    .session-run-status.status-error {
+      color: var(--danger);
+      border-color: color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
+    }
+
+    .session-item.is-running .session-title {
+      color: var(--accent);
+    }
+
     .btn-delete-session {
       flex-shrink: 0;
       width: 24px;
@@ -450,6 +478,25 @@
       letter-spacing: -0.04em;
     }
 
+    .current-agent {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-tertiary);
+      padding: 4px 10px;
+      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+      white-space: nowrap;
+    }
+
+    .current-agent strong {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
     .main-status {
       font-size: 11px;
       font-family: var(--font-mono);
@@ -664,6 +711,79 @@
     }
     .message.assistant.error .msg-card { border-color: color-mix(in srgb, var(--danger) 28%, var(--border-subtle)); }
     .message.assistant.error .msg-bubble { color: var(--danger); }
+
+    .live-subagents {
+      display: grid;
+      gap: 8px;
+      margin: 0 0 10px;
+    }
+
+    .live-subagent {
+      border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+      padding: 8px 10px;
+    }
+
+    .live-subagent.status-error {
+      border-color: color-mix(in srgb, var(--danger) 30%, var(--border-subtle));
+      background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+    }
+
+    .live-subagent.status-done {
+      border-color: color-mix(in srgb, var(--accent) 18%, var(--border-subtle));
+    }
+
+    .live-subagent-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .live-subagent-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .live-subagent-status {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      padding: 1px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-tertiary);
+    }
+
+    .live-subagent-status.status-running {
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--border-subtle));
+      background: color-mix(in srgb, var(--accent) 10%, transparent);
+    }
+
+    .live-subagent-status.status-done {
+      color: var(--text-secondary);
+    }
+
+    .live-subagent-status.status-error {
+      color: var(--danger);
+      border-color: color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
+    }
+
+    .live-subagent-task,
+    .live-subagent-summary {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .live-subagent-summary:empty,
+    .live-subagent-task:empty {
+      display: none;
+    }
 
     /* ── Message content (Markdown output) ───────────── */
 
@@ -1214,6 +1334,20 @@
       transform: translateY(-1px);
       outline: 1px solid var(--accent);
       outline-offset: 1px;
+    }
+
+    .agent-tab.is-selected {
+      border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+      background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--accent) 14%, var(--surface-raised)) 0%,
+        color-mix(in srgb, var(--accent) 6%, var(--surface)) 100%
+      );
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+    }
+
+    .agent-tab.is-selected .agent-tab-name {
+      color: var(--accent);
     }
 
     .agent-tab-role {

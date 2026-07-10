@@ -40,6 +40,9 @@
           <span class="main-eyebrow">Workspace Console</span>
           <div class="main-title-row">
             <span class="main-title">多 Agent 协作台</span>
+            <span class="current-agent" id="current-agent" title="当前默认 Agent；右侧卡片点击切换，消息行首 @ 可单次覆盖">
+              当前 Agent：<strong id="current-agent-name">architect</strong>
+            </span>
             <span class="main-status" id="status" style="display:none"></span>
           </div>
         </div>
@@ -62,8 +65,8 @@
       <section class="messages" id="messages" aria-live="polite" aria-label="消息列表">
         <div class="empty-state" id="empty-state">
           <div class="empty-state-icon">✦</div>
-          输入 @ 选择模型并开始对话
-          <small>Enter 发送 · Shift + Enter 换行</small>
+          选择默认 Agent 后直接发送，或用 @ 单次指定模型
+          <small>Enter 发送 · Shift + Enter 换行 · 右侧卡片切换默认 Agent</small>
         </div>
         <div class="messages-spacer"></div>
       </section>
@@ -95,7 +98,7 @@
       <section class="composer">
         <div class="composer-input">
           <div class="mention-menu" id="mention-menu" hidden></div>
-          <textarea id="prompt" placeholder="输入 @ 选择模型，然后输入消息…" rows="2"></textarea>
+          <textarea id="prompt" placeholder="直接输入消息，或用 @Agent 单次指定模型…" rows="2"></textarea>
         </div>
         <div class="composer-actions">
           <label class="worktree-mode" title="为本次对话创建或复用隔离 worktree">
@@ -115,6 +118,8 @@
        the legacy standalone drawer and overlay have been removed. -->
 
   <script src="/public/api-client.js"></script>
+  <script src="/public/agent-routing.js"></script>
+  <script src="/public/session-runtime.js"></script>
   <script src="/public/session-api.js"></script>
   <script src="/public/session-controller.js"></script>
   <script src="/public/worktree-api.js"></script>

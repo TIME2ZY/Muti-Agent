@@ -1128,6 +1128,132 @@ test("chat endpoint does not reuse a readonly provider session after switching t
   }
 });
 
+test("chat endpoint resumes the matching provider session after base↔worktree round-trip", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-"));
+  const sessionsFile = path.join(tmpDir, "sessions.json");
+  const invocationsFile = path.join(tmpDir, "invocations.json");
+  const sessionMapRoot = path.join(tmpDir, "session-maps");
+  const transcriptsDir = path.join(tmpDir, "transcripts");
+  const prevTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-base-"));
+  const worktreeDir = path.join(os.tmpdir(), "server-workspace-roundtrip-wt");
+  const runs = [];
+
+  if (!prevTranscriptDir) process.env.CAT_CAFE_TRANSCRIPT_DIR = transcriptsDir;
+
+  const server = createServer({
+    uiToken: TEST_UI_TOKEN,
+    sessionsFile,
+    invocationsFile,
+    sessionMapRoot,
+    worktreeManager: {
+      ensureWorktree({ sessionId }) {
+        return {
+          sessionId,
+          baseDir,
+          worktreeDir,
+          branch: `codex/session-${sessionId}`,
+          status: "active",
+          createdAt: "2026-07-02T00:00:00.000Z",
+        };
+      },
+    },
+    spawnRunner(command, args, options) {
+      runs.push({ cwd: options.cwd, env: options.env, args });
+      const child = createMockChild();
+      process.nextTick(() => {
+        child.stdout.end();
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const { port } = server.address();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+    const { session } = await created.json();
+
+    const sessionMapDir = path.join(sessionMapRoot, session.id);
+    fs.mkdirSync(sessionMapDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionMapDir, "sessions.json"), JSON.stringify({
+      orchestrator: {
+        sessionId: "provider-base-1",
+        workspaceKey: `base:${baseDir}`,
+        updatedAt: "2026-07-02T00:00:00.000Z",
+        byWorkspace: {
+          [`base:${baseDir}`]: {
+            sessionId: "provider-base-1",
+            updatedAt: "2026-07-02T00:00:00.000Z",
+          },
+          [`worktree:${worktreeDir}`]: {
+            sessionId: "provider-wt-1",
+            updatedAt: "2026-07-02T01:00:00.000Z",
+          },
+        },
+      },
+    }, null, 2));
+
+    // Seed a session worktree link so useWorktree can reuse it.
+    const sessionsData = JSON.parse(fs.readFileSync(sessionsFile, "utf8"));
+    sessionsData.sessions[session.id].worktree = {
+      sessionId: session.id,
+      baseDir,
+      worktreeDir,
+      branch: `codex/session-${session.id}`,
+      status: "active",
+      createdAt: "2026-07-02T00:00:00.000Z",
+    };
+    sessionsData.sessions[session.id].projectDir = baseDir;
+    fs.writeFileSync(sessionsFile, `${JSON.stringify(sessionsData, null, 2)}\n`, "utf8");
+
+    const worktreeChat = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agent: "orchestrator",
+        prompt: "worktree turn",
+        sessionId: session.id,
+        projectDir: baseDir,
+        useWorktree: true,
+      }),
+    });
+    assert.equal(worktreeChat.status, 200);
+    await worktreeChat.text();
+
+    const baseChat = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agent: "orchestrator",
+        prompt: "base turn again",
+        sessionId: session.id,
+        projectDir: baseDir,
+        useWorktree: false,
+      }),
+    });
+    assert.equal(baseChat.status, 200);
+    await baseChat.text();
+
+    assert.equal(runs.length, 2);
+    assert.equal(runs[0].cwd, worktreeDir);
+    assert.equal(runs[0].env.INVOKE_SESSION_ID, "provider-wt-1");
+    assert.equal(runs[0].env.INVOKE_WORKSPACE_KEY, `worktree:${worktreeDir}`);
+    assert.equal(runs[1].cwd, baseDir);
+    assert.equal(runs[1].env.INVOKE_SESSION_ID, "provider-base-1");
+    assert.equal(runs[1].env.INVOKE_WORKSPACE_KEY, `base:${baseDir}`);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (!prevTranscriptDir) {
+      delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("worktree status, diff, and discard endpoints delegate to manager", async () => {
   const calls = [];
   await withServer(
@@ -2131,11 +2257,14 @@ test("frontend app.js defines unified display helpers for user and agent identit
 
 test("frontend app.js defines invocation-level live run state and renderer hooks", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /liveRuns:\s*new Map\(\)/);
-  assert.match(js, /function applyAgentEvent\(event\)/);
-  assert.match(js, /function ensureLiveRun\(event\)/);
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  assert.match(js, /rt\.liveRuns\.set\(invocationId/);
+  assert.match(js, /function applyAgentEvent\(event,\s*sessionId\)/);
+  assert.match(js, /function ensureLiveRun\(event,\s*sessionId\)/);
   assert.match(js, /progressItems/);
   assert.match(js, /fileChanges/);
+  assert.match(js, /createRuntimeStore\(\)/);
+  assert.match(html, /src="\/public\/session-runtime\.js"/);
 });
 
 test("frontend app.js loads workspace status and diff for the workspace tab", () => {
@@ -2170,13 +2299,32 @@ test("frontend treats sealed SSE event as an expected terminal state", () => {
   const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
   assert.match(chatJs, /case "sealed":/);
   assert.match(chatJs, /context overflow/);
-  assert.match(appJs, /state\.doneReceived = true/);
+  assert.match(appJs, /rt\.doneReceived = true/);
+  assert.match(appJs, /function finishStream\(statusText,\s*sessionId\)/);
 });
 
-test("frontend lets model cards insert an agent mention", () => {
+test("frontend keeps per-session runtime status and does not abort on switch", () => {
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const controllerJs = fs.readFileSync(path.join(__dirname, "../public", "session-controller.js"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  assert.match(controllerJs, /Do not abort the previous session's background run/);
+  assert.doesNotMatch(controllerJs, /if \(state\.controller\) \{\s*state\.controller\.abort\(\)/);
+  assert.match(appJs, /function remountLiveMessages\(sessionId\)/);
+  assert.match(appJs, /session-run-status/);
+  assert.match(css, /\.session-run-status\.status-running/);
+});
+
+test("frontend agent cards set the default agent and support shift-click mention insert", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /item\.addEventListener\("click"[\s\S]*insertAgentMention/);
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  assert.match(js, /function setDefaultAgent/);
+  assert.match(js, /function resolvePromptAgent/);
+  assert.match(js, /agentRouting\.resolvePromptAgent/);
+  assert.match(js, /e\.shiftKey/);
   assert.match(js, /function insertAgentMention/);
+  assert.match(js, /item\.className = "agent-tab" \+ \(isSelected \? " is-selected" : ""\)/);
+  assert.match(html, /id="current-agent"/);
+  assert.match(html, /src="\/public\/agent-routing\.js"/);
 });
 
 test("frontend keeps right-side agent and workspace surfaces in a shared tab system", () => {
@@ -2208,10 +2356,10 @@ test("frontend styles.css defines plain-text live streaming style", () => {
 
 test("frontend keeps thinking and writing as badge-only live states", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /function showThinking\(agent\)/);
+  assert.match(js, /function showThinking\(agent,\s*sessionId\)/);
   assert.match(js, /item\.setBadge\("thinking"\)/);
   assert.match(js, /bubble\.classList\.add\("msg-bubble-live-pending"\)/);
-  assert.match(js, /function appendLive\(agent, text\)/);
+  assert.match(js, /function appendLive\(agent, text,\s*sessionId\)/);
   assert.match(js, /item\.bubble\.classList\.remove\("msg-bubble-live-pending"\)/);
   assert.match(js, /item\.setBadge\("writing"\)/);
   assert.doesNotMatch(js, /thinking-text/);
@@ -2219,12 +2367,15 @@ test("frontend keeps thinking and writing as badge-only live states", () => {
 
 test("frontend app.js surfaces Codex progress before first text delta", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /function setLivePending\(agent,\s*text\)/);
+  assert.match(js, /function setLivePending\(agent,\s*text,\s*sessionId\)/);
   assert.match(js, /function pendingTextForEvent\(event\)/);
   assert.match(js, /event\.type === "command\.started"/);
   assert.match(js, /event\.type === "file\.changed"/);
   assert.match(js, /event\.type === "stderr"/);
-  assert.match(js, /setLivePending\(event\.agent,\s*pendingTextForEvent\(event\)\)/);
+  assert.match(js, /event\.type === "tool\.started"/);
+  assert.match(js, /event\.type === "subagent\.started"/);
+  assert.match(js, /function upsertLiveSubagent/);
+  assert.match(js, /setLivePending\(event\.agent,\s*pendingTextForEvent\(event\),\s*sid\)/);
 });
 
 test("frontend routes stderr SSE into a separate system stderr message", () => {
@@ -2242,10 +2393,20 @@ test("frontend app.js renders semantic recall event bodies for structured events
   assert.match(js, /evt\.kind === "thinking\.delta"/);
   assert.match(js, /evt\.kind === "tool\.started"/);
   assert.match(js, /evt\.kind === "tool\.finished"/);
+  assert.match(js, /evt\.kind === "subagent\.started"/);
+  assert.match(js, /evt\.kind === "subagent\.completed"/);
+  assert.match(js, /evt\.kind === "subagent\.failed"/);
   assert.match(js, /evt\.kind === "command\.started"/);
   assert.match(js, /evt\.kind === "command\.finished"/);
   assert.match(js, /evt\.kind === "file\.changed"/);
   assert.match(js, /evt\.kind === "progress\.update"/);
+});
+
+test("frontend styles define live subagent cards", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  assert.match(css, /\.live-subagents/);
+  assert.match(css, /\.live-subagent-status\.status-running/);
+  assert.match(css, /\.live-subagent\.status-error/);
 });
 
 test("frontend caps recall page size and surfaces truncation state", () => {

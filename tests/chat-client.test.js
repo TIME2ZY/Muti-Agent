@@ -2,16 +2,18 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const chatClientModule = require("../public/chat-client.js");
+const { createRuntimeStore } = require("../public/session-runtime.js");
 
 function makeDeps(overrides = {}) {
+  const runtimeStore = createRuntimeStore();
   const state = {
     currentSessionId: null,
     rightPanelTab: "agents",
-    liveInvocations: new Map(),
-    liveMessages: new Map(),
-    controller: null,
-    doneReceived: false,
+    runtimeStore,
+    sessions: {},
     projectDir: "",
+    selectedAgent: "architect",
+    lastAgent: "architect",
   };
   const promptEl = {
     value: "",
@@ -26,20 +28,20 @@ function makeDeps(overrides = {}) {
 
   return {
     state,
+    runtimeStore,
     promptEl,
     btnSend,
     useWorktreeInput: { checked: false },
     resolvePromptAgent: () => null,
     addSystem() {},
     setStatus() {},
-    updateMentionMenu() {},
     sessionApi: { createSession: async () => ({ id: "s1" }) },
     createMessage() {},
     hideMentionMenu() {},
     fetchImpl: async () => { throw new Error("should not fetch"); },
     flushPendingLiveRender() {},
     renderMd: (text) => text,
-    sessionController: { loadSessions() {} },
+    sessionController: { loadSessions() {}, refreshSessionList() {} },
     loadProjectDir() {},
     loadWorktreeStatus() {},
     loadWorkspaceState() {},
@@ -50,6 +52,8 @@ function makeDeps(overrides = {}) {
     addDebug() {},
     finishStream() {},
     agentLabel: (id) => id,
+    syncComposerControls() {},
+    onRuntimeStatusChange() {},
     ...overrides,
   };
 }
@@ -87,24 +91,28 @@ test("handleSseEvent session updates state and reloads session-scoped data", () 
     loadProjectDir(id) { calls.push(["project", id]); },
     loadWorktreeStatus() { calls.push(["worktree"]); },
     loadWorkspaceState() { calls.push(["workspace"]); },
-    sessionController: { loadSessions() { calls.push(["sessions"]); } },
+    sessionController: {
+      loadSessions() { calls.push(["sessions"]); },
+      refreshSessionList() { calls.push(["refresh"]); },
+    },
   });
   deps.state.rightPanelTab = "workspace";
   const client = chatClientModule.createChatClient(deps);
 
-  client.handleSseEvent("session", { sessionId: "s1" });
+  client.handleSseEvent("session", { sessionId: "s1" }, { sessionId: "s1" });
 
   assert.equal(deps.state.currentSessionId, "s1");
   assert.deepEqual(calls, [["sessions"], ["project", "s1"], ["worktree"], ["workspace"]]);
 });
 
-test("handleSseEvent routes canonical agent-event frames", () => {
+test("handleSseEvent routes canonical agent-event frames into the bound session", () => {
   const seen = [];
   const deps = makeDeps({
-    applyAgentEvent(event) {
-      seen.push(event.type);
+    applyAgentEvent(event, sessionId) {
+      seen.push([event.type, sessionId]);
     },
   });
+  deps.state.currentSessionId = "visible";
   const client = chatClientModule.createChatClient(deps);
 
   client.handleSseEvent("agent-event", {
@@ -112,12 +120,44 @@ test("handleSseEvent routes canonical agent-event frames", () => {
     agent: "planner",
     invocationId: "inv-1",
     items: [],
-  });
+  }, { sessionId: "background" });
 
-  assert.deepEqual(seen, ["progress.update"]);
+  assert.deepEqual(seen, [["progress.update", "background"]]);
+  assert.equal(deps.runtimeStore.get("background").hasStructuredEvents, true);
 });
 
-test("sendPrompt rejects missing agent mention before creating a request", async () => {
+test("background SSE does not mutate the visible session UI helpers", () => {
+  const calls = [];
+  const deps = makeDeps({
+    state: {
+      currentSessionId: "visible",
+      rightPanelTab: "agents",
+      runtimeStore: createRuntimeStore(),
+      sessions: {},
+      projectDir: "",
+    },
+    showThinking(agent, sessionId) { calls.push(["think", agent, sessionId]); },
+    appendLive(agent, text, sessionId) { calls.push(["live", agent, text, sessionId]); },
+    addSystem(text) { calls.push(["system", text]); },
+    addDebug(agent, text) { calls.push(["debug", agent, text]); },
+  });
+  deps.runtimeStore = deps.state.runtimeStore;
+  const client = chatClientModule.createChatClient(deps);
+
+  client.handleSseEvent("agent-start", { agent: "architect", invocationId: "inv-9" }, { sessionId: "bg" });
+  client.handleSseEvent("message", { agent: "architect", text: "secret" }, { sessionId: "bg" });
+  client.handleSseEvent("stderr", { agent: "architect", text: "noise" }, { sessionId: "bg" });
+  client.handleSseEvent("error", { message: "boom" }, { sessionId: "bg" });
+
+  assert.deepEqual(calls, [
+    ["think", "architect", "bg"],
+    ["live", "architect", "secret", "bg"],
+  ]);
+  assert.equal(deps.runtimeStore.get("bg").status, "error");
+  assert.equal(deps.runtimeStore.get("bg").liveInvocations.get("architect"), "inv-9");
+});
+
+test("sendPrompt rejects when no agent can be resolved", async () => {
   const calls = [];
   const deps = makeDeps({
     promptEl: {
@@ -126,18 +166,153 @@ test("sendPrompt rejects missing agent mention before creating a request", async
       focused: 0,
       focus() { this.focused += 1; },
     },
+    resolvePromptAgent: () => null,
     addSystem(text, variant) { calls.push(["system", text, variant]); },
     setStatus(text, variant) { calls.push(["status", text, variant]); },
-    updateMentionMenu() { calls.push(["mention"]); },
   });
   const client = chatClientModule.createChatClient(deps);
 
   await client.sendPrompt();
 
   assert.deepEqual(calls, [
-    ["system", "请先输入 @ 选择一个模型", "error"],
-    ["status", "请选择模型", "error"],
-    ["mention"],
+    ["system", "没有可用的 Agent，请先加载模型列表", "error"],
+    ["status", "无可用模型", "error"],
   ]);
   assert.equal(deps.promptEl.focused, 1);
+});
+
+test("sendPrompt uses a resolved default agent without requiring @mention", async () => {
+  const bodies = [];
+  const runtimeStore = createRuntimeStore();
+  const deps = makeDeps({
+    runtimeStore,
+    promptEl: {
+      value: "hello without mention",
+      disabled: false,
+      focused: 0,
+      focus() {},
+    },
+    state: {
+      currentSessionId: "s1",
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+      selectedAgent: "architect",
+      lastAgent: "architect",
+    },
+    resolvePromptAgent: () => ({ id: "architect", label: "Architect" }),
+    createMessage() {},
+    fetchImpl: async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return {
+        ok: true,
+        body: {
+          getReader() {
+            return {
+              async read() {
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        },
+      };
+    },
+  });
+  const client = chatClientModule.createChatClient(deps);
+
+  await client.sendPrompt();
+
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].agent, "architect");
+  assert.equal(bodies[0].prompt, "hello without mention");
+  assert.equal(deps.state.sessions.s1.lastAgent, "architect");
+});
+
+test("sendPrompt keeps per-session controllers so another session can run in parallel", async () => {
+  const runtimeStore = createRuntimeStore();
+  const started = [];
+
+  function hangingFetch(sessionId) {
+    return async (_url, init) => {
+      started.push(sessionId);
+      return {
+        ok: true,
+        body: {
+          getReader() {
+            return {
+              async read() {
+                await new Promise((resolve, reject) => {
+                  const signal = init.signal;
+                  if (!signal) return;
+                  if (signal.aborted) {
+                    const err = new Error("aborted");
+                    err.name = "AbortError";
+                    reject(err);
+                    return;
+                  }
+                  signal.addEventListener("abort", () => {
+                    const err = new Error("aborted");
+                    err.name = "AbortError";
+                    reject(err);
+                  }, { once: true });
+                });
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        },
+      };
+    };
+  }
+
+  const depsA = makeDeps({
+    runtimeStore,
+    state: {
+      currentSessionId: "sA",
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+      selectedAgent: "architect",
+      lastAgent: "architect",
+    },
+    promptEl: { value: "a", disabled: false, focus() {} },
+    resolvePromptAgent: () => ({ id: "architect" }),
+    fetchImpl: hangingFetch("sA"),
+  });
+  const clientA = chatClientModule.createChatClient(depsA);
+  const sendA = clientA.sendPrompt();
+
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(runtimeStore.getStatus("sA"), "running");
+  assert.ok(runtimeStore.get("sA").controller);
+
+  const depsB = makeDeps({
+    runtimeStore,
+    state: {
+      currentSessionId: "sB",
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+      selectedAgent: "planner",
+      lastAgent: "planner",
+    },
+    promptEl: { value: "b", disabled: false, focus() {} },
+    resolvePromptAgent: () => ({ id: "planner" }),
+    fetchImpl: hangingFetch("sB"),
+  });
+  const clientB = chatClientModule.createChatClient(depsB);
+  const sendB = clientB.sendPrompt();
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(runtimeStore.getStatus("sA"), "running");
+  assert.equal(runtimeStore.getStatus("sB"), "running");
+  assert.deepEqual(started, ["sA", "sB"]);
+  assert.notEqual(runtimeStore.get("sA").controller, runtimeStore.get("sB").controller);
+
+  runtimeStore.abort("sA");
+  runtimeStore.abort("sB");
+  await Promise.allSettled([sendA, sendB]);
 });
