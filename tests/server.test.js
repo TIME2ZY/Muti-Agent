@@ -2234,7 +2234,8 @@ test("frontend uses unified Chinese console copy in the main shell", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.match(html, /多 Agent 协作台/);
   assert.match(html, /已激活能力/);
-  assert.match(html, /参与 Agent/);
+  assert.match(html, />Agents</);
+  assert.doesNotMatch(html, /agent-panel-title/);
   assert.match(html, />清空</);
   assert.match(html, />发送</);
   assert.doesNotMatch(html, />Agent Chat</);
@@ -2511,7 +2512,12 @@ test("frontend styles are split into domain sheets via @import aggregator", () =
   const css = readFrontendCss();
   assert.match(css, /--density/);
   assert.match(css, /\.ui-confirm-dialog/);
-  assert.match(css, /\.side-panel\.is-expanded/);
+  // is-expanded max-height must stay inside the mobile media query; applying it
+  // globally caps desktop workspace/recall tabs at ~360px (regression).
+  assert.match(
+    css,
+    /@media\s*\(\s*max-width:\s*700px\s*\)\s*\{[^}]*\.side-panel\.is-expanded\s*\{[^}]*max-height/
+  );
 });
 
 test("frontend vendors Prism offline and drops jsDelivr CDN", () => {
@@ -2583,11 +2589,13 @@ test("frontend styles.css defines workspace panel layout and diff colors", () =>
 test("frontend styles.css gives the recall panel a full-height scroll layout", () => {
   const css = readFrontendCss();
   assert.match(css, /\.agent-panel,\s*\.workspace-panel,\s*\.recall-panel-inline\s*\{[\s\S]*flex:\s*1 1 auto;/);
+  // Single scroll owner for the right-rail recall list
   assert.match(css, /\.recall-body\s*\{[\s\S]*flex:\s*1;[\s\S]*overflow-y:\s*auto;/);
   assert.match(css, /\.recall-panel-inline\s*\{[\s\S]*overflow:\s*hidden;/);
-  assert.match(css, /\.recall-item-body\s*\{[\s\S]*overflow-y:\s*auto;/);
-  assert.match(css, /\.recall-event-body\s*\{[\s\S]*overflow-y:\s*auto;/);
-  assert.doesNotMatch(css, /\.recall-event-body\s*\{[^}]*overflow:\s*hidden;/);
+  // Nested regions must not introduce extra scrollbars
+  assert.match(css, /\.recall-item-body\s*\{[\s\S]*overflow:\s*visible;/);
+  assert.match(css, /\.recall-event-body\s*\{[\s\S]*overflow:\s*visible;/);
+  assert.match(css, /\.recall-body::-webkit-scrollbar\s*\{[\s\S]*width:\s*5px/);
 });
 
 // ── Phase 4: Session Bootstrap ──────────────────────────────────

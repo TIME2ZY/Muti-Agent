@@ -7,9 +7,11 @@
   display: flex;
   flex-direction: column;
   padding: var(--space-4) var(--space-6) 0;
-  gap: var(--space-5);
+  gap: var(--msg-gap);
   min-height: 0;
   min-width: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 .messages-spacer {
@@ -22,16 +24,12 @@
   flex-direction: column;
   gap: var(--space-1);
   flex-shrink: 0;
-  animation: msg-in 0.25s ease-out;
+  animation: msg-in var(--duration) var(--ease-out);
 }
 
 @keyframes msg-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .message { animation: none; }
 }
 
 .message.user {
@@ -45,13 +43,20 @@
   max-width: 82%;
 }
 
+.message.system {
+  max-width: 72%;
+  opacity: 0.92;
+}
+
 .msg-meta {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  gap: 6px var(--space-2);
   font-size: 12px;
   color: var(--text-tertiary);
   padding: 0 4px;
+  min-height: 22px;
 }
 
 .msg-name {
@@ -59,12 +64,23 @@
   color: var(--text-primary);
 }
 
+.message.assistant .msg-name {
+  color: var(--agent-color, var(--text-primary));
+}
+
+.msg-agent-id {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  opacity: 0.85;
+}
+
 .msg-role-label {
   display: inline-flex;
   align-items: center;
   min-height: 20px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 10px;
   font-family: var(--font-mono);
   letter-spacing: 0.4px;
@@ -80,15 +96,27 @@
   border-color: color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
 }
 
+.message.assistant .msg-role-label {
+  color: var(--agent-color, var(--text-secondary));
+  background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 24%, var(--border-subtle));
+}
+
 .message.system .msg-role-label {
   color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.message.system .msg-name {
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .msg-copy {
   font-size: 12px;
   padding: 2px 4px;
   color: var(--text-tertiary);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   opacity: 0;
   transition: opacity 0.12s, color 0.12s;
 }
@@ -100,9 +128,9 @@
 .msg-card {
   position: relative;
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: 0 10px 24px rgba(15, 20, 18, 0.04);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
@@ -113,13 +141,14 @@
 
 .message.assistant .msg-card {
   background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 84%, white) 0%, var(--surface) 100%);
-  border-color: color-mix(in srgb, var(--assistant-line) 28%, var(--border-subtle));
-  box-shadow: inset 3px 0 0 var(--assistant-line), 0 12px 24px rgba(15, 20, 18, 0.05);
+  border-color: color-mix(in srgb, var(--agent-color, var(--assistant-line)) 30%, var(--border-subtle));
+  box-shadow: inset 3px 0 0 var(--agent-color, var(--assistant-line)), var(--shadow-sm);
 }
 
 .message.system .msg-card {
-  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
   border-style: dashed;
+  box-shadow: none;
 }
 
 .msg-bubble {
@@ -139,10 +168,12 @@
 
 .system .msg-bubble {
   font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
   overflow-wrap: anywhere;
   word-break: break-word;
+  padding: var(--space-2) var(--space-3);
 }
 
 .system.error .msg-card { border-color: color-mix(in srgb, var(--danger) 28%, var(--border-subtle)); }
@@ -152,12 +183,12 @@
   letter-spacing: 0.2px;
 }
 .system.stderr .msg-bubble {
-  color: var(--stderr);
-  background: color-mix(in srgb, var(--stderr) 8%, transparent);
+  color: color-mix(in srgb, var(--stderr) 88%, var(--text-tertiary));
+  background: color-mix(in srgb, var(--stderr) 6%, transparent);
 }
 .system.stderr .msg-card {
-  border-color: color-mix(in srgb, var(--stderr) 32%, var(--border-subtle));
-  background: color-mix(in srgb, var(--stderr) 6%, var(--surface-raised));
+  border-color: color-mix(in srgb, var(--stderr) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--stderr) 5%, var(--surface-raised));
 }
 .message.assistant.error .msg-card { border-color: color-mix(in srgb, var(--danger) 28%, var(--border-subtle)); }
 .message.assistant.error .msg-bubble { color: var(--danger); }
@@ -170,7 +201,7 @@
 
 .live-subagent {
   border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--accent) 6%, var(--surface));
   padding: 8px 10px;
 }
@@ -202,7 +233,7 @@
   font-size: 10px;
   font-family: var(--font-mono);
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border-subtle);
   color: var(--text-tertiary);
 }
@@ -274,27 +305,39 @@
   background: var(--surface-raised);
   border: 1px solid var(--border-subtle);
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   color: var(--accent);
 }
 
-/* ── Fenced code block (with header) ──────────── */
+/* ── Fenced code block (with header) ────────────
+   Strategy: code blocks always use a dark inset shell so Prism
+   "tomorrow" tokens stay readable in both light and dark UI themes.
+   ──────────────────────────────────────────────── */
 
 .md-code {
+  --code-bg: #1d1f1e;
+  --code-head-bg: #262926;
+  --code-border: #343a37;
+  --code-fg: #c8cdc9;
+  --code-muted: #8a928c;
+  --code-hover-bg: #303633;
+
   margin: var(--space-3) 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
-  background: var(--surface-inset);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
   overflow: hidden;
+  color-scheme: dark;
 }
 
 .md-code-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
   padding: 4px var(--space-2) 4px var(--space-3);
-  background: var(--surface-raised);
-  border-bottom: 1px solid var(--border-subtle);
+  background: var(--code-head-bg);
+  border-bottom: 1px solid var(--code-border);
   font-family: var(--font-mono);
   font-size: 11px;
 }
@@ -302,25 +345,25 @@
 .md-code-lang {
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: var(--text-tertiary);
+  color: var(--code-muted);
   font-weight: 600;
 }
 
 .md-code-copy {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--code-muted);
   padding: 2px 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   transition: color 0.15s, background 0.15s;
   letter-spacing: 0.4px;
 }
 .md-code-copy:hover {
-  color: var(--accent);
-  background: var(--surface);
+  color: #7fd6bf;
+  background: var(--code-hover-bg);
 }
 .md-code-copy.copied {
-  color: var(--success);
+  color: #7dba8d;
 }
 
 .md-code pre {
@@ -330,48 +373,44 @@
   line-height: 1.55;
   font-family: var(--font-mono);
   font-size: 0.85em;
+  background: transparent;
 }
 .md-code pre code {
   background: none;
   padding: 0;
   font-size: 1em;
-  color: var(--text-primary);
+  color: var(--code-fg);
 }
 
 /* Custom scrollbar inside code blocks */
 .md-code pre::-webkit-scrollbar { height: 6px; }
-.md-code pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.md-code pre::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--code-muted) 55%, transparent);
+  border-radius: var(--radius-sm);
+}
 .md-code pre::-webkit-scrollbar-track { background: transparent; }
-
-/* ═══════════════════════════════════════════════════════════
-   代码块美化样式
-   ═══════════════════════════════════════════════════════════ */
 
 /* 代码行数统计 */
 .md-code-lines {
-  color: var(--text-tertiary);
+  color: var(--code-muted);
   font-size: 10px;
   margin-left: var(--space-2);
+  margin-right: auto;
 }
 
 /* 折叠/展开按钮 */
 .md-code-toggle {
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--text-tertiary);
+  color: var(--code-muted);
   padding: 2px 6px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   transition: color 0.15s, background 0.15s;
   margin-right: var(--space-1);
 }
 .md-code-toggle:hover {
-  color: var(--accent);
-  background: var(--surface);
-}
-
-/* 可折叠代码块 */
-.md-code-collapsible {
-  /* 可折叠代码块的特殊样式 */
+  color: #7fd6bf;
+  background: var(--code-hover-bg);
 }
 
 /* 折叠状态 */
@@ -387,7 +426,7 @@
   left: 0;
   right: 0;
   height: 60px;
-  background: linear-gradient(transparent, var(--surface-inset));
+  background: linear-gradient(transparent, var(--code-bg));
   pointer-events: none;
 }
 
@@ -397,7 +436,7 @@
   overflow: visible;
 }
 
-/* Prism.js 语法高亮覆盖 */
+/* Prism.js 语法高亮覆盖 — keep transparent so shell dark bg shows */
 .md-code pre[class*="language-"] {
   margin: 0;
   padding: var(--space-3) var(--space-4);
@@ -407,6 +446,7 @@
   background: none;
   padding: 0;
   font-size: 1em;
+  color: var(--code-fg);
 }
 
 /* 行号样式（可选） */
@@ -461,7 +501,7 @@
   padding: var(--space-1) var(--space-4);
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--accent) 6%, transparent);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
 
 /* ── Horizontal rule ────────────────────────── */
@@ -480,7 +520,7 @@
   margin: var(--space-3) 0;
   font-size: 0.92em;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .md-table th, .md-table td {
@@ -552,20 +592,20 @@
   gap: 4px;
   font-size: 11px;
   padding: 0 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   margin-left: 6px;
   line-height: 1.6;
-  transition: opacity 0.3s, background 0.3s;
+  transition: opacity 0.3s, background 0.3s, color 0.3s;
 }
 
 .msg-badge.badge-thinking {
-  background: #f0e6d3;
-  color: #8a6d3b;
+  background: var(--badge-thinking-bg);
+  color: var(--badge-thinking-fg);
 }
 
 .msg-badge.badge-writing {
-  background: #d4ede4;
-  color: #2f7d68;
+  background: var(--badge-writing-bg);
+  color: var(--badge-writing-fg);
 }
 
 .msg-badge.badge-done {
@@ -574,8 +614,8 @@
 }
 
 .msg-badge.badge-error {
-  background: #f5d6d6;
-  color: var(--danger);
+  background: var(--badge-error-bg);
+  color: var(--badge-error-fg);
 }
 
 .badge-dot {
@@ -586,7 +626,7 @@
 }
 
 .badge-thinking .badge-dot {
-  background: #c9a84c;
+  background: var(--badge-thinking-fg);
   animation: dot-pulse 1.2s ease-in-out infinite;
 }
 
@@ -620,7 +660,7 @@
 .msg-thinking {
   margin: 0 0 var(--space-3);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-inset) 88%, transparent);
   color: var(--text-tertiary);
   font-size: 12px;
@@ -666,7 +706,7 @@
 .msg-progress li {
   position: relative;
   padding: 4px 8px 4px 22px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-family: var(--font-mono);
   color: var(--text-secondary);
@@ -710,7 +750,7 @@
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   width: fit-content;
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -745,8 +785,7 @@
   gap: var(--space-3);
   padding: var(--space-10) var(--space-4);
   text-align: center;
-  color: var(--text-tertiary);
-  font-style: italic;
+  color: var(--text-secondary);
   user-select: none;
 }
 
@@ -760,14 +799,57 @@
   background: var(--surface-raised);
   color: var(--accent);
   font-size: 22px;
+  box-shadow: var(--shadow-sm);
 }
 
-.empty-state small {
+.empty-state-title {
+  margin: 0;
+  max-width: 28rem;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.empty-state-hint {
+  margin: 0;
   font-size: 12px;
   font-family: var(--font-mono);
-  font-style: normal;
   color: var(--text-tertiary);
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
+}
+
+.empty-state-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  max-width: 36rem;
+}
+
+.empty-chip {
+  min-height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+  transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.empty-chip:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  transform: translateY(-1px);
+}
+
+.empty-chip:focus-visible {
+  box-shadow: var(--focus-ring);
 }
 
 /* ── Retry button in messages ────────────────────── */

@@ -18,6 +18,14 @@ body {
   font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  /* Firefox scrollbar (WebKit rules below) */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+:root[data-density="compact"] body {
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 button, input, textarea { font: inherit; color: inherit; }
@@ -29,12 +37,106 @@ button {
   padding: 0;
 }
 
+:focus { outline: none; }
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); background-clip: padding-box; }
+
+/* Global motion defaults — honor reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Shared command buttons (composer, confirm, workspace actions) */
+.btn-cmd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--btn-height-sm);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.btn-cmd:hover {
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  border-color: var(--border);
+}
+
+.btn-cmd:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.btn-cmd.primary {
+  min-height: var(--btn-height);
+  padding: 8px 18px;
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn-cmd.primary:hover {
+  color: var(--accent-text);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-cmd.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
+}
+
+.btn-cmd.danger:hover {
+  color: var(--danger-hover);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
+.btn-cmd.danger:focus-visible {
+  box-shadow: var(--focus-ring-danger);
+}
+
+/* Primary + danger (e.g. Send → Stop): solid danger CTA */
+.btn-cmd.primary.danger {
+  color: var(--danger-text);
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.btn-cmd.primary.danger:hover {
+  color: var(--danger-text);
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}

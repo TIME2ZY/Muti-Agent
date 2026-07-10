@@ -1,10 +1,16 @@
 /* ═══════════════════════════════════════════════════════════
    RECALL (memory/回忆) PANEL
+
+   Scroll model (critical for UX in the narrow right rail):
+   - Exactly ONE scroll owner: .recall-body (list)
+   - Expanded invocation content flows inside the list (no nested bar)
+   - Event bodies expand in place (no per-event bar)
+   - Inline message recall (.msg-recall-panel) is a separate single scroller
    ═══════════════════════════════════════════════════════════ */
 
 .recall-search {
   flex-shrink: 0;
-  padding: var(--space-2) var(--space-4);
+  padding: 0 0 var(--space-2);
 }
 .recall-search input {
   width: 100%;
@@ -12,23 +18,46 @@
   font-size: 13px;
   background: var(--surface-raised);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   color: var(--text-primary);
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 .recall-search input:focus { border-color: var(--accent); }
+.recall-search input:focus-visible { box-shadow: var(--focus-ring); }
 
 .recall-body {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: var(--space-2) var(--space-3) var(--space-4);
+  padding: 0 2px var(--space-2) 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
   min-height: 0;
+  /* Thin rail scrollbar (Firefox + WebKit) */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border) 80%, transparent) transparent;
+}
+
+.recall-body::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.recall-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.recall-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+.recall-body::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+  background-clip: padding-box;
 }
 
 .recall-empty {
@@ -47,10 +76,15 @@
 
 .recall-item {
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface-raised);
   overflow: hidden;
   flex-shrink: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.recall-item.expanded {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
+  box-shadow: var(--shadow-sm);
 }
 .recall-item-head {
   display: flex;
@@ -71,7 +105,7 @@
   font-size: 10px;
   font-family: var(--font-mono);
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   letter-spacing: 0.3px;
   text-transform: uppercase;
   background: var(--surface-inset);
@@ -97,22 +131,21 @@
   transition: transform 0.15s;
 }
 .recall-item.expanded .recall-item-caret { transform: rotate(90deg); }
+
+/* No nested scrollbar: expanded content participates in .recall-body scroll */
 .recall-item-body {
   border-top: 1px solid var(--border-subtle);
-  padding: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-3);
   background: var(--surface-inset);
-  max-height: min(55vh, 420px);
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
+  max-height: none;
+  overflow: visible;
 }
 
 /* ── Search hit rows ──────────────────────────────────── */
 
 .recall-hit {
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface-raised);
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
@@ -145,23 +178,78 @@
   overflow: hidden;
 }
 
-/* ── Event stream (shared by panel + inline expand) ──── */
+/* ── Event stream timeline ───────────────────────────── */
 
 .recall-events {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
+  padding: 2px 0 2px 14px;
 }
+
+/* Continuous vertical rail */
+.recall-events::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 35%, var(--border-subtle)),
+    var(--border-subtle) 40%,
+    var(--border-subtle)
+  );
+  pointer-events: none;
+}
+
 .recall-event {
-  border-left: 2px solid var(--border);
-  padding: var(--space-1) var(--space-2);
+  position: relative;
+  border: 1px solid var(--border-subtle);
+  border-left: none;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   background: var(--surface);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: var(--radius-md);
+  box-shadow: none;
 }
-.recall-event.kind-stdout { border-left-color: var(--assistant-line); }
-.recall-event.kind-stderr { border-left-color: var(--stderr); }
-.recall-event.kind-invocation-start { border-left-color: var(--accent); }
-.recall-event.kind-invocation-end { border-left-color: var(--success); }
+
+/* Node on the rail */
+.recall-event::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 11px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+  border: 2px solid var(--surface-inset);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 50%, transparent);
+  z-index: 1;
+}
+
+.recall-event.kind-stdout::before { background: var(--assistant-line); }
+.recall-event.kind-stderr::before { background: var(--stderr); }
+.recall-event.kind-invocation-start::before { background: var(--accent); }
+.recall-event.kind-invocation-end::before { background: var(--success); }
+
+/* Soft left tint by kind */
+.recall-event.kind-stdout {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--assistant-line) 70%, transparent);
+}
+.recall-event.kind-stderr {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--stderr) 70%, transparent);
+}
+.recall-event.kind-invocation-start {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.recall-event.kind-invocation-end {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--success) 70%, transparent);
+}
+
 .recall-event-head {
   display: flex;
   align-items: center;
@@ -180,6 +268,8 @@
   font-family: var(--font-mono);
   color: var(--text-tertiary);
 }
+
+/* No nested scrollbar: long payloads scroll with the parent list/panel */
 .recall-event-body {
   margin-top: 2px;
   font-size: 11px;
@@ -189,11 +279,8 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  max-height: 18em;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
+  max-height: none;
+  overflow: visible;
 }
 .recall-event.kind-stderr .recall-event-body { color: var(--stderr); }
 
@@ -204,7 +291,7 @@
   font-family: var(--font-mono);
   color: var(--text-tertiary);
   padding: 2px 6px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   letter-spacing: 0.3px;
   opacity: 0;
   transition: opacity 0.12s, color 0.12s, background 0.12s;
@@ -214,15 +301,28 @@
 .msg-recall:hover { opacity: 1; color: var(--accent); background: var(--surface-raised); }
 .msg-recall.open { color: var(--accent); opacity: 1; }
 
+/* Single scroller for in-message expand (not nested with event bodies) */
 .msg-recall-panel {
   margin-top: var(--space-2);
   padding: var(--space-2);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface-inset);
-  max-height: min(50vh, 360px);
+  max-height: min(40vh, 320px);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border) 80%, transparent) transparent;
+}
+
+.msg-recall-panel::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.msg-recall-panel::-webkit-scrollbar-track { background: transparent; }
+.msg-recall-panel::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 999px;
 }

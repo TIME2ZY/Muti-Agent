@@ -22,7 +22,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
-  background: color-mix(in srgb, #000 45%, transparent);
+  background: var(--overlay-scrim);
 }
 
 .ui-confirm-backdrop[hidden] { display: none; }
@@ -30,10 +30,10 @@
 .ui-confirm-dialog {
   width: min(420px, 100%);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--surface);
   color: var(--text-primary);
-  box-shadow: 0 16px 40px color-mix(in srgb, #000 25%, transparent);
+  box-shadow: var(--shadow-lg);
   padding: var(--space-5);
 }
 
@@ -56,13 +56,23 @@
   gap: var(--space-3);
 }
 
-/* Mobile side-panel expand for workspace/recall */
-.side-panel.is-expanded {
-  max-height: min(50vh, 360px) !important;
+/* Mobile only: expand side panel for workspace/recall density.
+   Must NOT apply on desktop — otherwise workspace/recall tabs get
+   capped at ~360px while the agent tab stays full height. */
+@media (max-width: 700px) {
+  .side-panel.is-expanded {
+    max-height: min(70vh, 520px) !important;
+  }
 }
 
 .mention-option.active,
 .mention-option.is-active {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
   color: var(--text-primary);
+}
+
+/* Prefer token focus ring over ad-hoc outlines on interactive chips */
+.panel-tab.is-active:focus-visible,
+.agent-tab.is-selected:focus-visible {
+  box-shadow: var(--focus-ring);
 }
