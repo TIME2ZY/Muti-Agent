@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { assertValidOpaqueId, isValidOpaqueId } = require("./id-policy");
 
 const LOCK_RETRY_MS = 25;
 const LOCK_TIMEOUT_MS = 5000;
@@ -43,6 +44,7 @@ function withFileLock(sessionsFile, fn) {
 }
 
 function makeSession(id) {
+  assertValidOpaqueId(id, "sessionId");
   return {
     id,
     title: "",
@@ -118,11 +120,13 @@ function listSessions(sessionsFile) {
 }
 
 function getSession(sessionsFile, sessionId) {
+  if (!isValidOpaqueId(sessionId)) return null;
   const data = readSessions(sessionsFile);
   return data.sessions[sessionId] || null;
 }
 
 function ensureSession(sessionsFile, sessionId) {
+  assertValidOpaqueId(sessionId, "sessionId");
   return withFileLock(sessionsFile, () => {
     const data = readSessions(sessionsFile);
     let session = data.sessions[sessionId];
@@ -137,6 +141,7 @@ function ensureSession(sessionsFile, sessionId) {
 }
 
 function setSessionProjectDir(sessionsFile, sessionId, projectDir) {
+  if (!isValidOpaqueId(sessionId)) return null;
   return withFileLock(sessionsFile, () => {
     const data = readSessions(sessionsFile);
     const session = data.sessions[sessionId];
@@ -149,6 +154,7 @@ function setSessionProjectDir(sessionsFile, sessionId, projectDir) {
 }
 
 function setSessionWorktree(sessionsFile, sessionId, worktree) {
+  if (!isValidOpaqueId(sessionId)) return null;
   return withFileLock(sessionsFile, () => {
     const data = readSessions(sessionsFile);
     const session = data.sessions[sessionId];
@@ -161,6 +167,7 @@ function setSessionWorktree(sessionsFile, sessionId, worktree) {
 }
 
 function deleteSession(sessionsFile, sessionId) {
+  if (!isValidOpaqueId(sessionId)) return false;
   return withFileLock(sessionsFile, () => {
     const data = readSessions(sessionsFile);
     if (!data.sessions[sessionId]) return false;
@@ -175,6 +182,7 @@ function deleteSession(sessionsFile, sessionId) {
 }
 
 function appendToSession(sessionsFile, sessionId, message, options = {}) {
+  if (!isValidOpaqueId(sessionId)) return null;
   return withFileLock(sessionsFile, () => {
     const allowCreate = options.allowCreate !== false;
     const data = readSessions(sessionsFile);

@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { DEFAULT_TRANSCRIPT_DIR } = require("../server/runtime-paths");
+const { isValidOpaqueId, resolveInside } = require("../server/id-policy");
 const MAX_LINE_BYTES = 256 * 1024;
 
 // Single global write queue. Serializing all appends through one chain
@@ -17,15 +18,11 @@ function setTranscriptDir(dir) {
 }
 
 function sanitizeId(id) {
-  if (typeof id !== "string" || !id) return "_invalid";
-  // Dots are safe inside a single path segment (path.join normalizes `..`),
-  // so we keep them for cleaner filenames. Only replace path separators and
-  // other control characters.
-  return id.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200);
+  return isValidOpaqueId(id) ? id : "_invalid";
 }
 
 function getInvocationPath(sessionId, invocationId) {
-  return path.join(
+  return resolveInside(
     getTranscriptDir(),
     sanitizeId(sessionId),
     "invocations",
@@ -34,7 +31,7 @@ function getInvocationPath(sessionId, invocationId) {
 }
 
 function getSessionDir(sessionId) {
-  return path.join(getTranscriptDir(), sanitizeId(sessionId));
+  return resolveInside(getTranscriptDir(), sanitizeId(sessionId));
 }
 
 function deleteSessionData(sessionId) {
@@ -68,7 +65,7 @@ function truncatePayload(event, maxBytes) {
 }
 
 function appendEvent(sessionId, invocationId, kind, payload) {
-  if (!sessionId || !invocationId) return;
+  if (!isValidOpaqueId(sessionId) || !isValidOpaqueId(invocationId)) return;
   if (typeof kind !== "string" || !kind) return;
 
   let event = {

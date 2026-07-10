@@ -27,6 +27,15 @@ test("createSession seeds worktree and projectDir defaults", withTempFile((file)
   assert.deepEqual(session.messages, []);
 }));
 
+test("session store rejects path and prototype-like IDs", withTempFile((file) => {
+  for (const id of ["..", "__proto__", "constructor"]) {
+    assert.throws(() => store.ensureSession(file, id), /sessionId/);
+    assert.equal(store.getSession(file, id), null);
+    assert.equal(store.deleteSession(file, id), false);
+    assert.equal(store.appendToSession(file, id, { role: "user", content: "x" }), null);
+  }
+}));
+
 test("setSessionProjectDir persists a session-specific project directory", withTempFile((file) => {
   const session = store.createSession(file);
   const updated = store.setSessionProjectDir(file, session.id, "/tmp/project");

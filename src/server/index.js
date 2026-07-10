@@ -15,6 +15,7 @@ const sessionStore = require("./session-store");
 const sessionMapStore = require("./session-map-store");
 const projectDirService = require("./project-dir");
 const invocationStore = require("./invocation-store");
+const uiSecurity = require("./ui-security");
 const sessionRoutes = require("./session-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
@@ -341,7 +342,7 @@ function readJsonBody(req) {
   });
 }
 
-function serveIndex(res) {
+function serveIndex(res, uiToken) {
   const indexPath = path.join(ROOT, "index.html");
   fs.readFile(indexPath, (error, content) => {
     if (error) {
@@ -353,7 +354,8 @@ function serveIndex(res) {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
     });
-    res.end(content);
+    const html = content.toString("utf8").replace("__CAT_CAFE_UI_TOKEN__", uiToken);
+    res.end(html);
   });
 }
 
@@ -549,6 +551,7 @@ function filterBenignStderr(text) {
 }
 
 function createServer(options = {}) {
+  const uiToken = uiSecurity.createUiToken(options.uiToken);
   const spawnRunner = options.spawnRunner || spawn;
   const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
   const worktreeManager = options.worktreeManager || worktreeManagerModule.createWorktreeManager({
@@ -659,7 +662,7 @@ function createServer(options = {}) {
     filterBenignStderr,
     runChildStream,
     spawnRunner,
-    ensureSession,
+    getSession,
     createSession,
     setSessionProjectDir,
     validateProjectDir,
@@ -676,13 +679,17 @@ function createServer(options = {}) {
     const url = new URL(req.url, "http://127.0.0.1");
 
     if (req.method === "GET" && url.pathname === "/") {
-      serveIndex(res);
+      serveIndex(res, uiToken);
       return;
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/public/")) {
       const relative = url.pathname.slice("/public".length);
       serveStatic(res, relative, path.join(ROOT, "public"));
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/") && !uiSecurity.authorizeApiRequest(req, res, url, { uiToken, sendJson })) {
       return;
     }
 

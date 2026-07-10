@@ -17,9 +17,11 @@ function withTempRoot(fn) {
   };
 }
 
-test("getSessionMapPath nests sessions under a sanitized directory", withTempRoot((root) => {
-  const file = store.getSessionMapPath("a/b:c", root);
-  assert.equal(file, path.join(root, "a_b_c", "sessions.json"));
+test("getSessionMapPath nests valid sessions and rejects unsafe IDs", withTempRoot((root) => {
+  const file = store.getSessionMapPath("session-1", root);
+  assert.equal(file, path.join(root, "session-1", "sessions.json"));
+  assert.throws(() => store.getSessionMapPath("..", root), /chatSessionId/);
+  assert.throws(() => store.getSessionMapPath("a/b:c", root), /chatSessionId/);
 }));
 
 test("readSessionMap returns {} for missing or invalid files", withTempRoot((root) => {

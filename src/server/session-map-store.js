@@ -1,12 +1,13 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { assertValidOpaqueId, resolveInside } = require("./id-policy");
 
 function sanitizeDir(id) {
-  return (id || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200);
+  return assertValidOpaqueId(id, "chatSessionId");
 }
 
 function getSessionMapPath(chatSessionId, sessionMapRoot) {
-  return path.join(sessionMapRoot, sanitizeDir(chatSessionId), "sessions.json");
+  return resolveInside(sessionMapRoot, sanitizeDir(chatSessionId), "sessions.json");
 }
 
 function readSessionMap(chatSessionId, sessionMapRoot) {

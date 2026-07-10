@@ -34,3 +34,27 @@ test("createLatestRequestRunner applies only the latest resolved result", async 
   assert.equal(firstResult.applied, false);
   assert.equal(firstResult.value, "first");
 });
+
+test("createLatestRequestRunner rejects the latest failure for explicit handling", async () => {
+  const runner = latestRequestModule.createLatestRequestRunner();
+  await assert.rejects(
+    runner.run(async () => { throw new Error("network down"); }),
+    /network down/
+  );
+});
+
+test("createLatestRequestRunner suppresses a stale failure", async () => {
+  let rejectFirst;
+  const first = new Promise((resolve, reject) => {
+    rejectFirst = reject;
+  });
+  const runner = latestRequestModule.createLatestRequestRunner();
+  const firstRun = runner.run(() => first);
+  const secondRun = runner.run(async () => "latest");
+  rejectFirst(new Error("stale failure"));
+
+  assert.equal((await secondRun).applied, true);
+  const stale = await firstRun;
+  assert.equal(stale.applied, false);
+  assert.match(stale.error.message, /stale failure/);
+});

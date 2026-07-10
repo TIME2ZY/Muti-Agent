@@ -5,9 +5,24 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { createServer } = require("../src/server/index");
+const { createServer, ensureSession } = require("../src/server/index");
 const { parseA2AMentions } = require("../src/agents/routing");
 const callbacks = require("../src/agents/callbacks");
+
+const TEST_UI_TOKEN = "test-ui-token";
+const nativeFetch = globalThis.fetch.bind(globalThis);
+
+function fetch(input, init = {}) {
+  const headers = new Headers(init.headers || {});
+  headers.set("X-Cat-Cafe-UI-Token", TEST_UI_TOKEN);
+  const method = String(init.method || "GET").toUpperCase();
+  let body = init.body;
+  if (["POST", "PUT", "PATCH"].includes(method) && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+    if (body === undefined) body = "{}";
+  }
+  return nativeFetch(input, { ...init, headers, ...(body !== undefined ? { body } : {}) });
+}
 
 function createMockChild() {
   const child = new EventEmitter();
@@ -43,16 +58,22 @@ function createPassthroughWorktreeManager() {
 
 async function withServer(options, fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoke-server-test-"));
+  const sessionsFile = path.join(tmpDir, "sessions.json");
+  const initialSessionIds = Array.isArray(options.initialSessionIds) ? options.initialSessionIds : [];
+  const serverOptions = { ...options };
+  delete serverOptions.initialSessionIds;
+  for (const sessionId of initialSessionIds) ensureSession(sessionsFile, sessionId);
   const prevTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
   if (!prevTranscriptDir) {
     process.env.CAT_CAFE_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   }
   const server = createServer({
-    sessionsFile: path.join(tmpDir, "sessions.json"),
+    sessionsFile,
     worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
-    ...options,
+    uiToken: TEST_UI_TOKEN,
+    ...serverOptions,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 
@@ -79,6 +100,84 @@ test("serves fixed agent list", async () => {
     for (const agent of body.agents) {
       assert.ok(agent.description && agent.description.length > 0, `Agent ${agent.id} missing description`);
     }
+  });
+});
+
+test("index injects the per-process UI token and loads the authenticated API client", async () => {
+  await withServer({}, async (baseUrl) => {
+    const response = await nativeFetch(`${baseUrl}/`);
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(html, new RegExp(`name="cat-cafe-ui-token" content="${TEST_UI_TOKEN}"`));
+    assert.doesNotMatch(html, /__CAT_CAFE_UI_TOKEN__/);
+    assert.match(html, /src="\/public\/api-client\.js"/);
+  });
+});
+
+test("UI API rejects requests without the per-process token", async () => {
+  await withServer({}, async (baseUrl) => {
+    const response = await nativeFetch(`${baseUrl}/api/agents`);
+    assert.equal(response.status, 401);
+    assert.match((await response.json()).error, /UI token/i);
+  });
+});
+
+test("UI API rejects cross-origin requests even with a valid token", async () => {
+  await withServer({}, async (baseUrl) => {
+    const response = await nativeFetch(`${baseUrl}/api/agents`, {
+      headers: {
+        Origin: "https://evil.example",
+        "X-Cat-Cafe-UI-Token": TEST_UI_TOKEN,
+      },
+    });
+    assert.equal(response.status, 403);
+    assert.match((await response.json()).error, /Origin/i);
+  });
+});
+
+test("UI API rejects non-JSON mutation requests before spawning an agent", async () => {
+  let spawnCount = 0;
+  await withServer({
+    spawnRunner() {
+      spawnCount += 1;
+      return createMockChild();
+    },
+  }, async (baseUrl) => {
+    const response = await nativeFetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/plain",
+        "X-Cat-Cafe-UI-Token": TEST_UI_TOKEN,
+      },
+      body: JSON.stringify({ agent: "architect", prompt: "probe" }),
+    });
+    assert.equal(response.status, 415);
+    assert.equal(spawnCount, 0);
+  });
+});
+
+test("chat rejects unsafe and unknown client-supplied session IDs", async () => {
+  let spawnCount = 0;
+  await withServer({
+    spawnRunner() {
+      spawnCount += 1;
+      return createMockChild();
+    },
+  }, async (baseUrl) => {
+    const unsafe = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: "architect", prompt: "probe", sessionId: ".." }),
+    });
+    assert.equal(unsafe.status, 400);
+
+    const unknown = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: "architect", prompt: "probe", sessionId: "unknown-session" }),
+    });
+    assert.equal(unknown.status, 404);
+    assert.equal(spawnCount, 0);
   });
 });
 
@@ -957,6 +1056,7 @@ test("chat endpoint does not reuse a readonly provider session after switching t
   if (!prevTranscriptDir) process.env.CAT_CAFE_TRANSCRIPT_DIR = transcriptsDir;
 
   const server = createServer({
+    uiToken: TEST_UI_TOKEN,
     sessionsFile,
     invocationsFile,
     sessionMapRoot,
@@ -1694,6 +1794,7 @@ async function withActiveChat(fn) {
   try {
     await withServer(
       {
+        initialSessionIds: ["phase3-active-session"],
         spawnRunner(command, args, options = {}) {
           captured.env = options.env;
           const child = createMockChild();
@@ -2196,6 +2297,7 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
   try {
     await withServer(
       {
+        initialSessionIds: ["bootstrap-test-session"],
         spawnRunner(command, args) {
           // Last positional arg is the prompt
           capturedPrompt = args[args.length - 1];
@@ -2247,6 +2349,7 @@ test("A2A-routed agents do NOT get bootstrap packet (handoff block instead)", as
 
   await withServer(
     {
+      initialSessionIds: ["bootstrap-a2a-test"],
       spawnRunner(command, args) {
         prompts.push(args[args.length - 1]);
         const child = createMockChild();
@@ -2297,6 +2400,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
   try {
     await withServer(
       {
+        initialSessionIds: [sessionId],
         spawnRunner(command, args) {
           if (!firstPrompts) firstPrompts = [args[args.length - 1]];
           const child = createMockChild();
@@ -2321,6 +2425,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
 
     await withServer(
       {
+        initialSessionIds: [sessionId],
         spawnRunner(command, args) {
           secondPrompt = args[args.length - 1];
           const child = createMockChild();

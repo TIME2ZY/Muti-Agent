@@ -37,9 +37,10 @@
     const recallPanelInlineEl = $("#recall-panel-inline");
     const recallBodyEl = recallPanelInlineEl ? recallPanelInlineEl.querySelector(".recall-body") : null;
     const recallSearchInputEl = recallPanelInlineEl ? recallPanelInlineEl.querySelector(".recall-search input") : null;
-    const sessionApi = window.SessionApi.createSessionApi(window.fetch.bind(window));
-    const worktreeApi = window.WorktreeApi.createWorktreeApi(window.fetch.bind(window));
-    const recallApi = window.RecallApi.createRecallApi(window.fetch.bind(window));
+    const apiFetch = window.ApiClient.apiFetch;
+    const sessionApi = window.SessionApi.createSessionApi(apiFetch);
+    const worktreeApi = window.WorktreeApi.createWorktreeApi(apiFetch);
+    const recallApi = window.RecallApi.createRecallApi(apiFetch);
     const escHtml = window.MarkdownLite.escHtml;
     const renderMd = window.MarkdownLite.renderMd;
     const writeClipboard = window.ClipboardUtils.writeClipboard;
@@ -1130,18 +1131,15 @@
 
     function updateActiveSkills(prompt) {
       clearTimeout(state.skillDebounce);
-      state.skillDebounce = setTimeout(() => {
-        runLatestSkillsRequest.run(
-          () => fetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`).then(jsonOrThrow),
-          {
-            onResolve(d) {
-              renderSkillTags(d.active);
-            },
-            onReject(e) {
-              console.warn("Active skills load failed:", e);
-            },
-          }
-        );
+      state.skillDebounce = setTimeout(async () => {
+        try {
+          const result = await runLatestSkillsRequest.run(
+            () => apiFetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`).then(jsonOrThrow)
+          );
+          if (result.applied) renderSkillTags(result.value.active);
+        } catch (error) {
+          console.warn("Active skills load failed:", error);
+        }
       }, 300);
     }
 
@@ -1280,7 +1278,7 @@
 
     async function loadAgents() {
       try {
-        const res = await fetch("/api/agents");
+        const res = await apiFetch("/api/agents");
         const data = await jsonOrThrow(res);
         state.agents = data.agents;
         if (!state.agents.find(a => a.id === state.selectedAgent)) {
@@ -1570,7 +1568,7 @@
       sessionApi,
       createMessage,
       hideMentionMenu,
-      fetchImpl: window.fetch.bind(window),
+      fetchImpl: apiFetch,
       flushPendingLiveRender,
       renderMd,
       sessionController,
@@ -1662,7 +1660,7 @@
     loadProjectDir();
     renderWorkspacePanel();
 
-    fetch("/api/skills")
+    apiFetch("/api/skills")
       .then(jsonOrThrow)
       .then((d) => {
         state.skillsMetadata = d.skills || [];

@@ -166,12 +166,22 @@ test("payload larger than MAX_LINE_BYTES is truncated with marker", withTempDir(
   assert.ok(events[0].payload.text.length < 300 * 1024);
 }));
 
-test("sanitizeId replaces path-unsafe characters", () => {
-  assert.equal(transcript._sanitizeId("abc/def\\ghi"), "abc_def_ghi");
-  assert.equal(transcript._sanitizeId("../../etc/passwd"), ".._.._etc_passwd");
+test("sanitizeId preserves valid IDs and contains path-unsafe values", () => {
+  assert.equal(transcript._sanitizeId("abc-def_ghi"), "abc-def_ghi");
+  assert.equal(transcript._sanitizeId("abc/def\\ghi"), "_invalid");
+  assert.equal(transcript._sanitizeId(".."), "_invalid");
+  assert.equal(transcript._sanitizeId("../../etc/passwd"), "_invalid");
   assert.equal(transcript._sanitizeId(""), "_invalid");
   assert.equal(transcript._sanitizeId(null), "_invalid");
 });
+
+test("unsafe IDs cannot escape the configured transcript root", withTempDir(async (tmpDir) => {
+  const resolved = transcript._getInvocationPath("..", "probe");
+  assert.equal(path.relative(tmpDir, resolved).startsWith(".."), false);
+  transcript.appendEvent("..", "probe", "stdout", { text: "x" });
+  await transcript.flush();
+  assert.equal(fs.existsSync(resolved), false);
+}));
 
 test("flush resolves after pending writes are durable", withTempDir(async () => {
   transcript.appendEvent("s1", "i1", "stdout", { text: "before-flush" });

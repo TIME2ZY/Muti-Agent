@@ -41,7 +41,11 @@
         return data.dir || "";
       },
       async createSession() {
-        const data = await jsonOrThrow(await request("/api/sessions", { method: "POST" }));
+        const data = await jsonOrThrow(await request("/api/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        }));
         return data.session;
       },
       async deleteSession(sessionId) {

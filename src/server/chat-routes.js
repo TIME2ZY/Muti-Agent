@@ -1,3 +1,5 @@
+const { assertValidOpaqueId } = require("./id-policy");
+
 function resolveResumeSessionId(sessionMap, agent, workspaceKey) {
   const entry = sessionMap && sessionMap[agent];
   if (!entry || typeof entry.sessionId !== "string" || !entry.sessionId) return "";
@@ -34,7 +36,7 @@ function createChatRoutes({
   filterBenignStderr,
   runChildStream,
   spawnRunner,
-  ensureSession,
+  getSession,
   createSession,
   setSessionProjectDir,
   validateProjectDir,
@@ -100,7 +102,7 @@ function createChatRoutes({
     const requestedAgent = typeof body.agent === "string" ? body.agent : "architect";
     const rawPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     const useWorktree = body.useWorktree === true;
-    let sessionId = typeof body.sessionId === "string" ? body.sessionId : null;
+    let sessionId = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : null;
 
     if (!AGENTS[requestedAgent]) {
       sendJson(res, 400, { error: `Unsupported agent "${requestedAgent}".` });
@@ -111,11 +113,23 @@ function createChatRoutes({
       return true;
     }
 
+    let session;
     if (!sessionId) {
-      sessionId = createSession(options.sessionsFile || undefined).id;
+      session = createSession(options.sessionsFile || undefined);
+      sessionId = session.id;
+    } else {
+      try {
+        assertValidOpaqueId(sessionId, "sessionId");
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+        return true;
+      }
+      session = getSession(options.sessionsFile || undefined, sessionId);
+      if (!session) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
     }
-
-    let session = ensureSession(options.sessionsFile || undefined, sessionId);
     if (typeof body.projectDir === "string" && body.projectDir.trim()) {
       let resolvedProjectDir;
       try {
