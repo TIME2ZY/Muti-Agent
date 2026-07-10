@@ -1,12 +1,30 @@
 (function initDisplayHelpers(globalScope) {
   "use strict";
 
+  function resolveLocale() {
+    if (globalScope.Locale && globalScope.Locale.locale) return globalScope.Locale.locale;
+    if (globalScope.LocaleZhCN && globalScope.LocaleZhCN.locale) return globalScope.LocaleZhCN.locale;
+    if (typeof module !== "undefined" && module.exports && typeof require === "function") {
+      try {
+        return require("./locale-zh-CN.js").locale;
+      } catch {
+        // fall through
+      }
+    }
+    return {
+      role: { user: "用户", system: "系统" },
+      roleBadge: { user: "发起者", assistant: "Agent", system: "系统" },
+      time: { justNow: "刚刚" },
+    };
+  }
+
   function fmtTime(iso, nowMs) {
     if (!iso) return "";
+    const L = resolveLocale();
     const now = typeof nowMs === "number" ? nowMs : Date.now();
     const diff = now - new Date(iso).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "刚刚";
+    if (mins < 1) return (L.time && L.time.justNow) || "刚刚";
     if (mins < 60) return `${mins}m`;
     const hrs = Math.floor(mins / 60);
     if (hrs < 24) return `${hrs}h`;
@@ -33,14 +51,16 @@
   }
 
   function roleBadgeLabel(role) {
-    if (role === "user") return "发起者";
-    if (role === "assistant") return "Agent";
-    return "系统";
+    const L = resolveLocale().roleBadge || {};
+    if (role === "user") return L.user || "发起者";
+    if (role === "assistant") return L.assistant || "Agent";
+    return L.system || "系统";
   }
 
   function roleDisplayName(role, agentId, agents) {
-    if (role === "system") return "系统";
-    return role === "user" ? "用户" : agentLabelFromList(agents, agentId);
+    const L = resolveLocale().role || {};
+    if (role === "system") return L.system || "系统";
+    return role === "user" ? (L.user || "用户") : agentLabelFromList(agents, agentId);
   }
 
   function agentRoleLabel(agent) {

@@ -16,8 +16,18 @@
     };
   }
 
-  function createRuntimeStore() {
+  function createRuntimeStore(options = {}) {
     const runtimes = new Map();
+    const bus = options.bus || null;
+
+    function emitStatus(sessionId, status, extra = {}) {
+      if (!bus || typeof bus.emit !== "function") return;
+      try {
+        bus.emit("runtime:status", { sessionId: sessionId || "_pending", status, ...extra });
+      } catch {
+        // ignore subscriber errors
+      }
+    }
 
     function getOrCreate(sessionId) {
       const id = sessionId || "_pending";
@@ -40,7 +50,9 @@
     function setStatus(sessionId, status) {
       const rt = getOrCreate(sessionId);
       rt.status = status;
-      return touch(rt);
+      touch(rt);
+      emitStatus(sessionId, status);
+      return rt;
     }
 
     function beginRun(sessionId, controller) {
@@ -56,7 +68,9 @@
       rt.liveInvocations.clear();
       rt.lastError = "";
       rt.status = "running";
-      return touch(rt);
+      touch(rt);
+      emitStatus(sessionId, "running");
+      return rt;
     }
 
     function endRun(sessionId, options = {}) {
@@ -77,7 +91,9 @@
         rt.status = "error";
       }
       if (options.error) rt.lastError = String(options.error);
-      return touch(rt);
+      touch(rt);
+      emitStatus(sessionId, rt.status, { error: rt.lastError || "" });
+      return rt;
     }
 
     function abort(sessionId) {
@@ -130,6 +146,7 @@
       rekey,
       getStatus,
       statusSnapshot,
+      bus,
       // test helper
       _runtimes: runtimes,
     };

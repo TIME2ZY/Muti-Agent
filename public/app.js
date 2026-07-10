@@ -50,40 +50,46 @@
   const writeClipboard = window.ClipboardUtils.writeClipboard;
   const runLatestSkillsRequest = window.LatestRequest.createLatestRequestRunner();
   const agentRouting = window.AgentRouting;
-  const runtimeStore = window.SessionRuntime.createRuntimeStore();
+  const bus = window.EventBus.createEventBus();
+  const runtimeStore = window.SessionRuntime.createRuntimeStore({ bus });
   const confirmImpl = window.UiConfirm.createConfirm();
   const sidePanelEl = $("#side-panel");
 
   /* ═══════════════════════════════════════════════════════════
      STATE ownership (see design §4.1)
-     - state: serializable UI selection only
+     - uiStore/state: serializable UI selection only
      - runtimeStore: per-session live runs (not mirrored into state)
+     - bus: pub/sub for ui:change / runtime:status
      - DOM: pure derived views; do not treat DOM as source of truth
      ═══════════════════════════════════════════════════════════ */
 
-  const state = {
-    // UI selection (serializable)
-    agents: [],
-    selectedAgent: "architect",
-    currentSessionId: null,
-    skillsMetadata: [],
-    // Per-session UI slots (lastPrompt/lastAgent for retry) — not live run data
-    sessions: {},
-    lastPrompt: "",
-    lastAgent: "architect",
-    skillDebounce: null,
-    projectDir: "",
-    worktreeStatus: null,
-    mentionOpen: false,
-    mentionIndex: 0,
-    mentionMatches: [],
-    mentionRange: null,
-    recallSearchDebounce: null,
-    rightPanelTab: "agents", // agents | workspace | recall
-    workspace: window.WorkspacePanel.emptyWorkspaceState(),
-    // NOT live run data — see runtimeStore
-    runtimeStore,
-  };
+  const uiStore = window.UiStore.createUiStore({
+    bus,
+    initial: {
+      // UI selection (serializable)
+      agents: [],
+      selectedAgent: "architect",
+      currentSessionId: null,
+      skillsMetadata: [],
+      // Per-session UI slots (lastPrompt/lastAgent for retry) — not live run data
+      sessions: {},
+      lastPrompt: "",
+      lastAgent: "architect",
+      skillDebounce: null,
+      projectDir: "",
+      worktreeStatus: null,
+      mentionOpen: false,
+      mentionIndex: 0,
+      mentionMatches: [],
+      mentionRange: null,
+      recallSearchDebounce: null,
+      rightPanelTab: "agents", // agents | workspace | recall
+      workspace: window.WorkspacePanel.emptyWorkspaceState(),
+      // NOT live run data — see runtimeStore
+      runtimeStore,
+    },
+  });
+  const state = uiStore.state;
 
   const display = window.DisplayHelpers.createDisplayHelpers({
     getAgents: () => state.agents,
@@ -166,9 +172,9 @@
   function setDefaultAgent(agentId, options = {}) {
     const known = state.agents.find((a) => a.id === agentId);
     if (!known) return;
-    state.selectedAgent = known.id;
-    state.lastAgent = known.id;
+    uiStore.patch({ selectedAgent: known.id, lastAgent: known.id }, { source: "setDefaultAgent" });
     sessionSlot().lastAgent = known.id;
+    bus.emit("agent:default", { agentId: known.id });
     if (options.render !== false) {
       renderAgentTabs();
       renderCurrentAgent();
@@ -183,8 +189,7 @@
     const resolvedId = known ? known.id : (state.agents[0]?.id || "architect");
     state.sessions[sid].lastAgent = resolvedId;
     if (sid === state.currentSessionId || !state.currentSessionId) {
-      state.selectedAgent = resolvedId;
-      state.lastAgent = resolvedId;
+      uiStore.patch({ selectedAgent: resolvedId, lastAgent: resolvedId }, { source: "applySessionAgent" });
       renderAgentTabs();
       renderCurrentAgent();
     }
@@ -358,7 +363,8 @@
   };
 
   function setRightPanelTab(nextTab) {
-    state.rightPanelTab = nextTab;
+    uiStore.patch({ rightPanelTab: nextTab }, { source: "setRightPanelTab" });
+    bus.emit("panel:tab", { tab: nextTab });
     if (agentPanelEl) agentPanelEl.hidden = nextTab !== "agents";
     if (workspacePanelEl) workspacePanelEl.hidden = nextTab !== "workspace";
     if (recallPanelInlineEl) recallPanelInlineEl.hidden = nextTab !== "recall";
