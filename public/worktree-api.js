@@ -41,6 +41,8 @@
       async discard(sessionId) {
         return jsonOrThrow(await request(`/api/sessions/${encodeURIComponent(sessionId)}/worktree/discard`, {
           method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
         }));
       },
     };

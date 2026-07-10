@@ -24,7 +24,36 @@ test("createSession seeds worktree and projectDir defaults", withTempFile((file)
   assert.equal(session.title, "");
   assert.equal(session.projectDir, "");
   assert.equal(session.worktree, null);
+  assert.equal(session.lastAgent, "");
   assert.deepEqual(session.messages, []);
+}));
+
+test("appendToSession records lastAgent from user messages", withTempFile((file) => {
+  const session = store.createSession(file);
+  store.appendToSession(file, session.id, {
+    role: "user",
+    agent: "planner",
+    content: "plan this",
+  });
+  const listed = store.listSessions(file);
+  assert.equal(store.getSession(file, session.id).lastAgent, "planner");
+  assert.equal(listed[0].lastAgent, "planner");
+}));
+
+test("setSessionLastAgent updates the session default agent", withTempFile((file) => {
+  const session = store.createSession(file);
+  const updated = store.setSessionLastAgent(file, session.id, "coder");
+  assert.equal(updated.lastAgent, "coder");
+  assert.equal(store.getSession(file, session.id).lastAgent, "coder");
+}));
+
+test("session store rejects path and prototype-like IDs", withTempFile((file) => {
+  for (const id of ["..", "__proto__", "constructor"]) {
+    assert.throws(() => store.ensureSession(file, id), /sessionId/);
+    assert.equal(store.getSession(file, id), null);
+    assert.equal(store.deleteSession(file, id), false);
+    assert.equal(store.appendToSession(file, id, { role: "user", content: "x" }), null);
+  }
 }));
 
 test("setSessionProjectDir persists a session-specific project directory", withTempFile((file) => {

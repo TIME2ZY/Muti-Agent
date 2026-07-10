@@ -17,9 +17,11 @@ function withTempRoot(fn) {
   };
 }
 
-test("getSessionMapPath nests sessions under a sanitized directory", withTempRoot((root) => {
-  const file = store.getSessionMapPath("a/b:c", root);
-  assert.equal(file, path.join(root, "a_b_c", "sessions.json"));
+test("getSessionMapPath nests valid sessions and rejects unsafe IDs", withTempRoot((root) => {
+  const file = store.getSessionMapPath("session-1", root);
+  assert.equal(file, path.join(root, "session-1", "sessions.json"));
+  assert.throws(() => store.getSessionMapPath("..", root), /chatSessionId/);
+  assert.throws(() => store.getSessionMapPath("a/b:c", root), /chatSessionId/);
 }));
 
 test("readSessionMap returns {} for missing or invalid files", withTempRoot((root) => {
@@ -40,3 +42,89 @@ test("deleteSessionMap removes the owning sanitized directory", withTempRoot((ro
 
   assert.equal(fs.existsSync(path.dirname(file)), false);
 }));
+
+test("upsertAgentProviderSession keeps base and worktree provider sessions side by side", () => {
+  const sessions = {};
+  store.upsertAgentProviderSession(sessions, "architect", "th-base", "base:C:\\proj");
+  store.upsertAgentProviderSession(sessions, "architect", "th-wt", "worktree:C:\\proj.worktrees\\s1");
+
+  assert.equal(sessions.architect.sessionId, "th-wt");
+  assert.equal(sessions.architect.workspaceKey, "worktree:C:\\proj.worktrees\\s1");
+  assert.equal(sessions.architect.byWorkspace["base:C:\\proj"].sessionId, "th-base");
+  assert.equal(sessions.architect.byWorkspace["worktree:C:\\proj.worktrees\\s1"].sessionId, "th-wt");
+});
+
+test("resolveResumeSessionId reads the matching workspace slot", () => {
+  const sessions = {};
+  store.upsertAgentProviderSession(sessions, "architect", "th-base", "base:C:\\proj");
+  store.upsertAgentProviderSession(sessions, "architect", "th-wt", "worktree:C:\\proj.worktrees\\s1");
+
+  assert.equal(
+    store.resolveResumeSessionId(sessions, "architect", "base:C:\\proj"),
+    "th-base"
+  );
+  assert.equal(
+    store.resolveResumeSessionId(sessions, "architect", "worktree:C:\\proj.worktrees\\s1"),
+    "th-wt"
+  );
+  assert.equal(
+    store.resolveResumeSessionId(sessions, "architect", "worktree:C:\\other"),
+    ""
+  );
+});
+
+test("resolveResumeSessionId keeps legacy single-slot maps working", () => {
+  const legacyWithKey = {
+    architect: {
+      sessionId: "legacy-base",
+      workspaceKey: "base:C:\\proj",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+    },
+  };
+  assert.equal(
+    store.resolveResumeSessionId(legacyWithKey, "architect", "base:C:\\proj"),
+    "legacy-base"
+  );
+  assert.equal(
+    store.resolveResumeSessionId(legacyWithKey, "architect", "worktree:C:\\proj.worktrees\\s1"),
+    ""
+  );
+
+  const legacyNoKey = {
+    architect: {
+      sessionId: "legacy-plain",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+    },
+  };
+  assert.equal(
+    store.resolveResumeSessionId(legacyNoKey, "architect", "base:C:\\proj"),
+    "legacy-plain"
+  );
+  assert.equal(
+    store.resolveResumeSessionId(legacyNoKey, "architect", "worktree:C:\\proj.worktrees\\s1"),
+    ""
+  );
+});
+
+test("upsert migrates a legacy single-slot entry into byWorkspace without losing it", () => {
+  const sessions = {
+    architect: {
+      sessionId: "legacy-base",
+      workspaceKey: "base:C:\\proj",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+    },
+  };
+  store.upsertAgentProviderSession(
+    sessions,
+    "architect",
+    "th-wt",
+    "worktree:C:\\proj.worktrees\\s1"
+  );
+
+  assert.equal(sessions.architect.byWorkspace["base:C:\\proj"].sessionId, "legacy-base");
+  assert.equal(sessions.architect.byWorkspace["worktree:C:\\proj.worktrees\\s1"].sessionId, "th-wt");
+  assert.equal(
+    store.resolveResumeSessionId(sessions, "architect", "base:C:\\proj"),
+    "legacy-base"
+  );
+});

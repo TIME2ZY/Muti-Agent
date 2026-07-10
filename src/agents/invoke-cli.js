@@ -190,7 +190,8 @@ function buildInvocation(cli, prompt) {
   if (config.name === "opencode") {
     validateModel(config.name, config.model);
 
-    const args = ["run", "--format", "json"];
+    // --thinking: stream reasoning/thinking parts as JSON events (otherwise omitted).
+    const args = ["run", "--format", "json", "--thinking"];
     if (config.model) {
       const fullModel = config.model.startsWith(OPENCODE_GO_MODEL_PREFIX)
         ? config.model
@@ -312,11 +313,14 @@ function extractSessionId(event) {
 /**
  * Write the session ID for this agent to the per-chat-session file so the
  * server can read it back for the next invocation in the same chat session.
+ * Provider sessions are stored per workspaceKey so base/worktree do not overwrite.
  */
 function persistSessionId(cli, sessionId) {
   const file = process.env.INVOKE_SESSION_FILE;
   if (!file || !sessionId) return;
   const key = cli.id || cli.name;
+  const workspaceKey = process.env.INVOKE_WORKSPACE_KEY || "";
+  const { upsertAgentProviderSession } = require("../server/session-map-store");
   let sessions = {};
   try {
     if (fs.existsSync(file)) {
@@ -325,10 +329,10 @@ function persistSessionId(cli, sessionId) {
   } catch {
     // corrupted file → start fresh
   }
-  sessions[key] = {
-    sessionId,
-    updatedAt: new Date().toISOString(),
-  };
+  if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
+    sessions = {};
+  }
+  upsertAgentProviderSession(sessions, key, sessionId, workspaceKey);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(sessions, null, 2)}\n`, "utf8");
 }
@@ -349,12 +353,38 @@ function invoke(cli, prompt, options = {}) {
   };
 
   const invocationId = process.env.CAT_CAFE_INVOCATION_ID || "standalone";
+  const rawEventLogEnabled = /^(1|true|yes|on)$/i.test(String(process.env.INVOKE_RAW_EVENT_LOG || ""));
+  let rawEventLogPath = "";
+  if (rawEventLogEnabled) {
+    try {
+      const { RUNTIME_DATA_DIR } = require("../server/runtime-paths");
+      const rawDir = path.join(RUNTIME_DATA_DIR, "raw-events");
+      fs.mkdirSync(rawDir, { recursive: true });
+      const safeId = String(invocationId).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) || "standalone";
+      rawEventLogPath = path.join(rawDir, `${safeId}.jsonl`);
+    } catch {
+      rawEventLogPath = "";
+    }
+  }
 
   let firstChild;
   let attempt = 0;
 
   const emitEvent = (event) => {
     process.stdout.write(`${JSON.stringify(event)}\n`);
+  };
+
+  const logRawEvent = (raw) => {
+    if (!rawEventLogPath) return;
+    try {
+      fs.appendFileSync(
+        rawEventLogPath,
+        `${JSON.stringify({ ts: new Date().toISOString(), provider: config.name, raw })}\n`,
+        "utf8"
+      );
+    } catch {
+      // ignore logging failures
+    }
   };
 
   const startAttempt = () => {
@@ -447,8 +477,11 @@ function invoke(cli, prompt, options = {}) {
         event = JSON.parse(line);
       } catch (error) {
         console.error("Failed to parse JSON line:", line);
+        logRawEvent({ parseError: true, line });
         return;
       }
+
+      logRawEvent(event);
 
       const sessionId = provider.extractSessionId(event);
       if (sessionId) persistSessionId(config, sessionId);

@@ -6,6 +6,11 @@ const path = require("node:path");
 const test = require("node:test");
 const worktrees = require("../../src/worktree/manager");
 
+test("sanitizeId rejects path-like worktree session IDs", () => {
+  assert.throws(() => worktrees.sanitizeId(".."), /sessionId/);
+  assert.throws(() => worktrees.sanitizeId("../outside"), /sessionId/);
+});
+
 function makeGitRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "worktree-manager-repo-"));
   spawnSync("git", ["init"], { cwd: dir, encoding: "utf8" });

@@ -1,0 +1,474 @@
+/* ═══════════════════════════════════════════════════════════
+   AGENT PANEL
+   ═══════════════════════════════════════════════════════════ */
+
+.side-panel {
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, transparent) 0%, color-mix(in srgb, var(--surface-raised) 72%, transparent) 100%);
+  /* Prefer thin scrollbars if a child ever scrolls */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border) 80%, transparent) transparent;
+}
+
+.side-panel::-webkit-scrollbar,
+.side-panel *::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.side-panel *::-webkit-scrollbar-track {
+  background: transparent;
+}
+.side-panel *::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+.side-panel *::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+  background-clip: padding-box;
+}
+
+.panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-raised) 78%, transparent);
+}
+
+.panel-tab {
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+  background: var(--surface);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  transition: border-color 0.15s, color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.panel-tab:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+}
+
+.panel-tab:focus-visible {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  box-shadow: var(--focus-ring);
+}
+
+.panel-tab.is-active {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.agent-panel,
+.workspace-panel,
+.recall-panel-inline {
+  flex: 1 1 auto;
+  padding: var(--space-4) var(--space-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Recall keeps a single scroll owner (.recall-body). Nested overflow on
+   the panel itself fights expanded cards and makes long traces feel stuck. */
+.recall-panel-inline {
+  overflow: hidden;
+}
+
+/* The HTML `hidden` attribute must override the display:flex
+   above (and any other display: rule further down). Without this
+   rule, the right-side panel-tab content stacks instead of
+   switching because class selectors beat the UA stylesheet's
+   [hidden] { display: none }. */
+.agent-panel[hidden],
+.workspace-panel[hidden],
+.recall-panel-inline[hidden] {
+  display: none;
+}
+
+.agent-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.agent-tab {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: var(--space-3);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-subtle);
+  text-align: left;
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface) 100%);
+  border-radius: var(--radius-md);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--agent-color, var(--border)) 70%, transparent);
+  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+}
+.agent-tab:hover {
+  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 36%, var(--border));
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+.agent-tab:focus-visible {
+  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 36%, var(--border));
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: inset 3px 0 0 var(--agent-color, var(--accent)), var(--focus-ring);
+}
+
+.agent-tab.is-selected {
+  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 48%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--agent-color, var(--accent)) 14%, var(--surface-raised)) 0%,
+    color-mix(in srgb, var(--agent-color, var(--accent)) 6%, var(--surface)) 100%
+  );
+  box-shadow:
+    inset 3px 0 0 var(--agent-color, var(--accent)),
+    0 0 0 1px color-mix(in srgb, var(--agent-color, var(--accent)) 18%, transparent);
+}
+
+.agent-tab.is-selected .agent-tab-name {
+  color: var(--agent-color, var(--accent));
+}
+
+.agent-tab-name {
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+.agent-tab-model {
+  display: block;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  line-height: 1.35;
+  opacity: 0.72;
+  overflow-wrap: anywhere;
+}
+
+/* Capability / role tag — last in card */
+.agent-tab-role {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 20px;
+  margin-top: 2px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--agent-color, var(--accent));
+  background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 24%, var(--border-subtle));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-tab-role:empty {
+  display: none;
+}
+
+.workspace-panel {
+  gap: var(--space-3);
+}
+
+.recall-panel-inline .recall-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  padding: 0 0 var(--space-2);
+}
+
+.recall-panel-inline .recall-search input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.recall-panel-inline .recall-search input:focus {
+  border-color: var(--accent);
+}
+
+.recall-panel-inline .recall-search input:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.workspace-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+.workspace-summary {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface) 100%);
+}
+
+.workspace-summary-branch {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.workspace-summary-meta {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.workspace-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.workspace-action-link {
+  width: fit-content;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.workspace-action-link:hover {
+  color: var(--accent-hover);
+}
+
+/* Fill the right rail: file list + diff share available height */
+.workspace-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(96px, 34%) minmax(0, 1fr);
+  gap: var(--space-3);
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.workspace-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.workspace-files-host,
+.workspace-diff-host {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Wider viewports: side-by-side when the main canvas is roomy */
+@media (min-width: 1200px) {
+  .workspace-content {
+    grid-template-columns: minmax(0, 150px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
+.workspace-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 8px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.workspace-file:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: var(--surface-raised);
+}
+
+.workspace-file:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: var(--surface-raised);
+  box-shadow: var(--focus-ring);
+}
+
+.workspace-file.selected {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.workspace-file-path {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-file-status {
+  flex-shrink: 0;
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+}
+
+.workspace-file-status.status-modified {
+  color: var(--stderr);
+  background: color-mix(in srgb, var(--stderr) 14%, transparent);
+  border-color: color-mix(in srgb, var(--stderr) 28%, var(--border-subtle));
+}
+
+.workspace-file-status.status-untracked {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border-color: color-mix(in srgb, var(--success) 28%, var(--border-subtle));
+}
+
+.workspace-file-status.status-deleted {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--border-subtle));
+}
+
+.workspace-file-status.status-renamed {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
+}
+
+.workspace-diff {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+  overflow: hidden;
+}
+
+.workspace-diff-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  background: color-mix(in srgb, var(--surface-inset) 94%, var(--surface));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-diff-body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.workspace-diff-line {
+  white-space: pre;
+  min-width: fit-content;
+  color: var(--text-secondary);
+}
+
+.workspace-diff-line-added {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+}
+
+.workspace-diff-line-removed {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.workspace-diff-body-virtual {
+  flex: 1 1 auto;
+  min-height: 160px;
+  max-height: none;
+  height: 100%;
+}
+
+.workspace-diff-expand {
+  display: block;
+  width: 100%;
+  margin: var(--space-2) 0;
+  text-align: center;
+}
+
+.workspace-empty {
+  padding: var(--space-4);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-tertiary);
+  text-align: center;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}

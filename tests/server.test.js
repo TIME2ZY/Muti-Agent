@@ -5,9 +5,34 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { createServer } = require("../src/server/index");
+const { createServer, ensureSession } = require("../src/server/index");
 const { parseA2AMentions } = require("../src/agents/routing");
 const callbacks = require("../src/agents/callbacks");
+
+const TEST_UI_TOKEN = "test-ui-token";
+const nativeFetch = globalThis.fetch.bind(globalThis);
+
+/** Resolve @import-based public/styles.css aggregator for contract tests. */
+function readFrontendCss() {
+  const root = path.join(__dirname, "../public");
+  const main = fs.readFileSync(path.join(root, "styles.css"), "utf8");
+  if (!main.includes("@import")) return main;
+  return main.replace(/@import url\("\.\/styles\/([^"]+)"\);/g, (_, name) =>
+    fs.readFileSync(path.join(root, "styles", name), "utf8")
+  );
+}
+
+function fetch(input, init = {}) {
+  const headers = new Headers(init.headers || {});
+  headers.set("X-Cat-Cafe-UI-Token", TEST_UI_TOKEN);
+  const method = String(init.method || "GET").toUpperCase();
+  let body = init.body;
+  if (["POST", "PUT", "PATCH"].includes(method) && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+    if (body === undefined) body = "{}";
+  }
+  return nativeFetch(input, { ...init, headers, ...(body !== undefined ? { body } : {}) });
+}
 
 function createMockChild() {
   const child = new EventEmitter();
@@ -43,16 +68,22 @@ function createPassthroughWorktreeManager() {
 
 async function withServer(options, fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoke-server-test-"));
+  const sessionsFile = path.join(tmpDir, "sessions.json");
+  const initialSessionIds = Array.isArray(options.initialSessionIds) ? options.initialSessionIds : [];
+  const serverOptions = { ...options };
+  delete serverOptions.initialSessionIds;
+  for (const sessionId of initialSessionIds) ensureSession(sessionsFile, sessionId);
   const prevTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
   if (!prevTranscriptDir) {
     process.env.CAT_CAFE_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   }
   const server = createServer({
-    sessionsFile: path.join(tmpDir, "sessions.json"),
+    sessionsFile,
     worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
-    ...options,
+    uiToken: TEST_UI_TOKEN,
+    ...serverOptions,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 
@@ -79,6 +110,84 @@ test("serves fixed agent list", async () => {
     for (const agent of body.agents) {
       assert.ok(agent.description && agent.description.length > 0, `Agent ${agent.id} missing description`);
     }
+  });
+});
+
+test("index injects the per-process UI token and loads the authenticated API client", async () => {
+  await withServer({}, async (baseUrl) => {
+    const response = await nativeFetch(`${baseUrl}/`);
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(html, new RegExp(`name="cat-cafe-ui-token" content="${TEST_UI_TOKEN}"`));
+    assert.doesNotMatch(html, /__CAT_CAFE_UI_TOKEN__/);
+    assert.match(html, /src="\/public\/api-client\.js"/);
+  });
+});
+
+test("UI API rejects requests without the per-process token", async () => {
+  await withServer({}, async (baseUrl) => {
+    const response = await nativeFetch(`${baseUrl}/api/agents`);
+    assert.equal(response.status, 401);
+    assert.match((await response.json()).error, /UI token/i);
+  });
+});
+
+test("UI API rejects cross-origin requests even with a valid token", async () => {
+  await withServer({}, async (baseUrl) => {
+    const response = await nativeFetch(`${baseUrl}/api/agents`, {
+      headers: {
+        Origin: "https://evil.example",
+        "X-Cat-Cafe-UI-Token": TEST_UI_TOKEN,
+      },
+    });
+    assert.equal(response.status, 403);
+    assert.match((await response.json()).error, /Origin/i);
+  });
+});
+
+test("UI API rejects non-JSON mutation requests before spawning an agent", async () => {
+  let spawnCount = 0;
+  await withServer({
+    spawnRunner() {
+      spawnCount += 1;
+      return createMockChild();
+    },
+  }, async (baseUrl) => {
+    const response = await nativeFetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/plain",
+        "X-Cat-Cafe-UI-Token": TEST_UI_TOKEN,
+      },
+      body: JSON.stringify({ agent: "architect", prompt: "probe" }),
+    });
+    assert.equal(response.status, 415);
+    assert.equal(spawnCount, 0);
+  });
+});
+
+test("chat rejects unsafe and unknown client-supplied session IDs", async () => {
+  let spawnCount = 0;
+  await withServer({
+    spawnRunner() {
+      spawnCount += 1;
+      return createMockChild();
+    },
+  }, async (baseUrl) => {
+    const unsafe = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: "architect", prompt: "probe", sessionId: ".." }),
+    });
+    assert.equal(unsafe.status, 400);
+
+    const unknown = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: "architect", prompt: "probe", sessionId: "unknown-session" }),
+    });
+    assert.equal(unknown.status, 404);
+    assert.equal(spawnCount, 0);
   });
 });
 
@@ -943,6 +1052,218 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
   );
 });
 
+test("chat endpoint does not reuse a readonly provider session after switching the same chat into worktree mode", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-resume-"));
+  const sessionsFile = path.join(tmpDir, "sessions.json");
+  const invocationsFile = path.join(tmpDir, "invocations.json");
+  const sessionMapRoot = path.join(tmpDir, "session-maps");
+  const transcriptsDir = path.join(tmpDir, "transcripts");
+  const prevTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-resume-base-"));
+  const worktreeDir = path.join(os.tmpdir(), "server-worktree-resume-session");
+  const runs = [];
+
+  if (!prevTranscriptDir) process.env.CAT_CAFE_TRANSCRIPT_DIR = transcriptsDir;
+
+  const server = createServer({
+    uiToken: TEST_UI_TOKEN,
+    sessionsFile,
+    invocationsFile,
+    sessionMapRoot,
+    worktreeManager: {
+      ensureWorktree({ sessionId }) {
+        return {
+          sessionId,
+          baseDir,
+          worktreeDir,
+          branch: `codex/session-${sessionId}`,
+          status: "active",
+          createdAt: "2026-07-02T00:00:00.000Z",
+        };
+      },
+    },
+    spawnRunner(command, args, options) {
+      runs.push({ cwd: options.cwd, env: options.env, args });
+      const child = createMockChild();
+      process.nextTick(() => {
+        child.stdout.end();
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const { port } = server.address();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+    const { session } = await created.json();
+
+    const sessionMapDir = path.join(sessionMapRoot, session.id);
+    fs.mkdirSync(sessionMapDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionMapDir, "sessions.json"), JSON.stringify({
+      orchestrator: {
+        sessionId: "readonly-session-1",
+        workspaceKey: `base:${baseDir}`,
+        updatedAt: "2026-07-02T00:00:00.000Z",
+      },
+    }, null, 2));
+
+    const response = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agent: "orchestrator",
+        prompt: "switch to worktree",
+        sessionId: session.id,
+        projectDir: baseDir,
+        useWorktree: true,
+      }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].cwd, worktreeDir);
+    assert.equal(runs[0].env.INVOKE_SESSION_ID, "");
+    assert.equal(runs[0].env.INVOKE_WORKSPACE_KEY, `worktree:${worktreeDir}`);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (!prevTranscriptDir) {
+      delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("chat endpoint resumes the matching provider session after base↔worktree round-trip", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-"));
+  const sessionsFile = path.join(tmpDir, "sessions.json");
+  const invocationsFile = path.join(tmpDir, "invocations.json");
+  const sessionMapRoot = path.join(tmpDir, "session-maps");
+  const transcriptsDir = path.join(tmpDir, "transcripts");
+  const prevTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-base-"));
+  const worktreeDir = path.join(os.tmpdir(), "server-workspace-roundtrip-wt");
+  const runs = [];
+
+  if (!prevTranscriptDir) process.env.CAT_CAFE_TRANSCRIPT_DIR = transcriptsDir;
+
+  const server = createServer({
+    uiToken: TEST_UI_TOKEN,
+    sessionsFile,
+    invocationsFile,
+    sessionMapRoot,
+    worktreeManager: {
+      ensureWorktree({ sessionId }) {
+        return {
+          sessionId,
+          baseDir,
+          worktreeDir,
+          branch: `codex/session-${sessionId}`,
+          status: "active",
+          createdAt: "2026-07-02T00:00:00.000Z",
+        };
+      },
+    },
+    spawnRunner(command, args, options) {
+      runs.push({ cwd: options.cwd, env: options.env, args });
+      const child = createMockChild();
+      process.nextTick(() => {
+        child.stdout.end();
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const { port } = server.address();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+    const { session } = await created.json();
+
+    const sessionMapDir = path.join(sessionMapRoot, session.id);
+    fs.mkdirSync(sessionMapDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionMapDir, "sessions.json"), JSON.stringify({
+      orchestrator: {
+        sessionId: "provider-base-1",
+        workspaceKey: `base:${baseDir}`,
+        updatedAt: "2026-07-02T00:00:00.000Z",
+        byWorkspace: {
+          [`base:${baseDir}`]: {
+            sessionId: "provider-base-1",
+            updatedAt: "2026-07-02T00:00:00.000Z",
+          },
+          [`worktree:${worktreeDir}`]: {
+            sessionId: "provider-wt-1",
+            updatedAt: "2026-07-02T01:00:00.000Z",
+          },
+        },
+      },
+    }, null, 2));
+
+    // Seed a session worktree link so useWorktree can reuse it.
+    const sessionsData = JSON.parse(fs.readFileSync(sessionsFile, "utf8"));
+    sessionsData.sessions[session.id].worktree = {
+      sessionId: session.id,
+      baseDir,
+      worktreeDir,
+      branch: `codex/session-${session.id}`,
+      status: "active",
+      createdAt: "2026-07-02T00:00:00.000Z",
+    };
+    sessionsData.sessions[session.id].projectDir = baseDir;
+    fs.writeFileSync(sessionsFile, `${JSON.stringify(sessionsData, null, 2)}\n`, "utf8");
+
+    const worktreeChat = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agent: "orchestrator",
+        prompt: "worktree turn",
+        sessionId: session.id,
+        projectDir: baseDir,
+        useWorktree: true,
+      }),
+    });
+    assert.equal(worktreeChat.status, 200);
+    await worktreeChat.text();
+
+    const baseChat = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agent: "orchestrator",
+        prompt: "base turn again",
+        sessionId: session.id,
+        projectDir: baseDir,
+        useWorktree: false,
+      }),
+    });
+    assert.equal(baseChat.status, 200);
+    await baseChat.text();
+
+    assert.equal(runs.length, 2);
+    assert.equal(runs[0].cwd, worktreeDir);
+    assert.equal(runs[0].env.INVOKE_SESSION_ID, "provider-wt-1");
+    assert.equal(runs[0].env.INVOKE_WORKSPACE_KEY, `worktree:${worktreeDir}`);
+    assert.equal(runs[1].cwd, baseDir);
+    assert.equal(runs[1].env.INVOKE_SESSION_ID, "provider-base-1");
+    assert.equal(runs[1].env.INVOKE_WORKSPACE_KEY, `base:${baseDir}`);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (!prevTranscriptDir) {
+      delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("worktree status, diff, and discard endpoints delegate to manager", async () => {
   const calls = [];
   await withServer(
@@ -1609,6 +1930,7 @@ async function withActiveChat(fn) {
   try {
     await withServer(
       {
+        initialSessionIds: ["phase3-active-session"],
         spawnRunner(command, args, options = {}) {
           captured.env = options.env;
           const child = createMockChild();
@@ -1880,6 +2202,7 @@ test("frontend exposes agent and workspace panel tabs", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.match(html, /id="panel-tab-agents"/);
   assert.match(html, /id="panel-tab-workspace"/);
+  assert.match(html, /id="panel-tab-recall"/);
   assert.match(html, /id="workspace-panel"/);
   assert.match(html, /src="\/public\/session-api\.js"/);
   assert.match(html, /src="\/public\/session-controller\.js"/);
@@ -1887,13 +2210,32 @@ test("frontend exposes agent and workspace panel tabs", () => {
   assert.match(html, /src="\/public\/recall-api\.js"/);
   assert.match(html, /src="\/public\/chat-client\.js"/);
   assert.match(html, /src="\/public\/workspace-diff\.js"/);
+  assert.match(html, /src="\/public\/display-helpers\.js"/);
+  assert.match(html, /src="\/public\/theme\.js"/);
+  assert.match(html, /src="\/public\/mention-composer\.js"/);
+  assert.match(html, /src="\/public\/session-list-view\.js"/);
+  assert.match(html, /src="\/public\/workspace-panel\.js"/);
+  assert.match(html, /src="\/public\/recall-panel\.js"/);
+  assert.match(html, /src="\/public\/message-view\.js"/);
+  assert.match(html, /src="\/public\/project-header\.js"/);
+  assert.match(html, /src="\/public\/agent-panel-view\.js"/);
+});
+
+test("frontend keeps session-level recall entry only inside the right-side tabs", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(html, /id="panel-tab-recall"/);
+  assert.doesNotMatch(html, /id="recall-toggle"/);
+  assert.doesNotMatch(js, /const recallToggleEl\s*=\s*\$\("#recall-toggle"\)/);
+  assert.doesNotMatch(js, /recallToggleEl\.addEventListener/);
 });
 
 test("frontend uses unified Chinese console copy in the main shell", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.match(html, /多 Agent 协作台/);
   assert.match(html, /已激活能力/);
-  assert.match(html, /参与 Agent/);
+  assert.match(html, />Agents</);
+  assert.doesNotMatch(html, /agent-panel-title/);
   assert.match(html, />清空</);
   assert.match(html, />发送</);
   assert.doesNotMatch(html, />Agent Chat</);
@@ -1909,36 +2251,61 @@ test("frontend app.js sends useWorktree from the explicit toggle", () => {
   assert.match(chatJs, /useWorktree:\s*useWorktreeInput\.checked/);
 });
 
+test("frontend loads clipboard helper and app.js uses it for rich copy", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(html, /<script src="\/public\/clipboard\.js"><\/script>/);
+  assert.match(appJs, /window\.ClipboardUtils\.writeClipboard/);
+});
+
+test("frontend app.js guards active skills rendering with latest-only requests", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(html, /<script src="\/public\/latest-request\.js"><\/script>/);
+  assert.match(appJs, /window\.LatestRequest\.createLatestRequestRunner/);
+  assert.match(appJs, /runLatestSkillsRequest\.run/);
+});
+
 test("frontend app.js defines unified display helpers for user and agent identities", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /function roleDisplayName\(role, agentId\)/);
-  assert.match(js, /return role === "user" \? "用户" : agentLabel\(agentId\);/);
-  assert.match(js, /function roleBadgeLabel\(role\)/);
-  assert.match(js, /metaLabel\.textContent = roleDisplayName\(role, agent\)/);
-  assert.match(js, /metaRole\.textContent = roleBadgeLabel\(role\)/);
+  const helpers = fs.readFileSync(path.join(__dirname, "../public", "display-helpers.js"), "utf8");
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(helpers, /function roleDisplayName\(role, agentId/);
+  assert.match(helpers, /return role === "user" \? "用户" : agentLabelFromList\(agents, agentId\)/);
+  assert.match(helpers, /function roleBadgeLabel\(role\)/);
+  assert.match(messageView, /metaLabel\.textContent = roleDisplayName\(role, agent\)/);
+  assert.match(messageView, /metaRole\.textContent = roleBadgeLabel\(role\)/);
+  assert.match(appJs, /createDisplayHelpers/);
 });
 
 test("frontend app.js defines invocation-level live run state and renderer hooks", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /liveRuns:\s*new Map\(\)/);
-  assert.match(js, /function applyAgentEvent\(event\)/);
-  assert.match(js, /function ensureLiveRun\(event\)/);
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  assert.match(js, /rt\.liveRuns\.set\(invocationId/);
+  assert.match(js, /function applyAgentEvent\(event,\s*sessionId\)/);
+  assert.match(js, /function ensureLiveRun\(event,\s*sessionId\)/);
   assert.match(js, /progressItems/);
   assert.match(js, /fileChanges/);
+  assert.match(appJs, /createRuntimeStore\(\)/);
+  assert.match(appJs, /createMessageView/);
+  assert.match(html, /src="\/public\/session-runtime\.js"/);
 });
 
 test("frontend app.js loads workspace status and diff for the workspace tab", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /rightPanelTab:\s*"agents"/);
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
+  assert.match(appJs, /rightPanelTab:\s*"agents"/);
+  assert.match(appJs, /createWorkspacePanel/);
+  assert.match(appJs, /window\.WorktreeApi\.createWorktreeApi/);
   assert.match(js, /async function loadWorkspaceState\(\)/);
-  assert.match(js, /window\.WorktreeApi\.createWorktreeApi/);
   assert.match(js, /worktreeApi\.readStatus\(state\.currentSessionId,\s*\{\s*allowMissing:\s*true\s*\}\)/);
   assert.match(js, /worktreeApi\.readDiff\(state\.currentSessionId,\s*\{\s*allowMissing:\s*true\s*\}\)/);
   assert.match(js, /function renderWorkspacePanel\(\)/);
 });
 
 test("frontend app.js handles missing worktree and discard actions", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
   assert.match(js, /当前会话尚未创建 worktree/);
   assert.match(js, /当前无改动/);
   assert.match(js, /async function discardWorkspace\(\)/);
@@ -1946,7 +2313,7 @@ test("frontend app.js handles missing worktree and discard actions", () => {
 });
 
 test("frontend app.js renders workspace file selection and diff output", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
   assert.match(js, /function renderWorkspaceFileList\(\)/);
   assert.match(js, /function renderWorkspaceDiff\(\)/);
   assert.match(js, /workspace\.selectedPath = path/);
@@ -1955,34 +2322,89 @@ test("frontend app.js renders workspace file selection and diff output", () => {
 });
 
 test("frontend treats sealed SSE event as an expected terminal state", () => {
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
   assert.match(chatJs, /case "sealed":/);
   assert.match(chatJs, /context overflow/);
-  assert.match(appJs, /state\.doneReceived = true/);
+  assert.match(messageView, /rt\.doneReceived = true/);
+  assert.match(messageView, /function finishStream\(statusText,\s*sessionId\)/);
 });
 
-test("frontend lets model cards insert an agent mention", () => {
+test("frontend keeps per-session runtime status and does not abort on switch", () => {
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const sessionList = fs.readFileSync(path.join(__dirname, "../public", "session-list-view.js"), "utf8");
+  const controllerJs = fs.readFileSync(path.join(__dirname, "../public", "session-controller.js"), "utf8");
+  const css = readFrontendCss();
+  assert.match(controllerJs, /Do not abort the previous session's background run/);
+  assert.doesNotMatch(controllerJs, /if \(state\.controller\) \{\s*state\.controller\.abort\(\)/);
+  assert.match(messageView, /function remountLiveMessages\(sessionId\)/);
+  assert.match(sessionList, /session-run-status/);
+  assert.match(css, /\.session-run-status\.status-running/);
+});
+
+test("frontend agent cards set the default agent and support shift-click mention insert", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /item\.addEventListener\("click"[\s\S]*insertAgentMention/);
+  const agentPanel = fs.readFileSync(path.join(__dirname, "../public", "agent-panel-view.js"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  assert.match(js, /function setDefaultAgent/);
+  assert.match(js, /function resolvePromptAgent/);
+  assert.match(js, /agentRouting\.resolvePromptAgent/);
   assert.match(js, /function insertAgentMention/);
+  assert.match(agentPanel, /e\.shiftKey/);
+  assert.match(agentPanel, /item\.className = "agent-tab" \+ \(isSelected \? " is-selected" : ""\)/);
+  assert.match(html, /id="current-agent"/);
+  assert.match(html, /src="\/public\/agent-routing\.js"/);
 });
 
 test("frontend keeps right-side agent and workspace surfaces in a shared tab system", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   assert.match(js, /panelTabAgentsEl\.addEventListener\("click"/);
   assert.match(js, /panelTabWorkspaceEl\.addEventListener\("click"/);
-  assert.match(js, /state\.rightPanelTab = "workspace"/);
-  assert.match(js, /loadWorkspaceState\(\)/);
+  assert.match(js, /function setRightPanelTab\(nextTab\)/);
+  assert.match(js, /activateRightTab\("workspace"\)|loadWorkspaceState\(\)/);
+});
+
+test("frontend workspace panel supports selection-only file list updates", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
+  assert.match(js, /function shouldRebuildFileList/);
+  assert.match(js, /function updateFileList/);
+  assert.match(js, /function updateDiff/);
+  assert.match(js, /DIFF_VIRTUAL_THRESHOLD/);
+});
+
+test("frontend virtual-list is loaded for large workspace diffs", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "virtual-list.js"), "utf8");
+  assert.match(html, /src="\/public\/virtual-list\.js"/);
+  assert.match(js, /function visibleRange/);
+  assert.match(js, /function createVirtualList/);
+});
+
+test("frontend session list exposes runtime status dots and updateStatus", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "session-list-view.js"), "utf8");
+  const css = readFrontendCss();
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  assert.match(js, /session-run-dot/);
+  assert.match(js, /function updateStatus/);
+  assert.match(js, /is-running/);
+  assert.match(css, /\.session-run-dot\.is-running/);
+  assert.match(appJs, /sessionListView\.updateStatus/);
+});
+
+test("frontend chunks process-trace hydrate for long histories", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  assert.match(js, /MESSAGE_VIRTUAL_THRESHOLD/);
+  assert.match(js, /scheduleHydrateProcessTrace/);
+  assert.match(js, /_hydrateQueue/);
 });
 
 test("frontend exposes delete session button on keyboard focus", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.btn-delete-session:focus-visible/);
 });
 
 test("frontend app.js uses plain-text live streaming instead of segmented markdown streaming", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   assert.match(js, /liveText\.className = "stream-live-text"/);
   assert.match(js, /item\._liveTextEl\.textContent = raw/);
   assert.doesNotMatch(js, /function splitIntoSegments/);
@@ -1990,55 +2412,168 @@ test("frontend app.js uses plain-text live streaming instead of segmented markdo
 });
 
 test("frontend styles.css defines plain-text live streaming style", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.stream-live-text\s*\{/);
   assert.doesNotMatch(css, /\.stream-suffix\s*\{/);
 });
 
-test("frontend keeps thinking and writing as badge-only live states", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /function showThinking\(agent\)/);
+test("frontend surfaces thinking in a collapsed details block and keeps writing badges", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const css = readFrontendCss();
+  assert.match(js, /function showThinking\(agent,\s*sessionId\)/);
   assert.match(js, /item\.setBadge\("thinking"\)/);
   assert.match(js, /bubble\.classList\.add\("msg-bubble-live-pending"\)/);
-  assert.match(js, /function appendLive\(agent, text\)/);
+  assert.match(js, /function appendLive\(agent, text,\s*sessionId\)/);
   assert.match(js, /item\.bubble\.classList\.remove\("msg-bubble-live-pending"\)/);
   assert.match(js, /item\.setBadge\("writing"\)/);
-  assert.doesNotMatch(js, /thinking-text/);
+  assert.match(js, /msg-thinking/);
+  assert.match(js, /thinking\.delta/);
+  assert.match(js, /msg-progress/);
+  assert.match(js, /progress\.update/);
+  assert.match(js, /msg-process/);
+  assert.match(js, /wrapProcessDetails/);
+  assert.match(js, /thinkingEl\.open = false/);
+  assert.match(css, /\.msg-thinking/);
+  assert.match(css, /\.msg-progress/);
+  assert.match(css, /\.msg-process/);
+});
+
+test("frontend app.js surfaces Codex progress before first text delta", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  assert.match(js, /function setLivePending\(agent,\s*text,\s*sessionId\)/);
+  assert.match(js, /function pendingTextForEvent\(event\)/);
+  assert.match(js, /event\.type === "command\.started"/);
+  assert.match(js, /event\.type === "file\.changed"/);
+  assert.match(js, /event\.type === "stderr"/);
+  assert.match(js, /event\.type === "tool\.started"/);
+  assert.match(js, /event\.type === "subagent\.started"/);
+  assert.match(js, /function upsertLiveSubagent/);
+  assert.match(js, /live-process-status/);
+  assert.match(js, /function buildProcessTraceFromRun/);
+  assert.match(js, /function buildProcessPanelFromTranscriptEvents/);
+  assert.match(js, /function hydrateProcessTrace/);
+  assert.match(js, /function upsertLiveTool/);
+  assert.match(js, /preservedSubagents/);
+  assert.match(js, /setLivePending\(event\.agent,\s*pendingTextForEvent\(event\),\s*sid\)/);
 });
 
 test("frontend routes stderr SSE into a separate system stderr message", () => {
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
   assert.match(chatJs, /case "stderr":/);
-  assert.match(appJs, /function addDebug\(agent, text\)/);
-  assert.match(appJs, /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/);
+  assert.match(messageView, /function addDebug\(agent, text\)/);
+  assert.match(messageView, /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/);
   assert.match(chatJs, /addDebug\(data\.agent, data\.text\)/);
-  assert.doesNotMatch(appJs, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
+  assert.doesNotMatch(messageView, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
 });
 
 test("frontend app.js renders semantic recall event bodies for structured events", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
   assert.match(js, /evt\.kind === "thinking\.delta"/);
   assert.match(js, /evt\.kind === "tool\.started"/);
   assert.match(js, /evt\.kind === "tool\.finished"/);
+  assert.match(js, /evt\.kind === "subagent\.started"/);
+  assert.match(js, /evt\.kind === "subagent\.completed"/);
+  assert.match(js, /evt\.kind === "subagent\.failed"/);
+  assert.match(js, /evt\.kind === "command\.started"/);
+  assert.match(js, /evt\.kind === "command\.finished"/);
   assert.match(js, /evt\.kind === "file\.changed"/);
   assert.match(js, /evt\.kind === "progress\.update"/);
 });
 
+test("frontend styles define live subagent cards", () => {
+  const css = readFrontendCss();
+  assert.match(css, /\.live-subagents/);
+  assert.match(css, /\.live-subagent-status\.status-running/);
+  assert.match(css, /\.live-subagent\.status-error/);
+});
+
 test("frontend caps recall page size and surfaces truncation state", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
   assert.match(js, /readInvocation\(sid,\s*invocationId,\s*\{\s*from:\s*0,\s*limit:\s*200\s*\}\)/);
   assert.match(js, /仅显示前/);
 });
 
+test("app.js stays an orchestrator under line budget after P0 split", () => {
+  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const lines = js.split(/\r?\n/).length;
+  assert.ok(lines <= 650, `app.js has ${lines} lines; expected <= 650 after P0/P2 wiring`);
+  assert.match(js, /createMessageView/);
+  assert.match(js, /createWorkspacePanel/);
+  assert.match(js, /createRecallPanel/);
+  assert.match(js, /createMentionComposer/);
+  assert.match(js, /createSessionListView/);
+  assert.match(js, /createThemeController/);
+  assert.match(js, /UiConfirm\.createConfirm|createConfirm\(/);
+});
+
+test("frontend styles are split into domain sheets via @import aggregator", () => {
+  const main = fs.readFileSync(path.join(__dirname, "../public/styles.css"), "utf8");
+  assert.match(main, /@import url\("\.\/styles\/tokens\.css"\)/);
+  assert.match(main, /@import url\("\.\/styles\/messages\.css"\)/);
+  assert.match(main, /@import url\("\.\/styles\/workspace\.css"\)/);
+  assert.match(main, /@import url\("\.\/styles\/a11y\.css"\)/);
+  const css = readFrontendCss();
+  assert.match(css, /--density/);
+  assert.match(css, /\.ui-confirm-dialog/);
+  // is-expanded max-height must stay inside the mobile media query; applying it
+  // globally caps desktop workspace/recall tabs at ~360px (regression).
+  assert.match(
+    css,
+    /@media\s*\(\s*max-width:\s*700px\s*\)\s*\{[^}]*\.side-panel\.is-expanded\s*\{[^}]*max-height/
+  );
+});
+
+test("frontend vendors Prism offline and drops jsDelivr CDN", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  assert.doesNotMatch(html, /cdn\.jsdelivr\.net\/npm\/prismjs/);
+  assert.match(html, /\/public\/vendor\/prism\//);
+  assert.ok(fs.existsSync(path.join(__dirname, "../public/vendor/prism/prism.min.js")));
+  assert.ok(fs.existsSync(path.join(__dirname, "../public/vendor/prism/prism-tomorrow.min.css")));
+});
+
+test("frontend a11y: tab controls, mention listbox, send busy wiring", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const mentionJs = fs.readFileSync(path.join(__dirname, "../public", "mention-composer.js"), "utf8");
+  assert.match(html, /aria-controls="agent-panel"/);
+  assert.match(html, /role="listbox"/);
+  assert.match(html, /aria-busy="false"/);
+  assert.match(appJs, /aria-busy/);
+  assert.match(appJs, /aria-label.*停止生成|停止生成/);
+  assert.match(appJs, /ArrowLeft|ArrowRight/);
+  assert.match(mentionJs, /role", "option"|role='option'|setAttribute\("role", "option"\)/);
+  assert.match(mentionJs, /aria-activedescendant/);
+  assert.match(mentionJs, /is-active/);
+});
+
+test("frontend uses ui-confirm for destructive actions", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const workspaceJs = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
+  assert.match(html, /src="\/public\/ui-confirm\.js"/);
+  assert.match(appJs, /confirmImpl/);
+  assert.match(appJs, /删除对话|确认删除/);
+  assert.match(workspaceJs, /confirmFn|confirmImpl/);
+  assert.match(workspaceJs, /await Promise\.resolve\(confirmFn/);
+});
+
+test("frontend distinguishes copy message vs copy code labels", () => {
+  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const md = fs.readFileSync(path.join(__dirname, "../public", "markdown-lite.js"), "utf8");
+  assert.match(messageView, /复制消息/);
+  assert.match(messageView, /复制代码|code\.textContent/);
+  assert.match(md, /复制代码/);
+});
+
 test("frontend styles.css gives stderr messages a separate debug appearance", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.system\.stderr \.msg-bubble/);
   assert.match(css, /\.system\.stderr \.msg-meta/);
 });
 
 test("frontend styles define a shared card system for messages and agent roles", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.msg-card/);
   assert.match(css, /\.message\.user \.msg-card/);
   assert.match(css, /\.message\.assistant \.msg-card/);
@@ -2046,13 +2581,25 @@ test("frontend styles define a shared card system for messages and agent roles",
 });
 
 test("frontend styles.css defines workspace panel layout and diff colors", () => {
-  const css = fs.readFileSync(path.join(__dirname, "../public", "styles.css"), "utf8");
+  const css = readFrontendCss();
   assert.match(css, /\.panel-tabs/);
   assert.match(css, /\.workspace-panel/);
   assert.match(css, /\.workspace-file-list/);
   assert.match(css, /\.workspace-diff/);
   assert.match(css, /\.workspace-diff-line-added/);
   assert.match(css, /\.workspace-diff-line-removed/);
+});
+
+test("frontend styles.css gives the recall panel a full-height scroll layout", () => {
+  const css = readFrontendCss();
+  assert.match(css, /\.agent-panel,\s*\.workspace-panel,\s*\.recall-panel-inline\s*\{[\s\S]*flex:\s*1 1 auto;/);
+  // Single scroll owner for the right-rail recall list
+  assert.match(css, /\.recall-body\s*\{[\s\S]*flex:\s*1;[\s\S]*overflow-y:\s*auto;/);
+  assert.match(css, /\.recall-panel-inline\s*\{[\s\S]*overflow:\s*hidden;/);
+  // Nested regions must not introduce extra scrollbars
+  assert.match(css, /\.recall-item-body\s*\{[\s\S]*overflow:\s*visible;/);
+  assert.match(css, /\.recall-event-body\s*\{[\s\S]*overflow:\s*visible;/);
+  assert.match(css, /\.recall-body::-webkit-scrollbar\s*\{[\s\S]*width:\s*5px/);
 });
 
 // ── Phase 4: Session Bootstrap ──────────────────────────────────
@@ -2068,6 +2615,7 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
   try {
     await withServer(
       {
+        initialSessionIds: ["bootstrap-test-session"],
         spawnRunner(command, args) {
           // Last positional arg is the prompt
           capturedPrompt = args[args.length - 1];
@@ -2119,6 +2667,7 @@ test("A2A-routed agents do NOT get bootstrap packet (handoff block instead)", as
 
   await withServer(
     {
+      initialSessionIds: ["bootstrap-a2a-test"],
       spawnRunner(command, args) {
         prompts.push(args[args.length - 1]);
         const child = createMockChild();
@@ -2169,6 +2718,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
   try {
     await withServer(
       {
+        initialSessionIds: [sessionId],
         spawnRunner(command, args) {
           if (!firstPrompts) firstPrompts = [args[args.length - 1]];
           const child = createMockChild();
@@ -2193,6 +2743,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
 
     await withServer(
       {
+        initialSessionIds: [sessionId],
         spawnRunner(command, args) {
           secondPrompt = args[args.length - 1];
           const child = createMockChild();

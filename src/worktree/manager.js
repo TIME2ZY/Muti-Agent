@@ -2,12 +2,12 @@ const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+const { assertValidOpaqueId, resolveInside } = require("../server/id-policy");
 
 const DEFAULT_STATE_FILE = ".invoke-worktrees.json";
 
 function sanitizeId(id) {
-  if (typeof id !== "string" || !id.trim()) throw new Error("sessionId is required.");
-  return id.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 120);
+  return assertValidOpaqueId(id, "sessionId");
 }
 
 function runGit(args, cwd, opts = {}) {
@@ -125,7 +125,7 @@ function createWorktreeManager(opts = {}) {
     if (existing && fs.existsSync(existing.worktreeDir)) return existing;
 
     const worktreesRoot = path.resolve(opts.worktreesRoot || `${gitRoot}.worktrees`);
-    const worktreeDir = path.join(worktreesRoot, safeSessionId);
+    const worktreeDir = resolveInside(worktreesRoot, safeSessionId);
     const branch = `codex/session-${safeSessionId}`;
 
     fs.mkdirSync(worktreesRoot, { recursive: true });

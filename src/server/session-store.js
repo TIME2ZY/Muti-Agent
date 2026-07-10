@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { assertValidOpaqueId, isValidOpaqueId } = require("./id-policy");
 
 const LOCK_RETRY_MS = 25;
 const LOCK_TIMEOUT_MS = 5000;
@@ -43,6 +44,7 @@ function withFileLock(sessionsFile, fn) {
 }
 
 function makeSession(id) {
+  assertValidOpaqueId(id, "sessionId");
   return {
     id,
     title: "",
@@ -50,6 +52,7 @@ function makeSession(id) {
     messages: [],
     worktree: null,
     projectDir: "",
+    lastAgent: "",
   };
 }
 
@@ -108,21 +111,24 @@ function createSession(sessionsFile) {
 function listSessions(sessionsFile) {
   const data = readSessions(sessionsFile);
   return Object.values(data.sessions)
-    .map(({ id, title, createdAt, messages }) => ({
+    .map(({ id, title, createdAt, messages, lastAgent }) => ({
       id,
       title: title || "(空对话)",
       createdAt,
       messageCount: Array.isArray(messages) ? messages.length : 0,
+      lastAgent: typeof lastAgent === "string" ? lastAgent : "",
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 function getSession(sessionsFile, sessionId) {
+  if (!isValidOpaqueId(sessionId)) return null;
   const data = readSessions(sessionsFile);
   return data.sessions[sessionId] || null;
 }
 
 function ensureSession(sessionsFile, sessionId) {
+  assertValidOpaqueId(sessionId, "sessionId");
   return withFileLock(sessionsFile, () => {
     const data = readSessions(sessionsFile);
     let session = data.sessions[sessionId];
@@ -137,6 +143,7 @@ function ensureSession(sessionsFile, sessionId) {
 }
 
 function setSessionProjectDir(sessionsFile, sessionId, projectDir) {
+  if (!isValidOpaqueId(sessionId)) return null;
   return withFileLock(sessionsFile, () => {
     const data = readSessions(sessionsFile);
     const session = data.sessions[sessionId];
@@ -149,6 +156,7 @@ function setSessionProjectDir(sessionsFile, sessionId, projectDir) {
 }
 
 function setSessionWorktree(sessionsFile, sessionId, worktree) {
+  if (!isValidOpaqueId(sessionId)) return null;
   return withFileLock(sessionsFile, () => {
     const data = readSessions(sessionsFile);
     const session = data.sessions[sessionId];
@@ -160,7 +168,23 @@ function setSessionWorktree(sessionsFile, sessionId, worktree) {
   });
 }
 
+function setSessionLastAgent(sessionsFile, sessionId, lastAgent) {
+  if (!isValidOpaqueId(sessionId)) return null;
+  const agentId = typeof lastAgent === "string" ? lastAgent.trim() : "";
+  if (!agentId) return getSession(sessionsFile, sessionId);
+  return withFileLock(sessionsFile, () => {
+    const data = readSessions(sessionsFile);
+    const session = data.sessions[sessionId];
+    if (!session) return null;
+    session.lastAgent = agentId;
+    data.lastSessionId = sessionId;
+    writeSessionsUnlocked(sessionsFile, data);
+    return session;
+  });
+}
+
 function deleteSession(sessionsFile, sessionId) {
+  if (!isValidOpaqueId(sessionId)) return false;
   return withFileLock(sessionsFile, () => {
     const data = readSessions(sessionsFile);
     if (!data.sessions[sessionId]) return false;
@@ -175,6 +199,7 @@ function deleteSession(sessionsFile, sessionId) {
 }
 
 function appendToSession(sessionsFile, sessionId, message, options = {}) {
+  if (!isValidOpaqueId(sessionId)) return null;
   return withFileLock(sessionsFile, () => {
     const allowCreate = options.allowCreate !== false;
     const data = readSessions(sessionsFile);
@@ -197,6 +222,10 @@ function appendToSession(sessionsFile, sessionId, message, options = {}) {
       session.title = message.content.slice(0, 40).replace(/\n/g, " ");
     }
 
+    if (message.role === "user" && typeof message.agent === "string" && message.agent.trim()) {
+      session.lastAgent = message.agent.trim();
+    }
+
     data.lastSessionId = sessionId;
     writeSessionsUnlocked(sessionsFile, data);
     return session;
@@ -212,6 +241,7 @@ module.exports = {
   ensureSession,
   setSessionProjectDir,
   setSessionWorktree,
+  setSessionLastAgent,
   deleteSession,
   appendToSession,
 };

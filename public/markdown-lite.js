@@ -12,6 +12,31 @@
     return inner.split("|").map((cell) => cell.trim());
   }
 
+  function isTableRowLine(line) {
+    const t = String(line || "").trim();
+    if (!t || t.indexOf("|") === -1) return false;
+    // At least one cell separator; allow missing leading/trailing pipes (GFM).
+    return /^\|?.+\|.+\|?\s*$/.test(t) && !/^[-*]\s+/.test(t) && !/^\d+\.\s+/.test(t);
+  }
+
+  function isTableSepLine(line) {
+    const t = String(line || "").trim();
+    if (!t || t.indexOf("|") === -1) return false;
+    return /^\|?[\s:|-]+\|[\s:|-]+\|?\s*$/.test(t);
+  }
+
+  function isBlockStartLine(line) {
+    const raw = String(line || "");
+    if (!raw.trim()) return true;
+    if (/^---+\s*$/.test(raw) || /^\*\*\*+\s*$/.test(raw)) return true;
+    if (/^#{1,6}\s+/.test(raw)) return true;
+    if (/^[-*]\s+/.test(raw)) return true;
+    if (/^\d+\.\s+/.test(raw)) return true;
+    if (/^>\s?/.test(raw)) return true;
+    if (isTableRowLine(raw)) return true;
+    return false;
+  }
+
   function renderMd(text) {
     if (!text) return "";
 
@@ -20,7 +45,8 @@
     const inlineCodes = [];
     let html = escHtml(text);
 
-    html = html.replace(/```([\w+-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    // Fenced code: allow optional trailing spaces on the closing fence.
+    html = html.replace(/```([\w+-]*)\r?\n?([\s\S]*?)```/g, (_, lang, code) => {
       const idx = codeBlocks.length;
       codeBlocks.push({ lang: lang || "", code: code.replace(/\n$/, "") });
       return `${marker}${idx}${marker}`;
@@ -55,7 +81,7 @@
         continue;
       }
 
-      if (/^\|.*\|\s*$/.test(raw) && i + 1 < lines.length && /^\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      if (isTableRowLine(raw) && i + 1 < lines.length && isTableSepLine(lines[i + 1])) {
         closeList();
         const headerCells = splitTableRow(raw);
         const alignCells = splitTableRow(lines[i + 1]);
@@ -69,7 +95,7 @@
         });
         const bodyRows = [];
         let j = i + 2;
-        while (j < lines.length && /^\|.*\|\s*$/.test(lines[j]) && lines[j].trim()) {
+        while (j < lines.length && isTableRowLine(lines[j]) && !isTableSepLine(lines[j]) && lines[j].trim()) {
           bodyRows.push(splitTableRow(lines[j]));
           j++;
         }
@@ -92,7 +118,8 @@
         continue;
       }
 
-      const heading = raw.match(/^(#{1,3})\s+(.+)/);
+      // Headings h1–h6 (was h1–h3 only — #### etc. leaked as raw text).
+      const heading = raw.match(/^(#{1,6})\s+(.+)/);
       if (heading) {
         closeList();
         const level = heading[1].length;
@@ -159,19 +186,44 @@
         continue;
       }
 
+      // Fenced-code placeholders must stay top-level (not wrapped in <p>).
+      if (new RegExp(`^${marker}\\d+${marker}$`).test(raw.trim())) {
+        closeList();
+        out.push(raw.trim());
+        i++;
+        continue;
+      }
+
+      // Paragraphs: wrap plain lines so newlines/structure survive without
+      // relying on white-space:pre-wrap (which breaks lists/tables styling).
       closeList();
-      out.push(raw);
+      const paraLines = [raw];
       i++;
+      while (
+        i < lines.length
+        && !isBlockStartLine(lines[i])
+        && !new RegExp(`^${marker}\\d+${marker}$`).test(String(lines[i]).trim())
+      ) {
+        paraLines.push(lines[i]);
+        i++;
+      }
+      out.push(`<p>${paraLines.join("<br>")}</p>`);
     }
     closeList();
 
     html = out.join("\n");
+    // Autolink angle-bracket URLs that survived escHtml as &lt;http...&gt;
+    html = html.replace(/&lt;(https?:\/\/[^&\s]+)&gt;/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+    html = html.replace(/&lt;(http[^&\s]+)&gt;/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+    // Also keep the pre-escape form for code-marker paths that reintroduce raw tags.
     html = html.replace(/<(http[^>\s]+)>/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
     html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      (_, label, url) => `<a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(label)}</a>`);
+      (_, label, url) => `<a href="${escHtml(url)}" target="_blank" rel="noopener">${label}</a>`);
     html = html.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-    html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+    // Bold: allow multi-word and CJK without requiring non-* only between stars greedily per segment.
+    html = html.replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/__([^_\n]+?)__/g, "<strong>$1</strong>");
+    html = html.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>");
 
     html = html.replace(new RegExp(`${marker}i(\\d+)${marker}`, "g"), (_, k) =>
       `<code class="md-code-inline">${inlineCodes[+k]}</code>`);
@@ -195,7 +247,7 @@
             <span class="md-code-lang">${escHtml(langLabel)}</span>
             <span class="md-code-lines">${lineCount} lines</span>
             ${shouldCollapse ? '<button type="button" class="md-code-toggle" data-toggle="1">▼</button>' : ""}
-            <button type="button" class="md-code-copy" data-copy="1">Copy</button>
+            <button type="button" class="md-code-copy" data-copy="1" title="复制代码">复制代码</button>
           </div>
           <pre class="${shouldCollapse ? "md-code-pre-collapsed" : ""}"><code class="language-${escHtml(lang)}">${highlightedCode}</code></pre>
         </div>`;
