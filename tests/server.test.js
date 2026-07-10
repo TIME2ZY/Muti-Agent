@@ -120,7 +120,9 @@ test("index injects the per-process UI token and loads the authenticated API cli
     assert.equal(response.status, 200);
     assert.match(html, new RegExp(`name="cat-cafe-ui-token" content="${TEST_UI_TOKEN}"`));
     assert.doesNotMatch(html, /__CAT_CAFE_UI_TOKEN__/);
-    assert.match(html, /src="\/public\/api-client\.js"/);
+    assert.match(html, /src="\/public\/boot\.js"/);
+    const boot = require("../public/boot.js");
+    assert.ok(boot.MODULES.includes("/public/api-client.js"));
   });
 });
 
@@ -412,7 +414,7 @@ test("chat endpoint preserves raw stdout chunk boundaries in SSE message events"
       const text = await response.text();
 
       assert.match(text, /event: message\ndata: \{"agent":"planner","role":"assistant","text":"line 1\\n\\n"\}/);
-      assert.match(text, /event: message\ndata: \{"agent":"planner","role":"assistant","text":"    code-ish indent\\n"\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"planner","role":"assistant","text":" {4}code-ish indent\\n"\}/);
       assert.match(text, /event: message\ndata: \{"agent":"planner","role":"assistant","text":"- list item"\}/);
     }
   );
@@ -718,7 +720,7 @@ test("DELETE /api/sessions/:id does not let a still-running chat recreate the se
 test("POST /api/chat with explicit sessionId stores messages there", async () => {
   await withServer(
     {
-      spawnRunner(command, args) {
+      spawnRunner(_command, _args) {
         const child = createMockChild();
         process.nextTick(() => {
           child.stdout.write("ok");
@@ -1365,7 +1367,7 @@ test("chat endpoint aborts previous invocation on same session", async () => {
   let callCount = 0;
   await withServer(
     {
-      spawnRunner(command, args) {
+      spawnRunner(_command, _args) {
         callCount += 1;
         const child = createMockChild();
         if (callCount === 1) {
@@ -1763,7 +1765,7 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
 
     await withServer(
       {
-        spawnRunner(command, args) {
+        spawnRunner(_command, _args) {
           const child = createMockChild();
           process.nextTick(() => {
             child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-transcript", text: "partial " }) + "\n");
@@ -1842,7 +1844,7 @@ test("chat endpoint emits context-warning when fillRatio crosses warn threshold"
   try {
     await withServer(
       {
-        spawnRunner(command, args) {
+        spawnRunner(_command, _args) {
           const child = createMockChild();
           process.nextTick(() => {
             // capacity 20 tokens × 4 chars/token = 80 char capacity
@@ -1882,7 +1884,7 @@ test("chat endpoint terminates the chain with sealed event when action threshold
   try {
     await withServer(
       {
-        spawnRunner(command, args) {
+        spawnRunner(_command, _args) {
           const child = createMockChild();
           process.nextTick(() => {
             // 80 chars × 4 chars/token / 20 tokens capacity = ratio 4.0, well past 0.90
@@ -1920,7 +1922,6 @@ test("chat endpoint terminates the chain with sealed event when action threshold
  * called.
  */
 async function withActiveChat(fn) {
-  const transcript = require("../src/session/transcript");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "phase3-"));
   const prevDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
   process.env.CAT_CAFE_TRANSCRIPT_DIR = tmpDir;
@@ -2200,25 +2201,31 @@ test("frontend index.html exposes explicit worktree mode toggle", () => {
 
 test("frontend exposes agent and workspace panel tabs", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const boot = require("../public/boot.js");
   assert.match(html, /id="panel-tab-agents"/);
   assert.match(html, /id="panel-tab-workspace"/);
   assert.match(html, /id="panel-tab-recall"/);
   assert.match(html, /id="workspace-panel"/);
-  assert.match(html, /src="\/public\/session-api\.js"/);
-  assert.match(html, /src="\/public\/session-controller\.js"/);
-  assert.match(html, /src="\/public\/worktree-api\.js"/);
-  assert.match(html, /src="\/public\/recall-api\.js"/);
-  assert.match(html, /src="\/public\/chat-client\.js"/);
-  assert.match(html, /src="\/public\/workspace-diff\.js"/);
-  assert.match(html, /src="\/public\/display-helpers\.js"/);
-  assert.match(html, /src="\/public\/theme\.js"/);
-  assert.match(html, /src="\/public\/mention-composer\.js"/);
-  assert.match(html, /src="\/public\/session-list-view\.js"/);
-  assert.match(html, /src="\/public\/workspace-panel\.js"/);
-  assert.match(html, /src="\/public\/recall-panel\.js"/);
-  assert.match(html, /src="\/public\/message-view\.js"/);
-  assert.match(html, /src="\/public\/project-header\.js"/);
-  assert.match(html, /src="\/public\/agent-panel-view\.js"/);
+  assert.match(html, /src="\/public\/boot\.js"/);
+  for (const src of [
+    "/public/session-api.js",
+    "/public/session-controller.js",
+    "/public/worktree-api.js",
+    "/public/recall-api.js",
+    "/public/chat-client.js",
+    "/public/workspace-diff.js",
+    "/public/display-helpers.js",
+    "/public/theme.js",
+    "/public/mention-composer.js",
+    "/public/session-list-view.js",
+    "/public/workspace-panel.js",
+    "/public/recall-panel.js",
+    "/public/message-view.js",
+    "/public/project-header.js",
+    "/public/agent-panel-view.js",
+  ]) {
+    assert.ok(boot.MODULES.includes(src), `boot MODULES missing ${src}`);
+  }
 });
 
 test("frontend keeps session-level recall entry only inside the right-side tabs", () => {
@@ -2252,16 +2259,16 @@ test("frontend app.js sends useWorktree from the explicit toggle", () => {
 });
 
 test("frontend loads clipboard helper and app.js uses it for rich copy", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const boot = require("../public/boot.js");
   const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(html, /<script src="\/public\/clipboard\.js"><\/script>/);
+  assert.ok(boot.MODULES.includes("/public/clipboard.js"));
   assert.match(appJs, /window\.ClipboardUtils\.writeClipboard/);
 });
 
 test("frontend app.js guards active skills rendering with latest-only requests", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const boot = require("../public/boot.js");
   const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(html, /<script src="\/public\/latest-request\.js"><\/script>/);
+  assert.ok(boot.MODULES.includes("/public/latest-request.js"));
   assert.match(appJs, /window\.LatestRequest\.createLatestRequestRunner/);
   assert.match(appJs, /runLatestSkillsRequest\.run/);
 });
@@ -2271,8 +2278,12 @@ test("frontend app.js defines unified display helpers for user and agent identit
   const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   assert.match(helpers, /function roleDisplayName\(role, agentId/);
-  assert.match(helpers, /return role === "user" \? "用户" : agentLabelFromList\(agents, agentId\)/);
+  assert.match(
+    helpers,
+    /return role === "user" \? \(L\.user \|\| "用户"\) : agentLabelFromList\(agents, agentId\)|return role === "user" \? "用户" : agentLabelFromList\(agents, agentId\)/
+  );
   assert.match(helpers, /function roleBadgeLabel\(role\)/);
+  assert.ok(require("../public/boot.js").MODULES.includes("/public/locale-zh-CN.js"));
   assert.match(messageView, /metaLabel\.textContent = roleDisplayName\(role, agent\)/);
   assert.match(messageView, /metaRole\.textContent = roleBadgeLabel\(role\)/);
   assert.match(appJs, /createDisplayHelpers/);
@@ -2281,15 +2292,15 @@ test("frontend app.js defines unified display helpers for user and agent identit
 test("frontend app.js defines invocation-level live run state and renderer hooks", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const boot = require("../public/boot.js");
   assert.match(js, /rt\.liveRuns\.set\(invocationId/);
   assert.match(js, /function applyAgentEvent\(event,\s*sessionId\)/);
   assert.match(js, /function ensureLiveRun\(event,\s*sessionId\)/);
   assert.match(js, /progressItems/);
   assert.match(js, /fileChanges/);
-  assert.match(appJs, /createRuntimeStore\(\)/);
+  assert.match(appJs, /createRuntimeStore\(\{\s*bus\s*\}\)|createRuntimeStore\(\)/);
   assert.match(appJs, /createMessageView/);
-  assert.match(html, /src="\/public\/session-runtime\.js"/);
+  assert.ok(boot.MODULES.includes("/public/session-runtime.js"));
 });
 
 test("frontend app.js loads workspace status and diff for the workspace tab", () => {
@@ -2346,6 +2357,7 @@ test("frontend agent cards set the default agent and support shift-click mention
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   const agentPanel = fs.readFileSync(path.join(__dirname, "../public", "agent-panel-view.js"), "utf8");
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const boot = require("../public/boot.js");
   assert.match(js, /function setDefaultAgent/);
   assert.match(js, /function resolvePromptAgent/);
   assert.match(js, /agentRouting\.resolvePromptAgent/);
@@ -2353,7 +2365,7 @@ test("frontend agent cards set the default agent and support shift-click mention
   assert.match(agentPanel, /e\.shiftKey/);
   assert.match(agentPanel, /item\.className = "agent-tab" \+ \(isSelected \? " is-selected" : ""\)/);
   assert.match(html, /id="current-agent"/);
-  assert.match(html, /src="\/public\/agent-routing\.js"/);
+  assert.ok(boot.MODULES.includes("/public/agent-routing.js"));
 });
 
 test("frontend keeps right-side agent and workspace surfaces in a shared tab system", () => {
@@ -2373,9 +2385,9 @@ test("frontend workspace panel supports selection-only file list updates", () =>
 });
 
 test("frontend virtual-list is loaded for large workspace diffs", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const boot = require("../public/boot.js");
   const js = fs.readFileSync(path.join(__dirname, "../public", "virtual-list.js"), "utf8");
-  assert.match(html, /src="\/public\/virtual-list\.js"/);
+  assert.ok(boot.MODULES.includes("/public/virtual-list.js"));
   assert.match(js, /function visibleRange/);
   assert.match(js, /function createVirtualList/);
 });
@@ -2548,10 +2560,10 @@ test("frontend a11y: tab controls, mention listbox, send busy wiring", () => {
 });
 
 test("frontend uses ui-confirm for destructive actions", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const boot = require("../public/boot.js");
   const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   const workspaceJs = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
-  assert.match(html, /src="\/public\/ui-confirm\.js"/);
+  assert.ok(boot.MODULES.includes("/public/ui-confirm.js"));
   assert.match(appJs, /confirmImpl/);
   assert.match(appJs, /删除对话|确认删除/);
   assert.match(workspaceJs, /confirmFn|confirmImpl/);
@@ -2605,7 +2617,6 @@ test("frontend styles.css gives the recall panel a full-height scroll layout", (
 // ── Phase 4: Session Bootstrap ──────────────────────────────────
 
 test("chat endpoint injects bootstrap packet (identity + recall rule) into first agent's prompt", async () => {
-  const transcript = require("../src/session/transcript");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bootstrap-inject-"));
   const prevDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
   process.env.CAT_CAFE_TRANSCRIPT_DIR = tmpDir;

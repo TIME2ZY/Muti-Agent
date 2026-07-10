@@ -19,6 +19,7 @@ const uiSecurity = require("./ui-security");
 const sessionRoutes = require("./session-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
+const skills = require("./skills");
 const {
   ROOT,
   DEFAULT_SESSIONS_FILE,
@@ -26,6 +27,15 @@ const {
   DEFAULT_SESSION_MAP_ROOT,
   DEFAULT_WORKTREE_STATE_FILE,
 } = runtimePaths;
+const {
+  getSkills,
+  publicSkills,
+  matchSkills,
+  loadSkills,
+  augmentPrompt,
+  parseSkillFrontmatter,
+  buildAugmentedPrompt,
+} = skills;
 const {
   readSessions,
   writeSessions,
@@ -56,7 +66,6 @@ const {
   searchInvocationsInMap,
   readInvocationFromMap,
 } = invocationStore;
-const SKILLS_DIR = path.join(ROOT, "skills");
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
 // Git root of the chat app itself — used to detect self-modification
 // (when projectDir points at this repo, we can preview modified code).
@@ -75,28 +84,6 @@ process.on("exit", () => {
 const DEFAULT_KILL_GRACE_MS = 5000;
 const DEFAULT_SERVER_TIMEOUT_MS = 30 * 60 * 1000; // 30 min, mirrors invoke-cli default
 
-/**
- * READONLY mode rule: injected into the agent prompt when worktree is not enabled.
- * This makes the worktree toggle an effective permission gate:
- *   - worktree on  → agent runs in isolated directory, can write files
- *   - worktree off → agent is told it's in read-only mode, must not write
- */
-const READONLY_MODE_RULE = [
-  "",
-  "<!-- ═══════════════════════════════════════════════════════════ -->",
-  "<!-- WORKTREE MODE: OFF (只读模式)                                  -->",
-  "<!-- 当前未开启改代码模式，你处于只读模式。                          -->",
-  "<!-- 禁止执行以下操作:                                              -->",
-  "<!--   - write  / 创建新文件                                       -->",
-  "<!--   - edit  / 修改现有文件                                      -->",
-  "<!--   - bash  / 执行任何会产生文件副作用的命令                      -->",
-  "<!-- 你可以: 查看代码、搜索、分析、回答问题、制定方案。              -->",
-  "<!-- 如果需要修改代码，请告知用户: 请先开启改代码模式（勾选 worktree    -->",
-  "<!-- 复选框），然后我会帮你实现。                                    -->",
-  "<!-- ═══════════════════════════════════════════════════════════ -->",
-  "",
-].join("\n");
-
 // ── Session map: per-chat-session agent → CLI session ID ──────
 // Server manages session persistence across agent invocations within
 // the same chat session. Each agent gets its own CLI session that
@@ -108,180 +95,7 @@ const READONLY_MODE_RULE = [
 // session and to let new requests abort stale ones.
 const activeInvocations = new Map();
 
-// ── Skill loader ──────────────────────────────────────────────
-
-/**
- * Parse YAML-like frontmatter from a markdown file.
- * Returns { meta: {}, body: "..." } or null if no frontmatter found.
- */
-function parseSkillFrontmatter(content) {
-  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
-  if (!match) return null;
-
-  const rawMeta = match[1];
-  const body = match[2].trim();
-  const meta = {};
-  let currentArrayKey = null;
-
-  for (const line of rawMeta.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    // YAML list item: "- value" or "- "value""
-    if (trimmed.startsWith("- ") && currentArrayKey) {
-      const item = trimmed.slice(2).trim().replace(/^["']|["']$/g, "");
-      meta[currentArrayKey].push(item);
-      continue;
-    }
-
-    // Key-only (start of a YAML list block): "key:"
-    const colonIdx = trimmed.indexOf(":");
-    if (colonIdx === -1) continue;
-
-    const key = trimmed.slice(0, colonIdx).trim();
-    let value = trimmed.slice(colonIdx + 1).trim();
-
-    // Key with no value → might start a YAML list block
-    if (value === "") {
-      meta[key] = [];
-      currentArrayKey = key;
-      continue;
-    }
-
-    // Key with value → reset list context
-    currentArrayKey = null;
-
-    // Boolean
-    if (value === "true") { meta[key] = true; continue; }
-    if (value === "false") { meta[key] = false; continue; }
-
-    // JSON-style array: [item1, item2]
-    if (value.startsWith("[") && value.endsWith("]")) {
-      const inner = value.slice(1, -1);
-      meta[key] = inner
-        ? inner.split(",").map((s) => s.trim().replace(/^["']|["']$/g, ""))
-        : [];
-      continue;
-    }
-
-    // String (strip optional quotes)
-    meta[key] = value.replace(/^["']|["']$/g, "");
-  }
-
-  return { meta, body };
-}
-
-/**
- * Load all skill files from the skills directory.
- * Returns an array of { name, description, triggers, always, body }.
- */
-function loadSkills(skillsDir) {
-  if (!fs.existsSync(skillsDir)) return [];
-
-  const files = fs.readdirSync(skillsDir).filter((f) => f.endsWith(".md"));
-  const skills = [];
-
-  for (const file of files) {
-    const content = fs.readFileSync(path.join(skillsDir, file), "utf8");
-    const parsed = parseSkillFrontmatter(content);
-    if (!parsed) continue;
-
-    skills.push({
-      name: parsed.meta.name || file.replace(".md", ""),
-      description: parsed.meta.description || "",
-      triggers: parsed.meta.triggers || [],
-      always: parsed.meta.always === true,
-      body: parsed.body,
-    });
-  }
-
-  return skills;
-}
-
-/**
- * Match skills against a user prompt.
- * Returns skills whose triggers appear in the prompt, plus always-on skills.
- */
-function matchSkills(prompt, skills) {
-  const lowerPrompt = prompt.toLowerCase();
-  const matched = [];
-
-  for (const skill of skills) {
-    if (skill.always) {
-      matched.push(skill);
-      continue;
-    }
-
-    for (const trigger of skill.triggers) {
-      if (lowerPrompt.includes(trigger.toLowerCase())) {
-        matched.push(skill);
-        break;
-      }
-    }
-  }
-
-  return matched;
-}
-
-/**
- * Build an augmented prompt by prepending matched skill content as system instructions.
- * The skill content is wrapped in a clearly delineated block so the CLI tool
- * sees it as part of the user message, NOT as a CLI-native skill.
- *
- * This is the ISOLATION key: skills are plain text injected into the prompt,
- * never written to codex/opencode skill directories.
- */
-function buildAugmentedPrompt(userPrompt, matchedSkills) {
-  if (matchedSkills.length === 0) return { augmentedPrompt: userPrompt, skillNames: [] };
-
-  const skillBlocks = matchedSkills.map((skill) => {
-    return `<!-- APPLICATION SKILL: ${skill.name} -->\n${skill.body}`;
-  });
-
-  const header = [
-    "<!-- ═══════════════════════════════════════════════════════════ -->",
-    "<!-- 以下为应用层注入的元规则（System-level Meta-rules）           -->",
-    "<!-- 这些不是 CLI 工具的原生 Skill，而是作为系统指令的一部分       -->",
-    "<!-- 请严格遵循以下规则，它们针对 AI 常见弱点设计                  -->",
-    "<!-- ═══════════════════════════════════════════════════════════ -->",
-    "",
-  ].join("\n");
-
-  const augmentedPrompt = header + "\n" + skillBlocks.join("\n\n") + "\n\n---\n\n" + userPrompt;
-  const skillNames = matchedSkills.map((s) => s.name);
-
-  return { augmentedPrompt, skillNames };
-}
-
-/**
- * Load skills once at server start, then match + augment per request.
- */
-let _skillsCache = null;
-function getSkills() {
-  if (!_skillsCache) _skillsCache = loadSkills(SKILLS_DIR);
-  return _skillsCache;
-}
-
-function augmentPrompt(rawPrompt, useWorktree = true) {
-  const skills = getSkills();
-  const matched = matchSkills(rawPrompt, skills);
-  const result = buildAugmentedPrompt(rawPrompt, matched);
-  if (!useWorktree) {
-    result.augmentedPrompt = READONLY_MODE_RULE + "\n" + result.augmentedPrompt;
-  }
-  return result;
-}
-
 // ── Public helpers ────────────────────────────────────────────
-
-function publicSkills() {
-  return getSkills().map((s) => ({
-    name: s.name,
-    description: s.description,
-    triggers: s.triggers,
-    always: s.always,
-  }));
-}
 
 function publicAgents() {
   return Object.values(AGENTS).map((agent) => ({

@@ -26,7 +26,7 @@ function buildIdentity({ threadId, sessionId, agent, generation = 1 }) {
   ].join("\n");
 }
 
-async function buildDigest({ threadId, sessionId }) {
+async function buildDigest({ sessionId }) {
   const invocations = await transcript.listInvocationsWithMeta(sessionId);
   if (invocations.length === 0) {
     return [

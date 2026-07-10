@@ -6,7 +6,6 @@
       state,
       runtimeStore,
       promptEl,
-      btnSend,
       useWorktreeInput,
       resolvePromptAgent,
       addSystem,

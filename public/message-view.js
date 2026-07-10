@@ -6,6 +6,39 @@
   const MESSAGE_VIRTUAL_THRESHOLD = 250;
   const HYDRATE_CHUNK_SIZE = 4;
 
+  function resolveProcessHelpers() {
+    if (globalScope.MessageProcessHelpers) return globalScope.MessageProcessHelpers;
+    if (typeof module !== "undefined" && module.exports && typeof require === "function") {
+      try { return require("./message-process-helpers.js"); } catch { /* ignore */ }
+    }
+    return null;
+  }
+
+  function resolveMsgLocale() {
+    const pack = globalScope.Locale || globalScope.LocaleZhCN;
+    if (pack && pack.locale && pack.locale.message) return pack.locale;
+    if (typeof module !== "undefined" && module.exports && typeof require === "function") {
+      try { return require("./locale-zh-CN.js").locale; } catch { /* ignore */ }
+    }
+    return {
+      badge: { thinking: "思考中", writing: "输出中", error: "异常退出" },
+      message: {
+        copy: "复制消息",
+        copyOk: "已复制",
+        copyFail: "失败",
+        thinkingProcess: "思考过程",
+        thinkingProcessChars: (n) => `思考过程 · ${n} 字`,
+        process: "执行过程",
+        running: "运行中",
+        done: "完成",
+        success: "成功",
+        failed: "失败",
+        progressDone: (n) => `进度 · ${n} 步已完成`,
+        progressPartial: (done, total) => `进度 · ${done}/${total}`,
+      },
+    };
+  }
+
   function createMessageView(deps) {
     const {
       messagesEl,
@@ -33,6 +66,19 @@
       getChatClient,
       promptEl,
     } = deps;
+
+    const processHelpers = resolveProcessHelpers() || {};
+    const {
+      truncateDisplay,
+      toolDetailFromEvent,
+      processSummaryFromEvent,
+      isTaskLikeTool,
+      progressItemLabel,
+      progressItemDone,
+    } = processHelpers;
+    const L = resolveMsgLocale();
+    const msg = L.message || {};
+    const badgeText = L.badge || {};
 
     function sessionRuntime(sessionId) {
       return runtimeStore.getOrCreate(sessionId || state.currentSessionId || "_pending");
@@ -91,10 +137,10 @@
         }
         badgeEl.style.display = "";
         const configs = {
-          thinking: { cls: "badge-thinking", text: "思考中", dot: true },
-          writing:  { cls: "badge-writing",  text: "输出中", dot: true },
+          thinking: { cls: "badge-thinking", text: badgeText.thinking || "思考中", dot: true },
+          writing:  { cls: "badge-writing",  text: badgeText.writing || "输出中", dot: true },
           done:     { cls: "badge-done",     text: "",        dot: false },
-          error:    { cls: "badge-error",    text: "异常退出", dot: false },
+          error:    { cls: "badge-error",    text: badgeText.error || "异常退出", dot: false },
         };
         const cfg = configs[badgeState] || configs.thinking;
         badgeEl.className = "msg-badge " + cfg.cls;
@@ -141,11 +187,11 @@
         const copy = document.createElement("button");
         copy.className = "msg-copy";
         copy.textContent = "⎘";
-        copy.title = "复制消息";
-        copy.setAttribute("aria-label", "复制消息");
+        copy.title = msg.copy || "复制消息";
+        copy.setAttribute("aria-label", msg.copy || "复制消息");
         copy.dataset.copyHtml = renderMd(content);
         copy.addEventListener("click", () => {
-          copyToClipboard(content, copy, "✓", "失败");
+          copyToClipboard(content, copy, "✓", msg.copyFail || "失败");
         });
         meta.appendChild(copy);
       }
@@ -205,7 +251,7 @@
       details.open = false;
       const summary = document.createElement("summary");
       summary.className = "msg-thinking-summary";
-      summary.textContent = "思考过程";
+      summary.textContent = msg.thinkingProcess || "思考过程";
       const body = document.createElement("pre");
       body.className = "msg-thinking-body";
       details.append(summary, body);
@@ -226,20 +272,13 @@
       const summary = details.querySelector(".msg-thinking-summary");
       if (summary) {
         const chars = text.length;
-        summary.textContent = chars > 0 ? `思考过程 · ${chars} 字` : "思考过程";
+        const base = msg.thinkingProcess || "思考过程";
+        summary.textContent = chars > 0
+          ? (typeof msg.thinkingProcessChars === "function"
+            ? msg.thinkingProcessChars(chars)
+            : `${base} · ${chars} 字`)
+          : base;
       }
-    }
-
-    function progressItemLabel(item) {
-      if (!item || typeof item !== "object") return String(item || "");
-      return item.text || item.label || item.title || item.description || "";
-    }
-
-    function progressItemDone(item) {
-      if (!item || typeof item !== "object") return false;
-      if (item.done === true || item.status === "done" || item.status === "completed") return true;
-      if (item.done === false) return false;
-      return false;
     }
 
     function ensureProgressList(liveItem) {
@@ -398,7 +437,7 @@
       if (live) details.dataset.live = "true";
       const summary = document.createElement("summary");
       summary.className = "msg-process-summary";
-      summary.textContent = "执行过程";
+      summary.textContent = msg.process || "执行过程";
       // Move existing panel inside details.
       if (panel.parentNode) panel.parentNode.insertBefore(details, panel);
       details.append(summary, panel);
@@ -427,7 +466,7 @@
       details.dataset.live = "true";
       const summary = document.createElement("summary");
       summary.className = "msg-process-summary";
-      summary.textContent = "执行过程";
+      summary.textContent = msg.process || "执行过程";
       details.append(summary, panel);
 
       if (liveItem._liveTextEl && liveItem._liveTextEl.parentNode === liveItem.bubble) {
@@ -438,104 +477,6 @@
         else liveItem.bubble.appendChild(details);
       }
       return panel;
-    }
-
-    function collapseWs(text) {
-      return String(text || "").replace(/\s+/g, " ").trim();
-    }
-
-    function truncateDisplay(text, max = 160) {
-      const value = collapseWs(text);
-      if (!value) return "";
-      return value.length > max ? `${value.slice(0, max - 1)}…` : value;
-    }
-
-    function cleanProcessOutput(text) {
-      let value = String(text || "");
-      if (!value) return "";
-      const resultMatch = value.match(/<task_result>\s*([\s\S]*?)\s*<\/task_result>/i);
-      if (resultMatch && resultMatch[1]) value = resultMatch[1];
-      value = value
-        .replace(/<\/?task\b[^>]*>/gi, " ")
-        .replace(/<\/?task_result\b[^>]*>/gi, " ")
-        .replace(/<\/?[^>]+>/g, " ")
-        .replace(/```[\s\S]*?```/g, " ")
-        .replace(/^#{1,6}\s+/gm, "")
-        .replace(/\|/g, " ");
-      return collapseWs(value);
-    }
-
-    function toolDetailFromEvent(event) {
-      if (!event) return "";
-      if (typeof event.command === "string" && event.command.trim()) {
-        return truncateDisplay(event.command, 140);
-      }
-      const args = event.args && typeof event.args === "object" ? event.args : {};
-      const preferred = args.title || args.description || args.command || args.cmd
-        || args.path || args.file || args.pattern || event.task || "";
-      return truncateDisplay(preferred, 140);
-    }
-
-    function isContentDumpTool(event) {
-      const name = String((event && event.toolName) || "").toLowerCase();
-      // These tools often return full file/dir bodies — never dump into the card.
-      return /^(read|glob|grep|list|search|find|cat|ls|dir|view|get)\b/.test(name)
-        || name.includes("read")
-        || name.includes("glob")
-        || name.includes("grep")
-        || name.includes("list_dir")
-        || name.includes("list-dir");
-    }
-
-    function processSummaryFromEvent(event) {
-      if (!event) return "";
-      if (typeof event.error === "string" && event.error.trim()) {
-        return truncateDisplay(cleanProcessOutput(event.error), 120);
-      }
-      if (event.status === "error") {
-        if (typeof event.output === "string" && event.output.trim()) {
-          return truncateDisplay(cleanProcessOutput(event.output), 120);
-        }
-        if (event.result != null) {
-          const raw = typeof event.result === "string" ? event.result : JSON.stringify(event.result);
-          return truncateDisplay(cleanProcessOutput(raw), 120);
-        }
-      }
-      // Explicit short summary from provider is ok when tiny.
-      if (typeof event.summary === "string" && event.summary.trim()) {
-        const cleaned = cleanProcessOutput(event.summary);
-        if (cleaned.length <= 80) return cleaned;
-        return truncateDisplay(cleaned, 80);
-      }
-      // Successful tool/command results: keep the card compact.
-      // Path/command already lives in the task line — do not paste bodies.
-      if (
-        event.type === "tool.finished"
-        || event.type === "command.finished"
-        || event.type === "tool.started"
-        || event.type === "command.started"
-        || isContentDumpTool(event)
-      ) {
-        return "";
-      }
-      if (typeof event.output === "string" && event.output.trim()) {
-        return truncateDisplay(cleanProcessOutput(event.output), 80);
-      }
-      if (event.result != null) {
-        const raw = typeof event.result === "string" ? event.result : JSON.stringify(event.result);
-        return truncateDisplay(cleanProcessOutput(raw), 80);
-      }
-      if (typeof event.text === "string" && event.text.trim()) {
-        return truncateDisplay(cleanProcessOutput(event.text), 80);
-      }
-      return "";
-    }
-
-    function isTaskLikeTool(event) {
-      const name = String((event && event.toolName) || "").toLowerCase();
-      if (name === "task" || name.endsWith(".task")) return true;
-      const args = event && event.args && typeof event.args === "object" ? event.args : {};
-      return Boolean(args.subagent_type || args.subagentType);
     }
 
     function ensureProcessPanel(liveItem) {
@@ -582,7 +523,7 @@
 
       nameEl.textContent = fields.name || "tool";
       const status = fields.status || "running";
-      statusEl.textContent = fields.statusText || "运行中";
+      statusEl.textContent = fields.statusText || msg.running || "运行中";
       statusEl.className = `live-subagent-status status-${status}`;
       row.className = `live-subagent live-tool-row status-${status}`;
       taskEl.textContent = fields.task || "";
@@ -594,16 +535,16 @@
 
     function upsertLiveSubagent(agent, event, sessionId) {
       let status = "running";
-      let statusText = "运行中";
+      let statusText = msg.running || "运行中";
       if (event.type === "subagent.completed") {
         status = "done";
-        statusText = "成功";
+        statusText = msg.success || "成功";
       } else if (event.type === "subagent.failed") {
         status = "error";
-        statusText = "失败";
+        statusText = msg.failed || "失败";
       } else if (event.type === "subagent.started") {
         status = "running";
-        statusText = "已创建";
+        statusText = msg.running || "运行中";
       }
       const key = `subagent:${event.subagentId || event.toolId || event.name || "subagent"}`;
       upsertProcessRow(agent, key, {
@@ -621,11 +562,11 @@
       const detail = toolDetailFromEvent(event);
       const id = `tool:${event.toolId || event.toolName || detail || event.type}`;
       let status = "running";
-      let statusText = "运行中";
+      let statusText = msg.running || "运行中";
       if (event.type === "tool.finished" || event.type === "command.finished") {
         const failed = event.status === "error" || (event.exitCode !== undefined && event.exitCode !== 0);
         status = failed ? "error" : "done";
-        statusText = failed ? "失败" : "完成";
+        statusText = failed ? (msg.failed || "失败") : (msg.done || "完成");
       }
       const name = event.type.startsWith("command.")
         ? "command"
@@ -858,7 +799,7 @@
       name.textContent = fields.name || "tool";
       const status = document.createElement("span");
       status.className = "live-subagent-status status-" + (fields.status || "done");
-      status.textContent = fields.statusText || "完成";
+      status.textContent = fields.statusText || msg.done || "完成";
       head.append(name, status);
       row.appendChild(head);
       if (fields.task) {
@@ -891,7 +832,7 @@
         appendTraceRow(panel, {
           name: evt.name || evt.toolName || "subagent",
           status: failed ? "error" : (done ? "done" : "running"),
-          statusText: failed ? "失败" : (done ? "成功" : "运行中"),
+          statusText: failed ? (msg.failed || "失败") : (done ? (msg.success || "成功") : (msg.running || "运行中")),
           task: truncateDisplay(evt.task || "", 100),
           summary: processSummaryFromEvent(evt),
         });
@@ -906,7 +847,7 @@
         appendTraceRow(panel, {
           name: evt.toolName || "tool",
           status: failed ? "error" : (done ? "done" : "running"),
-          statusText: failed ? "失败" : (done ? "完成" : "运行中"),
+          statusText: failed ? (msg.failed || "失败") : (done ? (msg.done || "完成") : (msg.running || "运行中")),
           task: detail,
           // Final cards stay compact: only errors get a summary line.
           summary: failed ? processSummaryFromEvent(evt) : "",
@@ -920,7 +861,7 @@
         appendTraceRow(panel, {
           name: "command",
           status: failed ? "error" : "done",
-          statusText: failed ? "失败" : "完成",
+          statusText: failed ? (msg.failed || "失败") : (msg.done || "完成"),
           task: truncateDisplay(evt.command, 120),
           summary: failed ? processSummaryFromEvent(evt) : "",
         });
@@ -1088,7 +1029,9 @@
       const done = progressEl.querySelectorAll
         ? progressEl.querySelectorAll("li.is-done").length
         : 0;
-      summary.textContent = done === n ? `进度 · ${n} 步已完成` : `进度 · ${done}/${n}`;
+      summary.textContent = done === n
+        ? (typeof msg.progressDone === "function" ? msg.progressDone(n) : `进度 · ${n} 步已完成`)
+        : (typeof msg.progressPartial === "function" ? msg.progressPartial(done, n) : `进度 · ${done}/${n}`);
       details.append(summary, progressEl);
       return details;
     }
@@ -1176,7 +1119,7 @@
           copy.setAttribute("aria-label", "复制消息");
           copy.dataset.copyHtml = rendered;
           copy.addEventListener("click", () => {
-            copyToClipboard(item.rawText || "", copy, "✓", "失败");
+            copyToClipboard(item.rawText || "", copy, "✓", msg.copyFail || "失败");
           });
           const meta = item.wrapper.querySelector(".msg-meta");
           if (meta) meta.appendChild(copy);
@@ -1279,7 +1222,7 @@
         const code = btn.closest(".md-code")?.querySelector("code");
         if (!code) return;
         // Plain code only — not the full message markdown.
-        copyToClipboard(code.textContent, btn, "已复制", "失败");
+        copyToClipboard(code.textContent, btn, msg.copyOk || "已复制", msg.copyFail || "失败");
       });
 
       doc.addEventListener("click", (e) => {

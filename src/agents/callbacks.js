@@ -119,7 +119,7 @@ function validateToken(threadId, invocationId, callbackToken) {
  *  - broadcast as an SSE message event
  *  - scanned for @mentions; any new target agents are appended to the worklist
  */
-function postMessage(threadId, invocationId, content, { appendToSession, readSessions } = {}) {
+function postMessage(threadId, invocationId, content, { appendToSession } = {}) {
   const thread = activeThreads.get(threadId);
   if (!thread) return false;
 
@@ -185,8 +185,8 @@ function postMessage(threadId, invocationId, content, { appendToSession, readSes
  * examples and (by the server) as the CAT_CAFE_THREAD_ID env var, so agents can
  * quote $CAT_CAFE_THREAD_ID instead of hard-coding it.
  */
-function buildCallbackInstructions(apiUrl, sessionId) {
-  const sid = sessionId || "$CAT_CAFE_THREAD_ID";
+function buildCallbackInstructions(apiUrl, _sessionId) {
+  // Curl examples intentionally use $CAT_CAFE_THREAD_ID so agents do not hard-code ids.
   return `<!-- ═══════════════════════════════════════════════════════════ -->
 <!-- MCP 回调工具说明（通过 HTTP 调用）                            -->
 <!-- 你可以在执行过程中主动发消息、查阅历史，不需要等执行结束      -->
