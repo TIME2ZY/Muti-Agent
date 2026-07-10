@@ -312,12 +312,14 @@ function extractSessionId(event) {
 /**
  * Write the session ID for this agent to the per-chat-session file so the
  * server can read it back for the next invocation in the same chat session.
+ * Provider sessions are stored per workspaceKey so base/worktree do not overwrite.
  */
 function persistSessionId(cli, sessionId) {
   const file = process.env.INVOKE_SESSION_FILE;
   if (!file || !sessionId) return;
   const key = cli.id || cli.name;
   const workspaceKey = process.env.INVOKE_WORKSPACE_KEY || "";
+  const { upsertAgentProviderSession } = require("../server/session-map-store");
   let sessions = {};
   try {
     if (fs.existsSync(file)) {
@@ -326,11 +328,10 @@ function persistSessionId(cli, sessionId) {
   } catch {
     // corrupted file → start fresh
   }
-  sessions[key] = {
-    sessionId,
-    updatedAt: new Date().toISOString(),
-    ...(workspaceKey ? { workspaceKey } : {}),
-  };
+  if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
+    sessions = {};
+  }
+  upsertAgentProviderSession(sessions, key, sessionId, workspaceKey);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(sessions, null, 2)}\n`, "utf8");
 }

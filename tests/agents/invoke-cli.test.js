@@ -298,6 +298,119 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
   assert.equal(text[0].text, "Hello from Codex");
 });
 
+test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const ctx = { invocationId: "inv-tool", agent: "architect" };
+
+  const toolStarted = runtime.transform({
+    type: "item.started",
+    item: {
+      id: "call-1",
+      type: "mcp_tool_call",
+      tool: "web_search",
+      arguments: { query: "codex events" },
+      status: "in_progress",
+    },
+  }, ctx);
+
+  const subStarted = runtime.transform({
+    type: "item.started",
+    item: {
+      id: "call-2",
+      type: "mcp_tool_call",
+      tool: "task",
+      arguments: {
+        subagent_type: "explore",
+        prompt: "Find where session runtime is defined",
+      },
+      status: "in_progress",
+    },
+  }, ctx);
+
+  const subDone = runtime.transform({
+    type: "item.completed",
+    item: {
+      id: "call-2",
+      type: "mcp_tool_call",
+      tool: "task",
+      arguments: {
+        subagent_type: "explore",
+        prompt: "Find where session runtime is defined",
+      },
+      result: { summary: "Defined in public/session-runtime.js" },
+      status: "completed",
+    },
+  }, ctx);
+
+  const subFailed = runtime.transform({
+    type: "item.completed",
+    item: {
+      id: "call-3",
+      type: "function_call",
+      name: "spawn_agent",
+      arguments: { agent: "general-purpose", prompt: "do work" },
+      error: "timeout",
+      status: "failed",
+    },
+  }, ctx);
+
+  assert.deepEqual(toolStarted, [{
+    type: "tool.started",
+    agent: "architect",
+    invocationId: "inv-tool",
+    toolName: "web_search",
+    args: { query: "codex events" },
+    toolId: "call-1",
+  }]);
+
+  assert.equal(subStarted.length, 2);
+  assert.equal(subStarted[0].type, "tool.started");
+  assert.equal(subStarted[1].type, "subagent.started");
+  assert.equal(subStarted[1].name, "explore");
+  assert.match(subStarted[1].task, /session runtime/);
+
+  assert.equal(subDone.some((e) => e.type === "subagent.completed"), true);
+  assert.equal(subDone.find((e) => e.type === "subagent.completed").summary.includes("session-runtime"), true);
+
+  assert.equal(subFailed.some((e) => e.type === "subagent.failed"), true);
+  assert.equal(subFailed.find((e) => e.type === "subagent.failed").error, "timeout");
+});
+
+test("opencode runtime maps tool/task parts into tool and subagent events", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-oc", agent: "planner" };
+
+  const started = runtime.transform({
+    type: "message.part.updated",
+    part: {
+      id: "part-1",
+      type: "tool",
+      tool: "task",
+      status: "running",
+      arguments: { subagent_type: "explore", prompt: "scan providers" },
+    },
+  }, ctx);
+
+  const done = runtime.transform({
+    type: "message.part.updated",
+    part: {
+      id: "part-1",
+      type: "tool",
+      tool: "task",
+      status: "completed",
+      arguments: { subagent_type: "explore", prompt: "scan providers" },
+      output: "found codex + opencode",
+    },
+  }, ctx);
+
+  assert.equal(started.some((e) => e.type === "tool.started"), true);
+  assert.equal(started.some((e) => e.type === "subagent.started"), true);
+  assert.equal(done.some((e) => e.type === "tool.finished"), true);
+  assert.equal(done.some((e) => e.type === "subagent.completed"), true);
+});
+
 test("codex runtime maps command, file, and transport errors into normalized events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
@@ -530,6 +643,32 @@ test("remembers workspace key from stream events when provided", () => {
   const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
   assert.equal(sessionFile.architect.sessionId, "codex-session-1");
   assert.equal(sessionFile.architect.workspaceKey, "base:test-workspace");
+  assert.equal(
+    sessionFile.architect.byWorkspace["base:test-workspace"].sessionId,
+    "codex-session-1"
+  );
+});
+
+test("persists provider sessions per workspace without overwriting the other", () => {
+  const first = runScriptWithEnv(["hello"], {
+    INVOKE_WORKSPACE_KEY: "base:C:\\proj",
+  });
+  assert.equal(first.status, 0);
+
+  // Second run reuses the same session file and writes a worktree slot.
+  const second = runScriptWithEnv(["hello again"], {
+    INVOKE_WORKSPACE_KEY: "worktree:C:\\proj.worktrees\\s1",
+    INVOKE_SESSION_FILE: first.sessionPath,
+  });
+  assert.equal(second.status, 0);
+
+  const sessionFile = JSON.parse(fs.readFileSync(first.sessionPath, "utf8"));
+  assert.equal(sessionFile.architect.byWorkspace["base:C:\\proj"].sessionId, "codex-session-1");
+  assert.equal(
+    sessionFile.architect.byWorkspace["worktree:C:\\proj.worktrees\\s1"].sessionId,
+    "codex-session-1"
+  );
+  assert.equal(sessionFile.architect.workspaceKey, "worktree:C:\\proj.worktrees\\s1");
 });
 
 test("cold starts when no saved session", () => {

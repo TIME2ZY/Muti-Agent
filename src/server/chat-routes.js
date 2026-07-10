@@ -1,14 +1,5 @@
 const { assertValidOpaqueId } = require("./id-policy");
-
-function resolveResumeSessionId(sessionMap, agent, workspaceKey) {
-  const entry = sessionMap && sessionMap[agent];
-  if (!entry || typeof entry.sessionId !== "string" || !entry.sessionId) return "";
-  if (!workspaceKey) return entry.sessionId;
-  if (typeof entry.workspaceKey === "string" && entry.workspaceKey) {
-    return entry.workspaceKey === workspaceKey ? entry.sessionId : "";
-  }
-  return workspaceKey.startsWith("base:") ? entry.sessionId : "";
-}
+const { resolveResumeSessionId } = require("./session-map-store");
 
 function createChatRoutes({
   rootDir,
@@ -426,4 +417,5 @@ function createChatRoutes({
 
 module.exports = {
   createChatRoutes,
+  resolveResumeSessionId,
 };

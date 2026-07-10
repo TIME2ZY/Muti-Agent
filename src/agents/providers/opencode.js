@@ -1,7 +1,107 @@
 const { makeEvent } = require("../event-protocol");
+const {
+  toolNameFromItem,
+  toolArgsFromItem,
+  toolResultFromItem,
+  isFailedItem,
+  isSubagentTool,
+  subagentDisplayName,
+  summarizeTask,
+  summarizeResult,
+  toolItemId,
+} = require("../tool-classification");
 
 function createOpencodeRuntime(cli) {
   const parts = new Map();
+  const toolStates = new Map();
+
+  function toolEventsFromPart(part, base) {
+    if (!part || typeof part !== "object") return [];
+    const type = String(part.type || "").toLowerCase();
+    if (!(type === "tool" || type === "tool_call" || type === "toolcall" || type === "mcp" || type === "task")) {
+      // Some OpenCode builds use part.tool / part.name without type=tool.
+      if (!part.tool && !part.name && !part.toolName) return [];
+    }
+
+    const toolName = toolNameFromItem(part) || part.tool || part.name || "tool";
+    const args = toolArgsFromItem(part);
+    const toolId = toolItemId(part, toolName);
+    const status = String(part.status || part.state || "").toLowerCase();
+    const prev = toolStates.get(toolId) || { started: false, finished: false };
+    const events = [];
+
+    const looksRunning = !status || ["pending", "running", "in_progress", "start", "started"].includes(status);
+    const looksDone = ["completed", "complete", "done", "success", "ok", "error", "failed", "cancelled", "canceled"].includes(status)
+      || part.output != null
+      || part.result != null
+      || part.error != null;
+
+    if (!prev.started && looksRunning) {
+      events.push(makeEvent("tool.started", {
+        ...base,
+        toolName,
+        args,
+        toolId,
+      }));
+      if (isSubagentTool(toolName, args) || type === "task") {
+        events.push(makeEvent("subagent.started", {
+          ...base,
+          subagentId: toolId,
+          name: subagentDisplayName(toolName, args),
+          task: summarizeTask(args),
+          toolName,
+        }));
+      }
+      prev.started = true;
+    }
+
+    if (!prev.finished && looksDone && status !== "running" && status !== "in_progress" && status !== "pending") {
+      const result = toolResultFromItem(part);
+      const failed = isFailedItem(part) || status === "error" || status === "failed";
+      events.push(makeEvent("tool.finished", {
+        ...base,
+        toolName,
+        result,
+        status: failed ? "error" : "ok",
+        toolId,
+      }));
+      if (isSubagentTool(toolName, args) || type === "task") {
+        if (failed) {
+          events.push(makeEvent("subagent.failed", {
+            ...base,
+            subagentId: toolId,
+            name: subagentDisplayName(toolName, args),
+            task: summarizeTask(args),
+            error: summarizeResult(result) || "subagent failed",
+            toolName,
+          }));
+        } else {
+          events.push(makeEvent("subagent.completed", {
+            ...base,
+            subagentId: toolId,
+            name: subagentDisplayName(toolName, args),
+            task: summarizeTask(args),
+            summary: summarizeResult(result),
+            toolName,
+          }));
+        }
+      }
+      prev.finished = true;
+    } else if (prev.started && !prev.finished && (part.output || part.result || part.title || part.text)) {
+      if (isSubagentTool(toolName, args) || type === "task") {
+        events.push(makeEvent("subagent.progress", {
+          ...base,
+          subagentId: toolId,
+          name: subagentDisplayName(toolName, args),
+          text: summarizeResult(part.output || part.result || part.title || part.text),
+          toolName,
+        }));
+      }
+    }
+
+    toolStates.set(toolId, prev);
+    return events;
+  }
 
   return {
     extractSessionId(event) {
@@ -30,6 +130,11 @@ function createOpencodeRuntime(cli) {
         }
         const delta = next.slice(prev.length);
         return delta ? [makeEvent("text.delta", { ...base, text: delta })] : [];
+      }
+
+      if (event.type === "message.part.updated" && part) {
+        const toolEvents = toolEventsFromPart(part, base);
+        if (toolEvents.length) return toolEvents;
       }
 
       if (event.type === "session.updated") {
