@@ -190,7 +190,8 @@ function buildInvocation(cli, prompt) {
   if (config.name === "opencode") {
     validateModel(config.name, config.model);
 
-    const args = ["run", "--format", "json"];
+    // --thinking: stream reasoning/thinking parts as JSON events (otherwise omitted).
+    const args = ["run", "--format", "json", "--thinking"];
     if (config.model) {
       const fullModel = config.model.startsWith(OPENCODE_GO_MODEL_PREFIX)
         ? config.model

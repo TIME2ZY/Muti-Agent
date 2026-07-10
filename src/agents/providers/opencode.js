@@ -13,9 +13,44 @@ const {
 
 function createOpencodeRuntime(cli) {
   const parts = new Map();
+  const reasoningParts = new Map();
   const toolStates = new Map();
   let emittedRunStarted = false;
   let lastStep = -1;
+
+  function isReasoningPartType(type) {
+    const t = String(type || "").toLowerCase();
+    return t === "reasoning" || t === "thinking" || t === "thought" || t === "reason";
+  }
+
+  function reasoningTextFromPart(part) {
+    if (!part || typeof part !== "object") return "";
+    if (typeof part.text === "string") return part.text;
+    if (typeof part.content === "string") return part.content;
+    if (typeof part.reasoning === "string") return part.reasoning;
+    if (typeof part.thinking === "string") return part.thinking;
+    return "";
+  }
+
+  /**
+   * Map OpenCode reasoning/thinking parts into thinking.delta events.
+   * Real CLI (with --thinking) emits: { type: "reasoning", part: { type: "reasoning", text } }
+   * Streaming builds may also push message.part.updated with growing part.text.
+   */
+  function thinkingEventsFromPart(part, base) {
+    if (!part || !isReasoningPartType(part.type)) return [];
+    const next = reasoningTextFromPart(part);
+    if (!next) return [];
+    const id = part.id || "_reasoning";
+    const prev = reasoningParts.get(id) || "";
+    reasoningParts.set(id, next);
+    if (!next.startsWith(prev)) {
+      // Non-monotonic update: emit full snapshot as a delta replacement for the UI.
+      return [makeEvent("thinking.delta", { ...base, text: next })];
+    }
+    const delta = next.slice(prev.length);
+    return delta ? [makeEvent("thinking.delta", { ...base, text: delta })] : [];
+  }
 
   function normalizePart(event) {
     const part = event.part || (event.properties && event.properties.part) || null;
@@ -246,6 +281,23 @@ function createOpencodeRuntime(cli) {
 
       const part = normalizePart(event);
 
+      // Thinking / reasoning (requires `opencode run --thinking` on the CLI).
+      if (
+        event.type === "reasoning"
+        || event.type === "thinking"
+        || (part && isReasoningPartType(part.type))
+      ) {
+        const thinkingPart = part && isReasoningPartType(part.type)
+          ? part
+          : {
+            type: event.type || "reasoning",
+            id: (part && part.id) || event.id || "_reasoning",
+            text: reasoningTextFromPart(part) || reasoningTextFromPart(event),
+          };
+        const thinking = thinkingEventsFromPart(thinkingPart, base);
+        if (thinking.length) return thinking;
+      }
+
       if (event.type === "message.part.updated" && part && part.type === "text") {
         const id = part.id || "_default";
         const next = typeof part.text === "string" ? part.text : "";
@@ -256,6 +308,11 @@ function createOpencodeRuntime(cli) {
         }
         const delta = next.slice(prev.length);
         return delta ? [makeEvent("text.delta", { ...base, text: delta })] : [];
+      }
+
+      if (event.type === "message.part.updated" && part && isReasoningPartType(part.type)) {
+        const thinking = thinkingEventsFromPart(part, base);
+        if (thinking.length) return thinking;
       }
 
       if (event.type === "message.part.updated" && part) {

@@ -191,7 +191,7 @@ test("uses orchestrator agent for deepseek v4 pro", () => {
     parseOutputEvents(result.stdout).map((event) => event.type),
     ["run.started", "text.delta", "run.finished"]
   );
-  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --model opencode-go\/deepseek-v4-pro hello:undefined/);
+  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --thinking --model opencode-go\/deepseek-v4-pro hello:undefined/);
   assert.equal(result.stderr, "");
 });
 
@@ -203,7 +203,7 @@ test("uses frontend agent for glm 5.2", () => {
     parseOutputEvents(result.stdout).map((event) => event.type),
     ["run.started", "text.delta", "run.finished"]
   );
-  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --model opencode-go\/glm-5.2 hello:undefined/);
+  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --thinking --model opencode-go\/glm-5.2 hello:undefined/);
   assert.equal(result.stderr, "");
 });
 
@@ -215,7 +215,7 @@ test("uses planner agent for mimo v2.5 pro", () => {
     parseOutputEvents(result.stdout).map((event) => event.type),
     ["run.started", "text.delta", "run.finished"]
   );
-  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --model opencode-go\/mimo-v2\.5-pro hello:undefined/);
+  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --thinking --model opencode-go\/mimo-v2\.5-pro hello:undefined/);
   assert.equal(result.stderr, "");
 });
 
@@ -674,6 +674,48 @@ test("opencode runtime extracts sessionID and text events from current cli schem
   assert.deepEqual(text.map((event) => event.text), ["Hello from current schema"]);
 });
 
+test("opencode runtime maps reasoning events (from --thinking) to thinking.delta", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const ctx = { invocationId: "inv-think", agent: "planner" };
+
+  // Real CLI shape observed with: opencode run --format json --thinking
+  const full = runtime.transform({
+    type: "reasoning",
+    sessionID: "ses_think",
+    part: {
+      id: "prt_reason_1",
+      type: "reasoning",
+      text: "The user wants exactly one word.",
+    },
+  }, ctx);
+
+  assert.equal(full.length, 1);
+  assert.equal(full[0].type, "thinking.delta");
+  assert.equal(full[0].text, "The user wants exactly one word.");
+  assert.equal(full[0].agent, "planner");
+  assert.equal(full[0].invocationId, "inv-think");
+
+  // Streaming growth on the same part id should emit only the delta suffix.
+  const more = runtime.transform({
+    type: "message.part.updated",
+    part: {
+      id: "prt_reason_1",
+      type: "reasoning",
+      text: "The user wants exactly one word. Keep it short.",
+    },
+  }, ctx);
+  assert.deepEqual(more.map((e) => e.type), ["thinking.delta"]);
+  assert.deepEqual(more.map((e) => e.text), [" Keep it short."]);
+
+  // Without text body, no event.
+  const empty = runtime.transform({
+    type: "reasoning",
+    part: { id: "prt_empty", type: "reasoning" },
+  }, ctx);
+  assert.deepEqual(empty, []);
+});
+
 test("provider registry lists codex and opencode", () => {
   const { listSupportedProviders, createProviderRuntime } = require("../../src/agents/providers");
   assert.deepEqual(listSupportedProviders().sort(), ["codex", "opencode"]);
@@ -737,7 +779,7 @@ test("resumes remembered opencode session", () => {
   assert.equal(result.status, 0);
   const events = parseOutputEvents(result.stdout);
   assert.equal(events[0].type, "text.delta");
-  assert.match(events[0].text, /opencode\.exe:run --format json --model opencode-go\/deepseek-v4-pro --session opencode-session-previous hello again/);
+  assert.match(events[0].text, /opencode\.exe:run --format json --thinking --model opencode-go\/deepseek-v4-pro --session opencode-session-previous hello again/);
   assert.equal(result.stderr, "");
 });
 
