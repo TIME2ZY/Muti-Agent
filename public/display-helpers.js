@@ -53,6 +53,30 @@
     return desc.length > max ? desc.slice(0, max) + "…" : desc;
   }
 
+  /** Stable palette slots (1..AGENT_COLOR_COUNT) for multi-agent scanning. */
+  const AGENT_COLOR_COUNT = 6;
+  const AGENT_COLOR_BY_ID = {
+    architect: 1,
+    orchestrator: 2,
+    planner: 3,
+    coder: 4,
+    frontend: 5,
+    critic: 6,
+  };
+
+  function agentColorIndex(id) {
+    if (!id) return 1;
+    const key = String(id);
+    if (Object.prototype.hasOwnProperty.call(AGENT_COLOR_BY_ID, key)) {
+      return AGENT_COLOR_BY_ID[key];
+    }
+    let h = 0;
+    for (let i = 0; i < key.length; i++) {
+      h = ((h << 5) - h + key.charCodeAt(i)) | 0;
+    }
+    return (Math.abs(h) % AGENT_COLOR_COUNT) + 1;
+  }
+
   function createDisplayHelpers({ getAgents, now } = {}) {
     const agentsOf = typeof getAgents === "function" ? getAgents : () => [];
     const nowOf = typeof now === "function" ? now : () => Date.now();
@@ -68,6 +92,7 @@
       agentLabel,
       agentMention,
       agentMeta,
+      agentColorIndex,
       roleBadgeLabel,
       roleDisplayName(role, agentId) {
         return roleDisplayName(role, agentId, agentsOf());
@@ -83,6 +108,8 @@
     agentLabelFromList,
     agentMention,
     agentMeta,
+    agentColorIndex,
+    AGENT_COLOR_COUNT,
     roleBadgeLabel,
     roleDisplayName,
     agentRoleLabel,

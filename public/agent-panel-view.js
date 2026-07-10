@@ -11,10 +11,16 @@
       agentMention,
       agentMeta,
       agentRoleSummary,
+      agentColorIndex,
       setDefaultAgent,
       insertAgentMention,
       promptEl,
     } = deps;
+
+    function colorFor(id) {
+      if (typeof agentColorIndex === "function") return String(agentColorIndex(id));
+      return "1";
+    }
 
     function renderCurrentAgent() {
       const agent = state.agents.find((a) => a.id === state.selectedAgent)
@@ -23,7 +29,12 @@
       const label = agentLabel(agent.id);
       if (currentAgentNameEl) currentAgentNameEl.textContent = label;
       if (currentAgentEl) {
-        currentAgentEl.title = `当前默认 Agent：${label}（${agent.id}）。右侧卡片点击切换默认；消息行首 @ 可单次覆盖。`;
+        currentAgentEl.title = `当前默认 Agent：${label}（${agent.id}）。点击打开 Agents；消息行首 @ 可单次覆盖。`;
+        currentAgentEl.dataset.agentColor = colorFor(agent.id);
+        currentAgentEl.dataset.agentId = agent.id;
+        if (typeof currentAgentEl.setAttribute === "function") {
+          currentAgentEl.setAttribute("aria-label", `当前默认 Agent：${label}`);
+        }
       }
     }
 
@@ -33,19 +44,22 @@
         const item = document.createElement("article");
         const isSelected = a.id === state.selectedAgent;
         item.className = "agent-tab" + (isSelected ? " is-selected" : "");
+        item.dataset.agentColor = colorFor(a.id);
+        item.dataset.agentId = a.id;
         item.setAttribute("role", "button");
         item.tabIndex = 0;
         item.setAttribute("aria-pressed", isSelected ? "true" : "false");
         item.title = a.description
           ? `${a.label} (${a.id}) — ${a.description}\n点击设为默认 Agent · Shift+点击插入 @${agentMention(a)}`
           : `点击设为默认 Agent · Shift+点击插入 @${agentMention(a)}`;
+        // Order: name → model → capability tag
         item.innerHTML = `
-          <span class="agent-tab-role"></span>
           <span class="agent-tab-name"></span>
-          <span class="agent-tab-model"></span>`;
-        item.querySelector(".agent-tab-role").textContent = agentRoleSummary(a);
+          <span class="agent-tab-model"></span>
+          <span class="agent-tab-role"></span>`;
         item.querySelector(".agent-tab-name").textContent = agentLabel(a.id);
         item.querySelector(".agent-tab-model").textContent = agentMeta(a);
+        item.querySelector(".agent-tab-role").textContent = agentRoleSummary(a);
         item.addEventListener("click", (e) => {
           if (e.shiftKey) {
             insertAgentMention(a);

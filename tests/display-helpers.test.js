@@ -7,6 +7,7 @@ const {
   agentMention,
   agentMeta,
   agentRoleSummary,
+  agentColorIndex,
   fmtTime,
   createDisplayHelpers,
 } = require("../public/display-helpers.js");
@@ -31,6 +32,15 @@ test("agent helpers format mention and meta", () => {
   assert.equal(agentMention({ id: "x", label: "X" }), "X");
   assert.match(agentMeta({ cli: "codex", model: "gpt", reasoningEffort: "high" }), /codex/);
   assert.equal(agentRoleSummary({ description: "a".repeat(40) }).length, 33);
+});
+
+test("agentColorIndex is stable for known agents and in 1..6", () => {
+  assert.equal(agentColorIndex("architect"), 1);
+  assert.equal(agentColorIndex("orchestrator"), 2);
+  assert.equal(agentColorIndex("critic"), 6);
+  assert.equal(agentColorIndex("architect"), agentColorIndex("architect"));
+  const unknown = agentColorIndex("custom-agent-xyz");
+  assert.ok(unknown >= 1 && unknown <= 6);
 });
 
 test("fmtTime returns relative labels", () => {
