@@ -95,7 +95,7 @@ http://127.0.0.1:8787
 | 路径 | 职责 |
 |------|------|
 | `src/server/` | HTTP 服务、路由、UI 安全、会话与调用存储、`skills.js` 技能系统 |
-| `src/agents/` | CLI 调用、Agent 定义、A2A 路由、回调协议、provider |
+| `src/agents/` | CLI 调用、Agent 定义、身份包（`identities/`）、A2A 路由、回调协议、provider |
 | `src/session/` | transcript、上下文健康、会话密封与 bootstrap |
 | `src/worktree/` | 按会话创建/丢弃 git worktree |
 | `public/` | 前端（IIFE + `window.*` 模块，无 bundler） |
@@ -173,6 +173,8 @@ http://127.0.0.1:8787
 - 文案：前端 JS 字符串集中在 `public/locale-zh-CN.js`；`index.html` 壳层文案暂保留中文硬编码
 - 消息流：过程卡纯函数在 `public/message-process-helpers.js`，`message-view.js` 负责 DOM 组合
 - Skill 系统：`src/server/skills.js`（frontmatter / 匹配 / prompt 增强 / 只读规则）
+- Agent 身份：`src/agents/identities/*.md` + `src/agents/identity.js`；**每一轮** invoke（含 A2A）注入对应身份块
+- A2A 交接：`src/agents/handoff.js` 解析 ` ```handoff ` 块；软约束（缺字段 degraded 仍路由），结构化注入下一位 Agent
 - 完整 ES modules / Vite 尚未接入；新增前端文件时请追加到 `MODULES` 并保证依赖顺序
 - 新增 `src` / `public` / `tests` 下的 `.js` 后，直接 `npm run check` / `npm run lint` 即可
 - 应用层 skills 放在 `skills/*.md`，由服务端按 trigger 匹配并注入 prompt
