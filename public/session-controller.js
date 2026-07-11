@@ -97,34 +97,33 @@
       if (token !== switchToken || state.currentSessionId !== id) return;
 
       const rt = store() ? store().get(id) : null;
-      if (rt && rt.status === "running" && typeof remountLiveMessages === "function") {
+      if (rt && rt.status === "running") {
+        // Replay a2a-route (and similar) system notices that may have been
+        // buffered while this session was in the background. Prefer notices
+        // not already present in the transcript-backed history load.
+        if (Array.isArray(rt.systemNotices) && rt.systemNotices.length > 0) {
+          const historySystem = new Set(
+            (Array.isArray(loadedMessages) ? loadedMessages : [])
+              .filter((m) => m && m.role === "system" && m.content)
+              .map((m) => String(m.content))
+          );
+          for (const notice of rt.systemNotices) {
+            if (!notice || !notice.content) continue;
+            if (historySystem.has(String(notice.content))) continue;
+            createMessage({
+              role: notice.role || "system",
+              agent: notice.agent || "system",
+              content: notice.content,
+              variant: notice.variant || "",
+            });
+          }
+        }
         // Rebuild live bubbles for an in-flight background stream only.
-        // Completed turns rely on hydrateProcessTrace() from transcript so we
-        // do not duplicate history assistant bubbles.
-        for (const [agent, item] of rt.liveMessages) {
-          if (item && item.detached) {
-            rt.liveMessages.delete(agent);
-          }
+        // Completed agents are removed from liveMessages on agent-exit so
+        // history assistant bubbles are not duplicated.
+        if (typeof remountLiveMessages === "function") {
+          remountLiveMessages(id);
         }
-        for (const [agent, item] of [...rt.liveMessages.entries()]) {
-          if (item && item.wrapper) continue;
-          if (!item || !item.rawText) {
-            rt.liveMessages.delete(agent);
-            continue;
-          }
-        }
-        for (const [agent, item] of [...rt.liveMessages.entries()]) {
-          if (item && !item.wrapper && item.rawText) {
-            const rebuilt = createMessage({ role: "assistant", agent, content: "" });
-            rebuilt.rawText = item.rawText;
-            rebuilt.invocationId = item.invocationId || rt.liveInvocations.get(agent) || null;
-            if (rebuilt._liveTextEl) rebuilt._liveTextEl.textContent = item.rawText;
-            rebuilt.setBadge("writing");
-            if (rebuilt.bubble) rebuilt.bubble.classList.remove("msg-bubble-live-pending");
-            rt.liveMessages.set(agent, rebuilt);
-          }
-        }
-        remountLiveMessages(id);
       }
 
       const sessions = await refreshSessionList();

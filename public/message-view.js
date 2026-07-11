@@ -1036,98 +1036,151 @@
       return details;
     }
 
+    /**
+     * Render a single live assistant bubble into its final form (markdown,
+     * process trace, badge). Used both for whole-stream finish and per-agent
+     * exit during A2A handoffs so the prior agent does not stay on "输出中".
+     */
+    function finalizeLiveItem(agent, item, sessionId, options = {}) {
+      if (!item || item.detached || !item.bubble || !item.wrapper) return false;
+
+      const sid = sessionId || state.currentSessionId || "_pending";
+      const error = options.error === true;
+
+      // Drop ephemeral live status chips — they don't belong on the final card.
+      item.bubble.querySelectorAll(".live-process-status, .live-process-chips").forEach((el) => el.remove());
+
+      const preservedProcess = item.bubble.querySelector(".msg-process");
+      const preservedSubagents = item.bubble.querySelector(".live-subagents");
+      if (preservedProcess) preservedProcess.remove();
+      else if (preservedSubagents) preservedSubagents.remove();
+
+      const preservedThinking = item.bubble.querySelector(".msg-thinking");
+      if (preservedThinking) {
+        preservedThinking.remove();
+        preservedThinking.removeAttribute("data-live");
+        preservedThinking.open = false;
+      }
+      const preservedProgress = item.bubble.querySelector(".msg-progress");
+      if (preservedProgress) preservedProgress.remove();
+
+      // Rebuild thinking from run state if panel was missing (detached remount).
+      if (!preservedThinking && item.thinkingText) {
+        updateThinkingPanel(item, item.thinkingText);
+      }
+      const thinkingEl = preservedThinking || item.bubble.querySelector(".msg-thinking");
+      if (thinkingEl) {
+        thinkingEl.removeAttribute("data-live");
+        thinkingEl.open = false;
+      }
+
+      if (!preservedProgress && item.progressItems && item.progressItems.length) {
+        updateProgressList(item, item.progressItems);
+      }
+      let progressEl = preservedProgress || item.bubble.querySelector(".msg-progress");
+      if (progressEl) progressEl = collapseProgressIntoDetails(progressEl);
+
+      const rendered = renderMd(item.rawText || "");
+      const content = document.createElement("div");
+      content.className = "msg-final-content";
+      content.innerHTML = rendered;
+
+      // Prefer a compact rebuilt process panel (collapsed) over the live expanded dump.
+      let processEl = buildProcessTraceFromRun(agent, sid);
+      if (!processEl && preservedProcess) {
+        processEl = wrapProcessDetails(
+          preservedProcess.classList.contains("msg-process")
+            ? (preservedProcess.querySelector(".live-subagents") || preservedProcess)
+            : preservedProcess,
+          { open: false, live: false }
+        );
+      } else if (!processEl && preservedSubagents) {
+        // Strip verbose summaries that may have been attached while live.
+        preservedSubagents.querySelectorAll(".live-subagent-summary").forEach((el) => {
+          el.textContent = "";
+        });
+        processEl = wrapProcessDetails(preservedSubagents, { open: false, live: false });
+      }
+      if (processEl && processEl.classList && processEl.classList.contains("msg-process")) {
+        processEl.open = false;
+        processEl.removeAttribute("data-live");
+        updateProcessDetailsLabel(processEl);
+      }
+
+      item.bubble.replaceChildren();
+      if (thinkingEl) item.bubble.appendChild(thinkingEl);
+      if (progressEl) item.bubble.appendChild(progressEl);
+      if (processEl) item.bubble.appendChild(processEl);
+      item.bubble.appendChild(content);
+      item.bubble.classList.remove("msg-bubble-live-pending");
+      item.bubble.classList.remove("msg-bubble-live");
+
+      if (!item.wrapper.querySelector(".msg-copy")) {
+        const copy = document.createElement("button");
+        copy.className = "msg-copy";
+        copy.textContent = "⎘";
+        copy.title = "复制消息";
+        copy.setAttribute("aria-label", "复制消息");
+        copy.dataset.copyHtml = rendered;
+        copy.addEventListener("click", () => {
+          copyToClipboard(item.rawText || "", copy, "✓", msg.copyFail || "失败");
+        });
+        const meta = item.wrapper.querySelector(".msg-meta");
+        if (meta) meta.appendChild(copy);
+      }
+      if (item.invocationId && typeof attachRecallToggle === "function") {
+        attachRecallToggle(item.wrapper, item.invocationId);
+      }
+      item.setBadge(error ? "error" : "done");
+      item.finalized = true;
+      return true;
+    }
+
+    /**
+     * Finalize one agent after its invocation exits (A2A handoff path).
+     * Removes it from liveMessages so session remount won't re-show "输出中"
+     * and won't duplicate the history bubble loaded from /api/messages.
+     */
+    function finalizeLiveAgent(agent, sessionId, options = {}) {
+      if (!agent) return;
+      const sid = sessionId || state.currentSessionId || "_pending";
+      flushPendingLiveRender(sid);
+      const rt = sessionRuntime(sid);
+      const invId = rt.liveInvocations.get(agent);
+      if (invId && rt.liveRuns.has(invId)) {
+        const run = rt.liveRuns.get(invId);
+        run.status = options.error === true ? "error" : "done";
+      }
+      const item = rt.liveMessages.get(agent);
+      if (!item) return;
+      if (item.detached || !item.bubble || !item.wrapper) {
+        // Background / non-viewing: session history is source of truth after exit.
+        rt.liveMessages.delete(agent);
+        return;
+      }
+      finalizeLiveItem(agent, item, sid, options);
+      // Drop from live map so switchSession remount does not re-attach as writing.
+      rt.liveMessages.delete(agent);
+    }
+
     function finalizeLiveMessages(sessionId) {
       const sid = sessionId || state.currentSessionId || "_pending";
       flushPendingLiveRender(sid);
       const rt = sessionRuntime(sid);
-      for (const [agent, item] of rt.liveMessages) {
-        if (!item || item.detached || !item.bubble || !item.wrapper) continue;
-
-        // Drop ephemeral live status chips — they don't belong on the final card.
-        item.bubble.querySelectorAll(".live-process-status, .live-process-chips").forEach((el) => el.remove());
-
-        const preservedProcess = item.bubble.querySelector(".msg-process");
-        const preservedSubagents = item.bubble.querySelector(".live-subagents");
-        if (preservedProcess) preservedProcess.remove();
-        else if (preservedSubagents) preservedSubagents.remove();
-
-        const preservedThinking = item.bubble.querySelector(".msg-thinking");
-        if (preservedThinking) {
-          preservedThinking.remove();
-          preservedThinking.removeAttribute("data-live");
-          preservedThinking.open = false;
+      for (const [agent, item] of [...rt.liveMessages.entries()]) {
+        if (!item) {
+          rt.liveMessages.delete(agent);
+          continue;
         }
-        const preservedProgress = item.bubble.querySelector(".msg-progress");
-        if (preservedProgress) preservedProgress.remove();
-
-        // Rebuild thinking from run state if panel was missing (detached remount).
-        if (!preservedThinking && item.thinkingText) {
-          updateThinkingPanel(item, item.thinkingText);
+        if (item.detached || !item.bubble || !item.wrapper) {
+          // Completed-or-abandoned detached stubs: history will cover them.
+          rt.liveMessages.delete(agent);
+          continue;
         }
-        const thinkingEl = preservedThinking || item.bubble.querySelector(".msg-thinking");
-        if (thinkingEl) {
-          thinkingEl.removeAttribute("data-live");
-          thinkingEl.open = false;
-        }
-
-        if (!preservedProgress && item.progressItems && item.progressItems.length) {
-          updateProgressList(item, item.progressItems);
-        }
-        let progressEl = preservedProgress || item.bubble.querySelector(".msg-progress");
-        if (progressEl) progressEl = collapseProgressIntoDetails(progressEl);
-
-        const rendered = renderMd(item.rawText || "");
-        const content = document.createElement("div");
-        content.className = "msg-final-content";
-        content.innerHTML = rendered;
-
-        // Prefer a compact rebuilt process panel (collapsed) over the live expanded dump.
-        let processEl = buildProcessTraceFromRun(agent, sid);
-        if (!processEl && preservedProcess) {
-          processEl = wrapProcessDetails(
-            preservedProcess.classList.contains("msg-process")
-              ? (preservedProcess.querySelector(".live-subagents") || preservedProcess)
-              : preservedProcess,
-            { open: false, live: false }
-          );
-        } else if (!processEl && preservedSubagents) {
-          // Strip verbose summaries that may have been attached while live.
-          preservedSubagents.querySelectorAll(".live-subagent-summary").forEach((el) => {
-            el.textContent = "";
-          });
-          processEl = wrapProcessDetails(preservedSubagents, { open: false, live: false });
-        }
-        if (processEl && processEl.classList && processEl.classList.contains("msg-process")) {
-          processEl.open = false;
-          processEl.removeAttribute("data-live");
-          updateProcessDetailsLabel(processEl);
-        }
-
-        item.bubble.replaceChildren();
-        if (thinkingEl) item.bubble.appendChild(thinkingEl);
-        if (progressEl) item.bubble.appendChild(progressEl);
-        if (processEl) item.bubble.appendChild(processEl);
-        item.bubble.appendChild(content);
-        item.bubble.classList.remove("msg-bubble-live-pending");
-        item.bubble.classList.remove("msg-bubble-live");
-
-        if (!item.wrapper.querySelector(".msg-copy")) {
-          const copy = document.createElement("button");
-          copy.className = "msg-copy";
-          copy.textContent = "⎘";
-          copy.title = "复制消息";
-          copy.setAttribute("aria-label", "复制消息");
-          copy.dataset.copyHtml = rendered;
-          copy.addEventListener("click", () => {
-            copyToClipboard(item.rawText || "", copy, "✓", msg.copyFail || "失败");
-          });
-          const meta = item.wrapper.querySelector(".msg-meta");
-          if (meta) meta.appendChild(copy);
-        }
-        if (item.invocationId && typeof attachRecallToggle === "function") {
-          attachRecallToggle(item.wrapper, item.invocationId);
-        }
-        item.setBadge("done");
+        finalizeLiveItem(agent, item, sid, { error: false });
+        // Drop after finalize so a later switch while status is still settling
+        // does not re-mount these as live "输出中" bubbles.
+        rt.liveMessages.delete(agent);
       }
     }
 
@@ -1198,16 +1251,57 @@
       createMessage({ role: "system", agent, content: text, variant: "stderr" });
     }
 
+    /**
+     * Re-attach or rebuild live agent bubbles after a session switch.
+     * Handles: DOM wiped by switchSession, detached placeholders (updated while
+     * background), and agents that only have thinking / pending status so far.
+     */
     function remountLiveMessages(sessionId) {
       const rt = runtimeStore.get(sessionId);
       if (!rt || rt.liveMessages.size === 0) return;
       hideEmpty();
       ensureSpacer();
-      for (const [, item] of rt.liveMessages) {
-        if (item && item.wrapper && !messagesEl.contains(item.wrapper)) {
-          messagesEl.insertBefore(item.wrapper, spacerEl);
+
+      for (const [agent, item] of [...rt.liveMessages.entries()]) {
+        if (!item || item.finalized) {
+          rt.liveMessages.delete(agent);
+          continue;
         }
+
+        const wrapperInDom = item.wrapper && messagesEl.contains(item.wrapper);
+        if (wrapperInDom) continue;
+
+        // Wrapper still held in memory (cleared from parent by replaceChildren).
+        if (item.wrapper && !item.detached) {
+          messagesEl.insertBefore(item.wrapper, spacerEl);
+          continue;
+        }
+
+        // Detached / missing DOM: rebuild a live bubble from buffered state.
+        // Keep empty rawText (thinking-only) so handoff targets stay visible.
+        const rebuilt = createMessage({ role: "assistant", agent, content: "" });
+        rebuilt.rawText = item.rawText || "";
+        rebuilt.thinkingText = item.thinkingText || "";
+        rebuilt.progressItems = Array.isArray(item.progressItems) ? item.progressItems : [];
+        rebuilt.pendingStatus = item.pendingStatus || "";
+        rebuilt.invocationId = item.invocationId || rt.liveInvocations.get(agent) || null;
+
+        if (rebuilt.rawText && rebuilt._liveTextEl) {
+          rebuilt._liveTextEl.textContent = rebuilt.rawText;
+          if (rebuilt.bubble) rebuilt.bubble.classList.remove("msg-bubble-live-pending");
+          rebuilt.setBadge("writing");
+        } else {
+          rebuilt.setBadge("thinking");
+          if (rebuilt.pendingStatus && rebuilt._liveTextEl) {
+            rebuilt._liveTextEl.textContent = rebuilt.pendingStatus;
+          }
+        }
+        if (rebuilt.thinkingText) updateThinkingPanel(rebuilt, rebuilt.thinkingText);
+        if (rebuilt.progressItems.length) updateProgressList(rebuilt, rebuilt.progressItems);
+
+        rt.liveMessages.set(agent, rebuilt);
       }
+
       ensureSpacer();
       scrollDown();
     }
@@ -1256,6 +1350,7 @@
       applyAgentEvent,
       ensureLiveRun,
       flushPendingLiveRender,
+      finalizeLiveAgent,
       finalizeLiveMessages,
       finishStream,
       remountLiveMessages,
