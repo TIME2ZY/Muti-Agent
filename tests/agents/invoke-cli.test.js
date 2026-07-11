@@ -1274,6 +1274,8 @@ childProcess.spawn = function spawn() {
   const text = events.find((event) => event.type === "text.delta");
   assert.ok(text);
   assert.equal(text.text, "retry-success");
+  // One invocation lifecycle across retries: single started + single finished.
+  assert.equal(events.filter((event) => event.type === "run.started").length, 1);
   assert.equal(events.filter((event) => event.type === "run.finished").length, 1);
   assert.equal(
     events.some((event) => event.type === "run.failed"),
@@ -1281,4 +1283,60 @@ childProcess.spawn = function spawn() {
   );
   assert.match(result.stderr, /temporary failure/);
   assert.match(result.stderr, /retrying 1\/1/);
+});
+
+test("retries keep a single lifecycle when first attempt already emitted content", () => {
+  const result = runScriptWithHook(
+    ["--retries", "1", "hello"],
+    `
+const childProcess = require("node:child_process");
+const { EventEmitter } = require("node:events");
+const { PassThrough } = require("node:stream");
+let attempt = 0;
+
+childProcess.spawn = function spawn() {
+  attempt += 1;
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = function kill(signal) {
+    child.emit("close", null, signal);
+    return true;
+  };
+
+  process.nextTick(() => {
+    if (attempt === 1) {
+      child.stdout.write(JSON.stringify({
+        type: "thread.started",
+        thread_id: "partial-session"
+      }) + "\\n");
+      child.stdout.write(JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "partial " }
+      }) + "\\n");
+      child.stderr.write("boom\\n");
+      child.emit("close", 1, null);
+      return;
+    }
+
+    child.stdout.write(JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text: "recovered" }
+    }) + "\\n");
+    child.stdout.end();
+    child.emit("close", 0, null);
+  });
+
+  return child;
+};
+`
+  );
+
+  assert.equal(result.status, 0);
+  const events = parseOutputEvents(result.stdout);
+  assert.equal(events.filter((e) => e.type === "run.started").length, 1);
+  assert.equal(events.filter((e) => e.type === "run.finished").length, 1);
+  assert.equal(events.filter((e) => e.type === "run.failed").length, 0);
+  const texts = events.filter((e) => e.type === "text.delta").map((e) => e.text);
+  assert.deepEqual(texts, ["partial ", "recovered"]);
 });

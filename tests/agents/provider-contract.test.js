@@ -156,6 +156,25 @@ test("unknown providerOptions fail fast with allowed field names", () => {
   );
 });
 
+test("non-object providerOptions fail fast instead of becoming empty object", () => {
+  assert.throws(
+    () =>
+      validateProviderConfig({
+        ...CONFIGS.codex,
+        providerOptions: "danger-full-access",
+      }),
+    /must be a plain object/
+  );
+  assert.throws(
+    () =>
+      validateProviderConfig({
+        ...CONFIGS.codex,
+        providerOptions: 1,
+      }),
+    /must be a plain object/
+  );
+});
+
 test("grok adapter owns missing-proxy diagnostics and GROK_PROXY env patch", () => {
   const messages = getProviderDiagnostics(CONFIGS.grok, { proxy: "" }, {});
   assert.ok(messages.some((line) => /no proxy for grok/i.test(line)));
@@ -174,4 +193,10 @@ test("invoke-cli entry stays free of provider special cases and server imports",
   assert.doesNotMatch(source, /providerId\s*===\s*["']grok["']/);
   assert.doesNotMatch(source, /require\(["']\.\.\/server\//);
   assert.doesNotMatch(source, /extractAssistantText/);
+});
+
+test("server entry does not hardcode grok proxy resolution", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../src/server/index.js"), "utf8");
+  assert.doesNotMatch(source, /resolveProviderProxy\(\s*["']grok["']\s*\)/);
+  assert.match(source, /collectProviderStartupDiagnostics/);
 });

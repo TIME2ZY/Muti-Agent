@@ -64,13 +64,15 @@ function getProviderAdapter(providerId) {
 }
 
 function validateProviderOptions(adapter, providerOptions) {
-  const options =
-    providerOptions && typeof providerOptions === "object" && !Array.isArray(providerOptions)
-      ? providerOptions
-      : {};
-  if (Array.isArray(providerOptions)) {
-    throw new Error(`providerOptions for "${adapter.id}" must be an object.`);
+  if (providerOptions == null) return {};
+  if (typeof providerOptions !== "object" || Array.isArray(providerOptions)) {
+    throw new Error(
+      `providerOptions for "${adapter.id}" must be a plain object (got ${
+        Array.isArray(providerOptions) ? "array" : typeof providerOptions
+      }).`
+    );
   }
+  const options = providerOptions;
   const allowed = new Set(adapter.allowedProviderOptions || []);
   const unknown = Object.keys(options).filter((key) => !allowed.has(key));
   if (unknown.length) {
@@ -102,13 +104,21 @@ function validateProviderConfig(config) {
   return { adapter, modelProfile };
 }
 
-function createProviderRuntime(config) {
+/**
+ * Create a provider runtime envelope.
+ *
+ * @param {object} config provider/agent config
+ * @param {{ lifecycle?: ReturnType<typeof createRunLifecycle> }} [options]
+ *   Pass a shared lifecycle from the process supervisor so retries keep one
+ *   invocation lifecycle while decoder state is recreated per attempt.
+ */
+function createProviderRuntime(config, options = {}) {
   const { adapter } = validateProviderConfig(config);
   const runtime = adapter.createRuntime(config);
   if (!runtime || typeof runtime.transform !== "function") {
     throw new Error(`Provider runtime "${adapter.id}" must implement transform().`);
   }
-  const lifecycle = createRunLifecycle();
+  const lifecycle = options.lifecycle || createRunLifecycle();
 
   const validateEvents = (events, context, sessionId = "") => {
     if (!Array.isArray(events)) {
@@ -142,6 +152,12 @@ function createProviderRuntime(config) {
     return accepted;
   };
   return {
+    get started() {
+      return lifecycle.started;
+    },
+    get terminal() {
+      return lifecycle.terminal;
+    },
     extractSessionId:
       typeof runtime.extractSessionId === "function"
         ? runtime.extractSessionId.bind(runtime)
@@ -190,6 +206,41 @@ function createProviderRuntime(config) {
       return events;
     },
   };
+}
+
+/**
+ * Collect startup diagnostics across all registered adapters (no provider hardcoding).
+ */
+function collectProviderStartupDiagnostics(env = process.env) {
+  const messages = [];
+  const globalProxy = resolveProxy({}, env);
+  if (globalProxy) {
+    messages.push(`CLI proxy: ${globalProxy} (INVOKE_CLI_PROXY / HTTPS_PROXY / HTTP_PROXY)`);
+  }
+
+  for (const adapter of Object.values(PROVIDERS)) {
+    const options = { proxy: "", providerOptions: {} };
+    const proxy =
+      typeof adapter.resolveProxy === "function"
+        ? adapter.resolveProxy(options, env)
+        : resolveProxy(options, env);
+    if (proxy && proxy !== globalProxy) {
+      messages.push(`${adapter.id} proxy: ${proxy}`);
+    }
+    if (typeof adapter.diagnostics === "function") {
+      const extra = adapter.diagnostics({ ...options, proxy }, env);
+      if (Array.isArray(extra)) {
+        for (const line of extra) {
+          if (typeof line === "string" && line.trim()) messages.push(line);
+        }
+      }
+    }
+  }
+
+  if (!globalProxy && messages.length === 0) {
+    messages.push("CLI proxy: (none)");
+  }
+  return messages;
 }
 
 function buildProviderInvocation(config, prompt) {
@@ -264,5 +315,6 @@ module.exports = {
   resolveProviderRunOptions,
   buildProviderEnvironment,
   getProviderDiagnostics,
+  collectProviderStartupDiagnostics,
   listSupportedProviders,
 };

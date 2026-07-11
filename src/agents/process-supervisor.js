@@ -1,5 +1,6 @@
 const { spawn } = require("node:child_process");
 const readline = require("node:readline");
+const { createRunLifecycle } = require("./event-protocol");
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_KILL_GRACE_MS = 5000;
@@ -7,8 +8,13 @@ const STDERR_BUFFER_LIMIT = 8192;
 
 /**
  * Supervise a provider CLI child process: timeout, signals, retries, NDJSON
- * line parsing, and terminal finish events. Provider-specific behavior must
- * stay behind the runtime / environment hooks passed in by the caller.
+ * line parsing, and terminal finish events.
+ *
+ * Invocation lifecycle is owned here and shared across retries. Callers must
+ * recreate decoder/runtime state per attempt while reusing the same lifecycle:
+ *
+ *   const lifecycle = createRunLifecycle(); // or omit — supervisor creates one
+ *   createRuntime: (lifecycle) => createProviderRuntime(config, { lifecycle })
  */
 function superviseProviderProcess({
   command,
@@ -24,6 +30,7 @@ function superviseProviderProcess({
   onSessionId,
   spawnFn = spawn,
   stderrLimit = STDERR_BUFFER_LIMIT,
+  lifecycle: externalLifecycle,
 } = {}) {
   if (typeof createRuntime !== "function") {
     throw new Error("createRuntime is required.");
@@ -32,12 +39,15 @@ function superviseProviderProcess({
     throw new Error("onEvent is required.");
   }
 
+  // One lifecycle per invocation — survives retries.
+  const lifecycle = externalLifecycle || createRunLifecycle();
   let firstChild;
   let attempt = 0;
 
   const startAttempt = () => {
     attempt += 1;
-    const providerRuntime = createRuntime();
+    // Decoder/runtime state is per-attempt; lifecycle is shared.
+    const providerRuntime = createRuntime(lifecycle);
 
     const child = spawnFn(command, args, {
       env,
@@ -181,13 +191,18 @@ function superviseProviderProcess({
       }
 
       if (code !== 0) {
-        if (!timedOut && attempt <= retries) {
+        // Retry only while the invocation lifecycle is still open. If the
+        // decoder already emitted run.failed/finished, do not start a second life.
+        const canRetry = !timedOut && attempt <= retries && !lifecycle.terminal;
+        if (canRetry) {
           finishProvider({ terminal: false });
-          console.error(
-            `${command} ${args.join(" ")} exited with code ${code}; retrying ${attempt}/${retries}.`
-          );
-          startAttempt();
-          return;
+          if (!lifecycle.terminal) {
+            console.error(
+              `${command} ${args.join(" ")} exited with code ${code}; retrying ${attempt}/${retries}.`
+            );
+            startAttempt();
+            return;
+          }
         }
 
         console.error(`\n${command} ${args.join(" ")} exited with code ${code}`);

@@ -183,7 +183,8 @@ function invoke(cli, prompt, options = {}) {
     timeoutMs: resolvedRun.timeoutMs,
     killGraceMs: resolvedRun.killGraceMs,
     retries: resolvedRun.retries ?? 0,
-    createRuntime: () => createProviderRuntime(config),
+    // Shared lifecycle across retries; decoder state recreated per attempt.
+    createRuntime: (lifecycle) => createProviderRuntime(config, { lifecycle }),
     eventContext: {
       agent: config.id || providerId,
       invocationId,

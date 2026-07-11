@@ -97,3 +97,37 @@ test("runtime envelope drops content after terminal and stamps protocolVersion",
   assert.deepEqual(late, []);
   assert.deepEqual(runtime.finish(ctx, { terminal: true, ok: true, exitCode: 0 }), []);
 });
+
+test("shared lifecycle across recreated runtimes suppresses second run.started", () => {
+  const { createRunLifecycle } = require("../../src/agents/event-protocol");
+  const lifecycle = createRunLifecycle();
+  const config = { providerId: "codex", model: "gpt-5.5" };
+  const ctx = { agent: "architect", invocationId: "inv-retry" };
+
+  const attempt1 = createProviderRuntime(config, { lifecycle });
+  const first = attempt1.transform(
+    { type: "item.completed", item: { type: "agent_message", text: "a" } },
+    ctx
+  );
+  assert.deepEqual(
+    first.map((e) => e.type),
+    ["run.started", "text.delta"]
+  );
+  // Intermediate process failure: flush without terminal.
+  assert.deepEqual(attempt1.finish(ctx, { terminal: false }), []);
+
+  const attempt2 = createProviderRuntime(config, { lifecycle });
+  const second = attempt2.transform(
+    { type: "item.completed", item: { type: "agent_message", text: "b" } },
+    ctx
+  );
+  assert.deepEqual(
+    second.map((e) => e.type),
+    ["text.delta"]
+  );
+  assert.equal(second[0].text, "b");
+  assert.deepEqual(
+    attempt2.finish(ctx, { terminal: true, ok: true, exitCode: 0 }).map((e) => e.type),
+    ["run.finished"]
+  );
+});

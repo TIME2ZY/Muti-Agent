@@ -2,9 +2,11 @@ const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 const { AGENTS, getAgentModelProfile } = require("../agents/catalog");
-const { getProviderAdapter } = require("../agents/providers");
+const {
+  getProviderAdapter,
+  collectProviderStartupDiagnostics,
+} = require("../agents/providers");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
-const { resolveProxy, resolveProviderProxy } = require("../agents/proxy");
 const agentIdentity = require("../agents/identity");
 const agentHandoff = require("../agents/handoff");
 const callbacks = require("../agents/callbacks");
@@ -285,17 +287,8 @@ if (require.main === module) {
   const server = createServer();
   server.listen(DEFAULT_PORT, "127.0.0.1", () => {
     console.log(`Invoke UI listening at http://127.0.0.1:${DEFAULT_PORT}`);
-    const grokProxy = resolveProviderProxy("grok");
-    const globalProxy = resolveProxy();
-    if (grokProxy && grokProxy !== globalProxy) {
-      console.log(`Grok proxy: ${grokProxy} (GROK_PROXY / INVOKE_GROK_PROXY)`);
-    }
-    if (globalProxy) {
-      console.log(`CLI proxy: ${globalProxy} (INVOKE_CLI_PROXY / HTTPS_PROXY / HTTP_PROXY)`);
-    } else if (!grokProxy) {
-      console.log(
-        "CLI proxy: (none) — if Grok hangs, set GROK_PROXY=http://127.0.0.1:7892 (Grok-only) before npm start"
-      );
+    for (const line of collectProviderStartupDiagnostics()) {
+      console.log(line);
     }
   });
 }
