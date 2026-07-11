@@ -174,6 +174,7 @@ http://127.0.0.1:8787
 - 消息流：过程卡纯函数在 `public/message-process-helpers.js`，`message-view.js` 负责 DOM 组合
 - Skill 系统：`src/server/skills.js`（frontmatter / 匹配 / prompt 增强 / 只读规则）
 - Agent 身份：`src/agents/identities/*.md` + `src/agents/identity.js`；**每一轮** invoke（含 A2A）注入对应身份块
+- A2A 交接：`src/agents/handoff.js` 解析 ` ```handoff ` 块；软约束（缺字段 degraded 仍路由），结构化注入下一位 Agent
 - 完整 ES modules / Vite 尚未接入；新增前端文件时请追加到 `MODULES` 并保证依赖顺序
 - 新增 `src` / `public` / `tests` 下的 `.js` 后，直接 `npm run check` / `npm run lint` 即可
 - 应用层 skills 放在 `skills/*.md`，由服务端按 trigger 匹配并注入 prompt

@@ -5,6 +5,7 @@ const path = require("node:path");
 const { AGENTS } = require("../agents/invoke-cli");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
 const agentIdentity = require("../agents/identity");
+const agentHandoff = require("../agents/handoff");
 const callbacks = require("../agents/callbacks");
 const transcript = require("../session/transcript");
 const contextHealth = require("../session/health");
@@ -472,6 +473,7 @@ function createServer(options = {}) {
     sessionSealer,
     sessionBootstrap,
     agentIdentity,
+    agentHandoff,
     worktreeManager,
     worktreeManagerModule,
     activeInvocations,

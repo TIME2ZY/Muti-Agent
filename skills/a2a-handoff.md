@@ -1,6 +1,6 @@
 ---
 name: a2a-handoff
-description: Agent 之间通过 @mention 自动路由 — 何时 @、怎么 @、@ 之前检查什么
+description: Agent 之间通过 @mention 自动路由 — 何时 @、怎么 @、必须附带 handoff 块
 triggers:
   - "@Codex"
   - "@万事通"
@@ -16,7 +16,7 @@ always: true
 
 # Agent-to-Agent 路由规则
 
-你是多 Agent 协作系统中的一个 Agent。当你的任务完成或需要其他 Agent 介入时，通过 `@AgentName` 自动将任务路由给下一个 Agent。
+你是多 Agent 协作系统中的一个 Agent。需要其他 Agent 介入时，通过行首 `@AgentName` 路由，并**必须**附带标准 `handoff` 块。
 
 ## 当前 Agent 阵容
 
@@ -33,69 +33,82 @@ always: true
 
 ## 出口检查（发送前必须执行）
 
-每条消息发送前，必须做一次"出口检查"：
-
 ```
 回复前问自己："到我这里结束了吗？"
 ```
 
-- **如果还需要下一个 Agent 采取行动** → 直接 @ 对方（跳过下面两问）
-- **如果不需要别人行动** → 再问：
-  1. **对方需要知道这个信息吗？**
-  2. **这会影响对方的工作吗？**
-  3. 两个都否 → 不 @
+- **如果还需要下一个 Agent 采取行动** → 行首 `@` + 完整 `handoff` 块
+- **如果不需要别人行动** → 再问对方是否需要知道 / 是否影响对方；两个都否 → 不 @
 
-**关键设计：Q1 是短路的。** "需要对方采取行动"直接 @，不被 Q2/Q3 拦截。这防止"该 @ 不 @"的链条断裂。
+## 格式要求（两段都要）
 
-## 格式要求（违反不触发路由）
+### 1) 行首 @mention（触发路由）
 
 ```
-@AgentName
-
-[清晰的任务描述，包含完整上下文]
+@小评
 ```
 
-- **行首**写 `@AgentName`（前面不能有其他文字）
-- 后面跟上明确的任务指令
-- 附上对方需要的代码、日志、上下文
+- 必须在**行首**（前面只能有空白）
+- 代码块内的 `@` **不会**触发路由
+- 不要 @ 自己
 
-## 标准协作流程
+### 2) 标准 handoff 块（机器可读，必填）
 
-### 开发新功能
+在同一条回复中附上：
+
+````markdown
+```handoff
+to: critic
+goal: 请 review 登录 API 的鉴权与错误处理
+what: 新增 POST /api/login，JWT 签发，bcrypt 哈希
+why: 需求要求无状态鉴权；现有 session 方案与多实例部署冲突
+tradeoff: 放弃服务端 session；短期不做 refresh token
+open_questions:
+  - token TTL 是否应对齐产品 7 天要求
+next_action: 审查密码哈希、JWT 声明与错误码是否安全一致
+files:
+  - src/server/auth.js
+  - tests/auth.test.js
+evidence:
+  - npm test -- tests/auth.test.js 通过
+```
+````
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `to` | 建议 | 目标 agent id 或 label |
+| `goal` | 建议 | 一句话目标 |
+| `what` | **是** | 做了什么 / 交给对方什么 |
+| `why` | **是** | 为什么这样做（最重要） |
+| `tradeoff` | 建议 | 放弃了什么方案 |
+| `open_questions` | 建议 | 未决问题列表 |
+| `next_action` | **是** | 希望对方具体做什么 |
+| `files` | 可选 | 相关路径 |
+| `evidence` | 可选 | 测试 / 日志 / 结论 |
+
+没有 `handoff` 块仍可能被路由，但接手方会收到 **degraded** 警告，协作质量显著下降。
+
+## 完整示例
 
 ```
-用户: @Codex 实现用户登录功能
-  → Codex: 拆解任务，设计方案
-  → @小谋 请给出登录功能的方案对比 + 选型建议
-  → 小谋: 给出 JWT vs Session 两种方案对比
-  → @小码 请实现以下登录功能：1. POST /api/login... 2. JWT token...
-  → 小码: 写后端代码
-  → @小视 请实现登录页 UI：表单、错误提示、跳转逻辑
-  → 小视: 写前端代码
-  → @小评 请 review 以上登录实现（前后端），关注安全性和错误处理
-  → 小评: review 代码
-  → @小码 发现 2 个 P1 问题：密码哈希未加盐、token 无过期时间。请修复
-  → 小码: 修复
-  → @小评 已修复，请确认
-  → 小评: 确认通过
-  → @Codex review 通过，可以合入
-```
+登录后端已实现，请接手 review。
 
-### 修 Bug
+@小评
 
+```handoff
+to: critic
+what: 实现 POST /api/login + JWT
+why: 多实例部署不能用内存 session
+tradeoff: 暂不做 refresh token
+next_action: 审查哈希与 JWT 声明安全性
+files:
+  - src/server/auth.js
 ```
-用户: @小码 修复登录超时后不跳转的问题
-  → 小码: 定位问题，修复后端逻辑
-  → @小视 前端跳转逻辑也需要配合改一下
-  → 小视: 调整前端跳转
-  → @小评 修复已完成（前后端），请 review
-  → 小评: LGTM
 ```
 
 ## 禁止行为
 
-- ❌ 在代码块内部写 @mention（会被剥离，不触发路由）
-- ❌ 在句子中间写 @mention（如"我建议@小评 看看"→ 行首才触发）
-- ❌ @ 自己（会被过滤）
-- ❌ 无上下文地 @（如只写"@小评"不加任何说明）
+- ❌ 只写 `@小评` 不写 handoff / 上下文
+- ❌ 在代码示例里依赖 `@` 触发路由
+- ❌ 句子中间的 `@小评`（必须行首）
 - ❌ 连续 @ 多个 Agent 做同一件事（选一个最合适的）

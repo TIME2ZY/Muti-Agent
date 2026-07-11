@@ -510,11 +510,13 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
 
       assert.equal(response.status, 200);
       assert.equal(prompts.length, 2);
-      assert.match(text, /event: a2a-route\ndata: \{"from":"architect","to":"planner"\}/);
+      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"architect"[^\n]*"to":"planner"/);
+      assert.match(text, /event: handoff-parsed\ndata: \{[^\n]*"to":"planner"/);
       assert.match(prompts[1], /任务交接/);
       assert.match(prompts[1], /architect result/);
       assert.match(prompts[1], /用户原始请求/);
       assert.match(prompts[1], /build feature/);
+      assert.match(prompts[1], /未提供标准/);
     }
   );
 });
@@ -2733,6 +2735,82 @@ test("A2A-routed agents get persona identity + light session header, not full bo
   assert.doesNotMatch(prompts[1], /<!-- Digest/);
   assert.match(prompts[1], /任务交接/);
   assert.match(prompts[1], /architect result/);
+  // No ```handoff block → soft degraded path still routes with warning
+  assert.match(prompts[1], /未提供标准/);
+});
+
+test("A2A-routed agents receive structured handoff fields when present", async () => {
+  const prompts = [];
+  const architectOut = [
+    "@小谋",
+    "",
+    "```handoff",
+    "to: planner",
+    "goal: 拆解登录方案",
+    "what: 用户要登录功能",
+    "why: 需要无状态鉴权支持多实例",
+    "tradeoff: 暂不做 OAuth",
+    "next_action: 给出 JWT vs Session 对比与推荐",
+    "files:",
+    "  - docs/auth.md",
+    "```",
+    "",
+    "architect narrative",
+  ].join("\n");
+
+  await withServer(
+    {
+      initialSessionIds: ["structured-handoff-test"],
+      spawnRunner(command, args) {
+        prompts.push(args[args.length - 1]);
+        const child = createMockChild();
+        process.nextTick(() => {
+          if (args[2] === "architect") {
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "architect",
+                invocationId: "sh-1",
+                text: architectOut,
+              }) + "\n"
+            );
+          } else {
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "planner",
+                invocationId: "sh-2",
+                text: "planned",
+              }) + "\n"
+            );
+          }
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agent: "architect",
+          prompt: "做登录",
+          sessionId: "structured-handoff-test",
+        }),
+      });
+      await response.text();
+    }
+  );
+
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /Structured Handoff/);
+  assert.match(prompts[1], /what: 用户要登录功能/);
+  assert.match(prompts[1], /why: 需要无状态鉴权支持多实例/);
+  assert.match(prompts[1], /next_action: 给出 JWT vs Session 对比与推荐/);
+  assert.match(prompts[1], /交接包完整度: ok/);
+  assert.match(prompts[1], /做登录/);
+  assert.doesNotMatch(prompts[1], /未提供标准/);
 });
 
 test("bootstrap digest lists prior invocations when chat is re-entered with same sessionId", async () => {

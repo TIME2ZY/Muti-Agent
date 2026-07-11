@@ -14,6 +14,7 @@ function createChatRoutes({
   sessionSealer,
   sessionBootstrap,
   agentIdentity,
+  agentHandoff,
   worktreeManager,
   worktreeManagerModule,
   activeInvocations,
@@ -273,25 +274,30 @@ function createChatRoutes({
         } else {
           const prev = a2aHistory[a2aHistory.length - 1];
           const prevLabel = AGENTS[prev.agent]?.label || prev.agent;
-          const prevBlock = prev.content.slice(-4000);
-          agentPrompt = [
-            `[任务交接：由 ${prevLabel} 转交给你]`,
-            "",
-            `=== ${prevLabel} 的完整分析 ===`,
-            prevBlock,
-            "",
-            "=== 用户原始请求 ===",
-            rawPrompt,
-            "",
-            "请根据上述上下文继续执行任务。",
-          ].join("\n");
+          // Prefer structured handoff for this target; soft-degrade if missing.
+          const handoff =
+            prev.handoffByTarget && prev.handoffByTarget[agent]
+              ? prev.handoffByTarget[agent]
+              : prev.handoff || null;
+          const quality =
+            prev.handoffQualityByTarget && prev.handoffQualityByTarget[agent]
+              ? prev.handoffQualityByTarget[agent]
+              : prev.handoffQuality || agentHandoff.evaluateHandoff(handoff);
+          agentPrompt = agentHandoff.renderHandoffTask({
+            handoff,
+            quality,
+            fromAgent: prev.agent,
+            fromLabel: prevLabel,
+            fromContent: prev.content,
+            userPrompt: rawPrompt,
+          });
         }
 
         // Prompt layout (top → bottom):
         //   1. Agent identity (every turn, including A2A)
         //   2. Session bootstrap (first turn only: coords + digest + recall)
         //   3. Light session header on later turns (correct agent label)
-        //   4. Task body (user/skills or handoff)
+        //   4. Task body (user/skills or structured handoff)
         //   5. Callback instructions
         const identityBlock = agentIdentity.renderIdentityBlock(agent, agentConfig);
         const promptParts = [identityBlock];
@@ -398,7 +404,23 @@ function createChatRoutes({
           sealerState: sealer.getState(),
         });
         sendSse(res, "agent-exit", { agent, code, signal, invocationId });
-        a2aHistory.push({ agent, content: assistantContent });
+
+        // Parse structured handoff once per turn (soft — never blocks routing).
+        const primaryHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
+          currentAgentId: agent,
+        });
+        const primaryQuality = agentHandoff.evaluateHandoff(primaryHandoff);
+        const handoffByTarget = Object.create(null);
+        const handoffQualityByTarget = Object.create(null);
+
+        a2aHistory.push({
+          agent,
+          content: assistantContent,
+          handoff: primaryHandoff,
+          handoffQuality: primaryQuality,
+          handoffByTarget,
+          handoffQualityByTarget,
+        });
 
         if (sealer.isSealed()) {
           aborted = true;
@@ -408,13 +430,50 @@ function createChatRoutes({
         if (threadCtx.a2aCount < maxDepth) {
           const mentions = parseA2AMentions(assistantContent, agent);
           for (const m of mentions) {
+            const targetHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
+              currentAgentId: agent,
+              routedTo: m,
+            });
+            const targetQuality = agentHandoff.evaluateHandoff(targetHandoff);
+            handoffByTarget[m] = targetHandoff;
+            handoffQualityByTarget[m] = targetQuality;
+
+            const summary = agentHandoff.summarizeHandoff(targetHandoff, targetQuality);
+            if (targetHandoff && targetHandoff.to) {
+              const toNorm = agentHandoff.normalizeTo(targetHandoff.to);
+              const targetNorm = String(m).toLowerCase();
+              const targetLabel = (AGENTS[m]?.label || "").toLowerCase();
+              if (toNorm && toNorm !== targetNorm && toNorm !== targetLabel) {
+                summary.toMismatch = true;
+              }
+            }
+
+            // Route target `m` wins over handoff.to (which may be missing/mismatched).
+            transcript.appendEvent(sessionId, invocationId, "handoff", {
+              ...summary,
+              from: agent,
+              to: m,
+            });
+            sendSse(res, "handoff-parsed", {
+              ...summary,
+              from: agent,
+              to: m,
+            });
+
             if (!worklist.includes(m)) {
               worklist.push(m);
               threadCtx.a2aCount += 1;
-              sendSse(res, "a2a-route", { from: agent, to: m });
+              sendSse(res, "a2a-route", {
+                from: agent,
+                to: m,
+                handoffOk: targetQuality.ok,
+                handoffDegraded: targetQuality.degraded,
+              });
               transcript.appendEvent(sessionId, invocationId, "a2a-route", {
                 from: agent,
                 to: m,
+                handoffOk: targetQuality.ok,
+                handoffDegraded: targetQuality.degraded,
               });
             }
           }

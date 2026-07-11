@@ -53,6 +53,20 @@ function baseDeps(res, overrides = {}) {
     agentIdentity: {
       renderIdentityBlock: (agentId) => `<!-- Agent Identity: ${agentId} -->\n`,
     },
+    agentHandoff: {
+      extractPrimaryHandoff: () => null,
+      evaluateHandoff: () => ({
+        ok: false,
+        degraded: true,
+        missing: ["what", "why", "next_action"],
+        missingRecommended: [],
+        score: 0,
+        hasBlock: false,
+      }),
+      renderHandoffTask: () => "[任务交接]\n",
+      summarizeHandoff: () => ({ hasBlock: false, ok: false, degraded: true, score: 0, missing: [] }),
+      normalizeTo: (v) => String(v || "").toLowerCase(),
+    },
     worktreeManager: {},
     worktreeManagerModule: { ensureGitRoot: () => null },
     activeInvocations: new Map(),
