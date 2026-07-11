@@ -18,7 +18,7 @@
 |------|------|
 | Node.js | **>= 20**（见 `package.json` `engines` 与 `.nvmrc`） |
 | 包管理 | 运行 UI 可不装依赖；跑 lint/CI 需 `npm ci` 安装 `devDependencies` |
-| CLI | 本机可执行 `codex`、`opencode`（按所用 Agent 安装） |
+| CLI | 本机可执行 `codex`、`opencode`、`grok`（Grok Build CLI，按所用 Agent 安装） |
 | 系统 | Windows / macOS / Linux；Windows 建议 PowerShell 7（`pwsh`） |
 
 ```bash
@@ -113,8 +113,12 @@ http://127.0.0.1:8787
 | `orchestrator` | 万事通 | opencode | deepseek-v4-pro | 通才兜底、跨领域杂活 |
 | `planner` | 小谋 | opencode | mimo-v2.5-pro | 任务拆解、方案与决策 |
 | `coder` | 小码 | opencode | minimax-m3 | 服务端与通用实现/重构 |
+| `grok` | Grok | grok (Grok Build CLI) | grok-4.5 | 高难度编码与硬推理（本地 CLI + `reasoning-effort high`） |
 | `frontend` | 小视 | opencode | glm-5.2 | UI、样式、交互与 a11y |
 | `critic` | 小评 | opencode | qwen3.7-plus | 代码评审与质量把关 |
+
+> **Grok 接入（与 Codex/OpenCode 同模式）**：安装 [Grok Build CLI](https://x.ai/cli)，`grok login` 或设置 `XAI_API_KEY`。服务端 spawn：`grok -p ... --output-format streaming-json -m grok-4.5 --reasoning-effort high --always-approve`。  
+> **代理（仅 Grok）**：若直连 `api.x.ai` 超时，启动前设 `GROK_PROXY=http://127.0.0.1:7892`（只注入 Grok 子进程，不影响 OpenCode/Codex）。
 
 使用方式：
 
@@ -163,7 +167,8 @@ http://127.0.0.1:8787
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `INVOKE_CLI_PROXY` | 空 | 代理地址（传给 invoke 逻辑） |
+| `INVOKE_CLI_PROXY` | 空（可回退 `HTTPS_PROXY`/`HTTP_PROXY`） | 共享代理，注入所有 CLI 子进程 |
+| `GROK_PROXY` | 空 | **仅 Grok** 子进程代理（推荐）；别名 `INVOKE_GROK_PROXY` / `GROK_HTTP_PROXY` |
 | `INVOKE_RAW_EVENT_LOG` | 关闭 | `1`/`true`/`yes`/`on` 时写原始事件日志 |
 
 ## 开发提示
@@ -175,6 +180,7 @@ http://127.0.0.1:8787
 - Skill 系统：`src/server/skills.js`（frontmatter / 匹配 / prompt 增强 / 只读规则）
 - Agent 身份：`src/agents/identities/*.md` + `src/agents/identity.js`；**每一轮** invoke（含 A2A）注入对应身份块
 - A2A 交接：`src/agents/handoff.js` 解析 ` ```handoff ` 块；软约束（缺字段 degraded 仍路由），结构化注入下一位 Agent
+- Grok provider：本地 `grok` CLI + `src/agents/providers/grok.js`（`streaming-json` → thinking/text）
 - 完整 ES modules / Vite 尚未接入；新增前端文件时请追加到 `MODULES` 并保证依赖顺序
 - 新增 `src` / `public` / `tests` 下的 `.js` 后，直接 `npm run check` / `npm run lint` 即可
 - 应用层 skills 放在 `skills/*.md`，由服务端按 trigger 匹配并注入 prompt

@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
 const { createProviderRuntime } = require("./providers");
+const { resolveProxy, resolveProviderProxy, proxyEnvVars } = require("./proxy");
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_KILL_GRACE_MS = 5000;
@@ -24,6 +25,8 @@ const SUPPORTED_OPENCODE_GO_MODELS = new Set([
   "qwen3.7-max",
   "qwen3.7-plus",
 ]);
+const SUPPORTED_GROK_MODELS = new Set(["grok-4.5"]);
+const SUPPORTED_GROK_EFFORTS = new Set(["low", "medium", "high"]);
 const AGENTS = {
   architect: {
     id: "architect",
@@ -55,6 +58,22 @@ const AGENTS = {
     reasoningEffort: "high",
     description: "Coding 主力，负责服务端与通用代码实现与重构。",
   },
+  /**
+   * Grok 4.5 via local Grok Build CLI (same pattern as codex / opencode).
+   * Requires `grok` on PATH (`curl -fsSL https://x.ai/cli/install.sh | bash`
+   * or Windows: `irm https://x.ai/cli/install.ps1 | iex`), then `grok login`
+   * or XAI_API_KEY.
+   */
+  grok: {
+    id: "grok",
+    label: "Grok",
+    name: "grok",
+    model: "grok-4.5",
+    reasoningEffort: "high",
+    // Grok 4.5 context window is 500k; use it for sealer thresholds.
+    capacityTokens: 500_000,
+    description: "Grok 4.5 high — 本地 Grok Build CLI 编码与硬推理主力。",
+  },
   frontend: {
     id: "frontend",
     label: "小视",
@@ -75,7 +94,8 @@ function parseArgs(argv) {
   const args = [...argv];
   let agentName = "architect";
   const options = {
-    proxy: process.env.INVOKE_CLI_PROXY || "",
+    // Prefer explicit INVOKE_CLI_PROXY, else inherit shell HTTPS_PROXY/HTTP_PROXY.
+    proxy: resolveProxy(),
     timeoutMs: DEFAULT_TIMEOUT_MS,
     killGraceMs: DEFAULT_KILL_GRACE_MS,
     retries: 0,
@@ -207,6 +227,36 @@ function buildInvocation(cli, prompt) {
     };
   }
 
+  if (config.name === "grok") {
+    validateModel(config.name, config.model);
+    const effort = config.reasoningEffort || "high";
+    if (!SUPPORTED_GROK_EFFORTS.has(effort)) {
+      throw new Error(
+        `Unsupported Grok reasoning effort "${effort}". Supported: ${[...SUPPORTED_GROK_EFFORTS].join(", ")}.`
+      );
+    }
+    // Local Grok Build CLI (same pattern as codex / opencode):
+    //   grok -p "..." --output-format streaming-json -m grok-4.5 --reasoning-effort high
+    // Auth: `grok login` or XAI_API_KEY in the environment.
+    const args = [
+      "-p",
+      prompt,
+      "--output-format",
+      "streaming-json",
+      "--always-approve",
+      "--no-auto-update",
+    ];
+    if (config.model) args.push("-m", config.model);
+    if (effort) args.push("--reasoning-effort", effort);
+    if (config.resumeSessionId) {
+      args.push("-r", config.resumeSessionId);
+    }
+    return {
+      command: resolveGrokCommand(),
+      args,
+    };
+  }
+
   validateModel(config.name, config.model);
 
   const args = ["-s", "danger-full-access", "-a", "never"];
@@ -238,6 +288,12 @@ function validateModel(cliName, model) {
       `Unsupported opencode model "${model}". Supported Go subscription models: ${[...SUPPORTED_OPENCODE_GO_MODELS].join(", ")}.`
     );
   }
+
+  if (cliName === "grok" && !SUPPORTED_GROK_MODELS.has(model)) {
+    throw new Error(
+      `Unsupported grok model "${model}". Supported models: ${[...SUPPORTED_GROK_MODELS].join(", ")}.`
+    );
+  }
 }
 
 function resolveOpencodeCommand() {
@@ -253,6 +309,29 @@ function resolveOpencodeCommand() {
   }
 
   return "opencode.exe";
+}
+
+/**
+ * Resolve the local Grok Build CLI binary.
+ * Default install paths: ~/.grok/bin/grok(.exe) or PATH.
+ */
+function resolveGrokCommand() {
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  const candidates = [];
+  if (home) {
+    candidates.push(path.join(home, ".grok", "bin", process.platform === "win32" ? "grok.exe" : "grok"));
+  }
+  for (const entry of (process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    candidates.push(path.join(entry, process.platform === "win32" ? "grok.exe" : "grok"));
+  }
+  for (const command of candidates) {
+    try {
+      if (fs.existsSync(command)) return command;
+    } catch {
+      // ignore
+    }
+  }
+  return process.platform === "win32" ? "grok.exe" : "grok";
 }
 
 function extractAssistantText(event, state) {
@@ -326,7 +405,9 @@ function invoke(cli, prompt, options = {}) {
   const resolvedCli = resumeSessionId ? { ...config, resumeSessionId } : config;
   const { command, args } = buildInvocation(resolvedCli, prompt);
   const runtime = {
-    proxy: options.proxy || process.env.INVOKE_CLI_PROXY || "",
+    // Per-provider proxy: Grok can use GROK_PROXY only; codex/opencode use
+    // shared INVOKE_CLI_PROXY / HTTPS_PROXY (and never pick GROK_PROXY alone).
+    proxy: resolveProviderProxy(config.name, { proxy: options.proxy }),
     timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS,
     killGraceMs: options.killGraceMs || DEFAULT_KILL_GRACE_MS,
     retries: options.retries || 0,
@@ -370,18 +451,29 @@ function invoke(cli, prompt, options = {}) {
   const startAttempt = () => {
     attempt += 1;
 
+    // Avoid noisy stderr on every invoke (tests assert empty stderr). Log only
+    // when explicitly requested, or when Grok is likely to hang without a proxy.
+    if (runtime.proxy && /^(1|true|yes|on)$/i.test(String(process.env.INVOKE_CLI_PROXY_LOG || ""))) {
+      console.error(`[invoke-cli] proxy for ${config.name || "cli"}: ${runtime.proxy}`);
+    } else if (!runtime.proxy && config.name === "grok") {
+      console.error(
+        "[invoke-cli] no proxy for grok; if requests hang, set GROK_PROXY=http://127.0.0.1:7892 (Grok-only) or INVOKE_CLI_PROXY / HTTPS_PROXY"
+      );
+    }
+
+    // Inject HTTP(S)_PROXY only into this CLI child. For Grok-only setups the
+    // parent may have GROK_PROXY set without polluting codex/opencode.
+    const childEnv = {
+      ...process.env,
+      ...proxyEnvVars(runtime.proxy),
+    };
+    // Keep GROK_PROXY visible to nested tools if user set it.
+    if (config.name === "grok" && process.env.GROK_PROXY && !childEnv.GROK_PROXY) {
+      childEnv.GROK_PROXY = process.env.GROK_PROXY;
+    }
+
     const child = spawn(command, args, {
-      env: {
-        ...process.env,
-        ...(runtime.proxy ? {
-          HTTP_PROXY: runtime.proxy,
-          HTTPS_PROXY: runtime.proxy,
-          ALL_PROXY: runtime.proxy,
-          http_proxy: runtime.proxy,
-          https_proxy: runtime.proxy,
-          all_proxy: runtime.proxy,
-        } : {}),
-      },
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -564,8 +656,14 @@ if (require.main === module) {
 
 module.exports = {
   AGENTS,
+  SUPPORTED_GROK_MODELS,
+  SUPPORTED_GROK_EFFORTS,
   invoke,
   parseArgs,
   buildInvocation,
+  resolveGrokCommand,
+  resolveProxy,
+  resolveProviderProxy,
+  proxyEnvVars,
   extractAssistantText,
 };

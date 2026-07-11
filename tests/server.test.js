@@ -105,7 +105,7 @@ test("serves fixed agent list", async () => {
     const body = await response.json();
 
     assert.equal(response.status, 200);
-    assert.deepEqual(body.agents.map((agent) => agent.id), ["architect", "orchestrator", "planner", "coder", "frontend", "critic"]);
+    assert.deepEqual(body.agents.map((agent) => agent.id), ["architect", "orchestrator", "planner", "coder", "grok", "frontend", "critic"]);
     // Every agent must surface a non-empty description so the UI can show it.
     for (const agent of body.agents) {
       assert.ok(agent.description && agent.description.length > 0, `Agent ${agent.id} missing description`);
