@@ -45,6 +45,11 @@
     if (!agent) return "";
     const cliLabel = agent.cli === "opencode" ? "opencode go" : agent.cli;
     if (agent.cli === "opencode") return `${cliLabel} · ${agent.model}`;
+    if (agent.cli === "grok") {
+      return agent.reasoningEffort
+        ? `xAI · ${agent.model} · ${agent.reasoningEffort}`
+        : `xAI · ${agent.model}`;
+    }
     return agent.reasoningEffort
       ? `${cliLabel} · ${agent.model} · ${agent.reasoningEffort}`
       : `${cliLabel} · ${agent.model}`;
@@ -80,6 +85,7 @@
     orchestrator: 2,
     planner: 3,
     coder: 4,
+    grok: 4, // coding cohort shares palette slot with 小码
     frontend: 5,
     critic: 6,
   };

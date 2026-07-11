@@ -4,6 +4,7 @@ const http = require("node:http");
 const path = require("node:path");
 const { AGENTS } = require("../agents/invoke-cli");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
+const { resolveProxy, resolveProviderProxy } = require("../agents/proxy");
 const agentIdentity = require("../agents/identity");
 const agentHandoff = require("../agents/handoff");
 const callbacks = require("../agents/callbacks");
@@ -232,6 +233,13 @@ function buildInvokeArgs(body, augmentedPrompt) {
 
   const finalPrompt = augmentedPrompt || prompt;
   const args = ["src/agents/invoke-cli.js", "--agent", agent];
+  // Per-provider proxy only. Grok can use GROK_PROXY without forcing --proxy
+  // onto codex/opencode. Global INVOKE_CLI_PROXY still applies to all.
+  const providerName = (AGENTS[agent] && AGENTS[agent].name) || agent;
+  const proxy = resolveProviderProxy(providerName);
+  if (proxy) {
+    args.push("--proxy", proxy);
+  }
   args.push(finalPrompt);
   return args;
 }
@@ -246,9 +254,14 @@ function runChildStream({ spawnRunner, args, res, cwd, onStdout, onEvent, onStde
   const serverTimeoutMs = timeoutMs || DEFAULT_SERVER_TIMEOUT_MS;
 
   return new Promise((resolve) => {
+    // Pass through GROK_PROXY (Grok-only) and optional global proxy env to the
+    // invoke-cli process. Actual HTTP_PROXY injection for the *provider CLI*
+    // happens inside invoke-cli based on agent name (so OpenCode is not forced
+    // through GROK_PROXY).
+    const mergedEnv = { ...process.env, ...(env || {}) };
     const child = spawnRunner(process.execPath, args, {
       cwd: workDir,
-      env: { ...process.env, ...env },
+      env: mergedEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -555,6 +568,18 @@ if (require.main === module) {
   const server = createServer();
   server.listen(DEFAULT_PORT, "127.0.0.1", () => {
     console.log(`Invoke UI listening at http://127.0.0.1:${DEFAULT_PORT}`);
+    const grokProxy = resolveProviderProxy("grok");
+    const globalProxy = resolveProxy();
+    if (grokProxy && grokProxy !== globalProxy) {
+      console.log(`Grok proxy: ${grokProxy} (GROK_PROXY / INVOKE_GROK_PROXY)`);
+    }
+    if (globalProxy) {
+      console.log(`CLI proxy: ${globalProxy} (INVOKE_CLI_PROXY / HTTPS_PROXY / HTTP_PROXY)`);
+    } else if (!grokProxy) {
+      console.log(
+        "CLI proxy: (none) — if Grok hangs, set GROK_PROXY=http://127.0.0.1:7892 (Grok-only) before npm start"
+      );
+    }
   });
 }
 

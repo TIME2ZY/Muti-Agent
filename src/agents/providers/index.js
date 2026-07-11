@@ -1,5 +1,6 @@
 const { createCodexRuntime } = require("./codex");
 const { createOpencodeRuntime } = require("./opencode");
+const { createGrokRuntime } = require("./grok");
 
 /**
  * Provider adapters keyed by CLI runtime name (not model id).
@@ -8,6 +9,7 @@ const { createOpencodeRuntime } = require("./opencode");
 const PROVIDER_RUNTIMES = {
   codex: createCodexRuntime,
   opencode: createOpencodeRuntime,
+  grok: createGrokRuntime,
 };
 
 function createProviderRuntime(cli) {

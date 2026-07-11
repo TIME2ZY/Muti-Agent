@@ -17,6 +17,26 @@ function installFakeOpencodeBin(tmpDir) {
   fs.writeFileSync(path.join(fakeOpencodeDir, "opencode"), "");
 }
 
+const PROXY_ENV_KEYS = [
+  "INVOKE_CLI_PROXY",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+];
+
+function withoutAmbientProxy(env, keepKeys = {}) {
+  const next = { ...env };
+  for (const key of PROXY_ENV_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(keepKeys, key)) {
+      delete next[key];
+    }
+  }
+  return next;
+}
+
 function runScript(args) {
   return runScriptWithEnv(args, {});
 }
@@ -84,15 +104,17 @@ childProcess.spawn = function spawn(command, args, options = {}) {
     "utf8"
   );
 
+  const env = withoutAmbientProxy({
+    ...process.env,
+    PATH: `${tmpDir}${path.delimiter}${process.env.PATH}`,
+    NODE_OPTIONS: `--require ${hookPath}`,
+    INVOKE_SESSION_FILE: sessionPath,
+    ...extraEnv,
+  }, extraEnv);
+
   const result = spawnSync(process.execPath, ["src/agents/invoke-cli.js", ...args], {
     cwd: path.resolve(__dirname, "../.."),
-    env: {
-      ...process.env,
-      PATH: `${tmpDir}${path.delimiter}${process.env.PATH}`,
-      NODE_OPTIONS: `--require ${hookPath}`,
-      INVOKE_SESSION_FILE: sessionPath,
-      ...extraEnv,
-    },
+    env,
     encoding: "utf8",
   });
 
@@ -141,13 +163,13 @@ childProcess.spawn = function spawn(command, args, options = {}) {
 
   const result = spawnSync(process.execPath, ["src/agents/invoke-cli.js", ...args], {
     cwd: path.resolve(__dirname, "../.."),
-    env: {
+    env: withoutAmbientProxy({
       ...process.env,
       PATH: `${tmpDir}${path.delimiter}${process.env.PATH}`,
       NODE_OPTIONS: `--require ${hookPath}`,
       INVOKE_SESSION_FILE: sessionPath,
       INVOKE_SESSION_ID: resumeSessionId,
-    },
+    }),
     encoding: "utf8",
   });
 
@@ -164,11 +186,11 @@ function runScriptWithHook(args, hookSource) {
 
   const result = spawnSync(process.execPath, ["src/agents/invoke-cli.js", ...args], {
     cwd: path.resolve(__dirname, "../.."),
-    env: {
+    env: withoutAmbientProxy({
       ...process.env,
       NODE_OPTIONS: `--require ${hookPath}`,
       INVOKE_SESSION_FILE: sessionPath,
-    },
+    }),
     encoding: "utf8",
   });
 
@@ -274,13 +296,24 @@ test("exports invoke function", () => {
 });
 
 test("exports the fixed agents", () => {
-  assert.deepEqual(Object.keys(AGENTS).sort(), ["architect", "coder", "critic", "frontend", "orchestrator", "planner"]);
+  assert.deepEqual(Object.keys(AGENTS).sort(), [
+    "architect",
+    "coder",
+    "critic",
+    "frontend",
+    "grok",
+    "orchestrator",
+    "planner",
+  ]);
   assert.equal(AGENTS.architect.model, "gpt-5.5");
   assert.equal(AGENTS.architect.reasoningEffort, "high");
   assert.equal(AGENTS.orchestrator.model, "deepseek-v4-pro");
   assert.equal(AGENTS.planner.model, "mimo-v2.5-pro");
   assert.equal(AGENTS.coder.model, "minimax-m3");
   assert.equal(AGENTS.coder.reasoningEffort, "high");
+  assert.equal(AGENTS.grok.model, "grok-4.5");
+  assert.equal(AGENTS.grok.reasoningEffort, "high");
+  assert.equal(AGENTS.grok.name, "grok");
   assert.equal(AGENTS.frontend.model, "glm-5.2");
   assert.equal(AGENTS.critic.model, "qwen3.7-plus");
 });
@@ -738,10 +771,11 @@ test("opencode runtime maps reasoning events (from --thinking) to thinking.delta
   assert.deepEqual(empty, []);
 });
 
-test("provider registry lists codex and opencode", () => {
+test("provider registry lists codex, grok, and opencode", () => {
   const { listSupportedProviders, createProviderRuntime } = require("../../src/agents/providers");
-  assert.deepEqual(listSupportedProviders().sort(), ["codex", "opencode"]);
+  assert.deepEqual(listSupportedProviders().sort(), ["codex", "grok", "opencode"]);
   assert.ok(createProviderRuntime({ name: "codex" }));
+  assert.ok(createProviderRuntime({ name: "grok", model: "grok-4.5" }));
   assert.throws(() => createProviderRuntime({ name: "claude" }), /Unsupported provider/);
 });
 

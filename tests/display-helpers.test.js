@@ -37,6 +37,7 @@ test("agent helpers format mention and meta", () => {
 test("agentColorIndex is stable for known agents and in 1..6", () => {
   assert.equal(agentColorIndex("architect"), 1);
   assert.equal(agentColorIndex("orchestrator"), 2);
+  assert.equal(agentColorIndex("grok"), 4);
   assert.equal(agentColorIndex("critic"), 6);
   assert.equal(agentColorIndex("architect"), agentColorIndex("architect"));
   const unknown = agentColorIndex("custom-agent-xyz");

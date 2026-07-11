@@ -1,0 +1,151 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+const {
+  createGrokRuntime,
+  THINKING_FLUSH_CHARS,
+  TEXT_FLUSH_CHARS,
+} = require("../../src/agents/providers/grok");
+const {
+  AGENTS,
+  buildInvocation,
+  resolveGrokCommand,
+} = require("../../src/agents/invoke-cli");
+const { createProviderRuntime, listSupportedProviders } = require("../../src/agents/providers");
+
+test("provider registry includes grok", () => {
+  assert.ok(listSupportedProviders().includes("grok"));
+  const runtime = createProviderRuntime({ name: "grok", model: "grok-4.5" });
+  assert.equal(typeof runtime.transform, "function");
+  assert.equal(typeof runtime.extractSessionId, "function");
+});
+
+test("AGENTS.grok is catalogued with grok-4.5 high", () => {
+  assert.ok(AGENTS.grok);
+  assert.equal(AGENTS.grok.name, "grok");
+  assert.equal(AGENTS.grok.model, "grok-4.5");
+  assert.equal(AGENTS.grok.reasoningEffort, "high");
+  assert.equal(AGENTS.grok.capacityTokens, 500_000);
+});
+
+test("buildInvocation for grok spawns local grok CLI headless", () => {
+  const inv = buildInvocation(AGENTS.grok, "hello world");
+  assert.match(String(inv.command), /grok(\.exe)?$/i);
+  assert.ok(inv.args.includes("-p"));
+  assert.ok(inv.args.includes("hello world"));
+  assert.ok(inv.args.includes("--output-format"));
+  assert.ok(inv.args.includes("streaming-json"));
+  assert.ok(inv.args.includes("-m"));
+  assert.ok(inv.args.includes("grok-4.5"));
+  assert.ok(inv.args.includes("--reasoning-effort"));
+  assert.ok(inv.args.includes("high"));
+  assert.ok(inv.args.includes("--always-approve"));
+});
+
+test("buildInvocation for grok resumes with -r session id", () => {
+  const inv = buildInvocation(
+    { ...AGENTS.grok, resumeSessionId: "019f50e8-88a0-7ee1-b525-df3b193ced6b" },
+    "continue"
+  );
+  const rIdx = inv.args.indexOf("-r");
+  assert.ok(rIdx >= 0);
+  assert.equal(inv.args[rIdx + 1], "019f50e8-88a0-7ee1-b525-df3b193ced6b");
+});
+
+test("buildInvocation rejects unsupported grok model", () => {
+  assert.throws(
+    () => buildInvocation({ name: "grok", model: "grok-nope" }, "x"),
+    /Unsupported grok model/
+  );
+});
+
+test("resolveGrokCommand returns a string", () => {
+  const cmd = resolveGrokCommand();
+  assert.equal(typeof cmd, "string");
+  assert.ok(cmd.length > 0);
+});
+
+test("createGrokRuntime coalesces many tiny thought tokens", () => {
+  const runtime = createGrokRuntime({ name: "grok", model: "grok-4.5" });
+  const ctx = { agent: "grok", invocationId: "inv-1" };
+
+  const pieces = ["The", " user", " wants", " a", " short", " answer."];
+  let thinkingEvents = 0;
+  let started = 0;
+  let combined = "";
+
+  for (const piece of pieces) {
+    const events = runtime.transform({ type: "thought", data: piece }, ctx);
+    for (const e of events) {
+      if (e.type === "run.started") started += 1;
+      if (e.type === "thinking.delta") {
+        thinkingEvents += 1;
+        combined += e.text;
+      }
+    }
+  }
+  // Flush remaining via end
+  const endEvents = runtime.transform({ type: "end", sessionId: "s1" }, ctx);
+  for (const e of endEvents) {
+    if (e.type === "thinking.delta") {
+      thinkingEvents += 1;
+      combined += e.text;
+    }
+  }
+
+  assert.equal(started, 1);
+  assert.equal(combined, pieces.join(""));
+  // Must be far fewer than one event per token
+  assert.ok(thinkingEvents < pieces.length, `expected coalesce, got ${thinkingEvents} for ${pieces.length} tokens`);
+  assert.ok(thinkingEvents >= 1);
+});
+
+test("createGrokRuntime flushes thinking before text and coalesces text", () => {
+  const runtime = createGrokRuntime({ name: "grok", model: "grok-4.5" });
+  const ctx = { agent: "grok", invocationId: "inv-2" };
+
+  // Under threshold: still buffered
+  let events = runtime.transform({ type: "thought", data: "think " }, ctx);
+  assert.ok(events.some((e) => e.type === "run.started"));
+  assert.ok(!events.some((e) => e.type === "thinking.delta"));
+
+  // Switch to text forces thinking flush
+  events = runtime.transform({ type: "text", data: "Hel" }, ctx);
+  assert.ok(events.some((e) => e.type === "thinking.delta" && e.text === "think "));
+  // "Hel" alone may still be buffered
+  const earlyText = events.filter((e) => e.type === "text.delta");
+  assert.ok(earlyText.length <= 1);
+
+  events = runtime.transform({ type: "text", data: "lo world, this is enough text." }, ctx);
+  const textParts = events.filter((e) => e.type === "text.delta").map((e) => e.text).join("");
+
+  events = runtime.transform({ type: "end", sessionId: "s2" }, ctx);
+  const finalText = textParts + events.filter((e) => e.type === "text.delta").map((e) => e.text).join("");
+  assert.match(finalText, /Hello world/);
+});
+
+test("createGrokRuntime extracts session id from end", () => {
+  const runtime = createGrokRuntime({ name: "grok", model: "grok-4.5" });
+  assert.equal(
+    runtime.extractSessionId({
+      type: "end",
+      sessionId: "019f50e8-88a0-7ee1-b525-df3b193ced6b",
+      stopReason: "EndTurn",
+    }),
+    "019f50e8-88a0-7ee1-b525-df3b193ced6b"
+  );
+});
+
+test("coalesce thresholds are positive", () => {
+  assert.ok(THINKING_FLUSH_CHARS >= 40);
+  assert.ok(TEXT_FLUSH_CHARS >= 16);
+});
+
+test("identity file exists for grok and mentions CLI", () => {
+  const file = path.join(__dirname, "../../src/agents/identities/grok.md");
+  assert.ok(fs.existsSync(file));
+  const body = fs.readFileSync(file, "utf8");
+  assert.match(body, /id: grok/);
+  assert.match(body, /Grok Build CLI|本地/);
+});
