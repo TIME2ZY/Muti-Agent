@@ -26,6 +26,7 @@
       applyAgentEvent,
       addDebug,
       finishStream,
+      finalizeLiveAgent,
       agentLabel,
       syncComposerControls,
       onRuntimeStatusChange,
@@ -123,20 +124,40 @@
           finishStream("上下文已封存", sessionId);
           if (active) addSystem("context overflow: 已停止继续路由");
           break;
-        case "agent-exit":
-          if (data.code !== 0) {
-            const item = rt.liveMessages.get(data.agent);
-            if (item && item.setBadge) item.setBadge("error");
+        case "agent-exit": {
+          const failed = data.code !== 0;
+          if (failed) {
             rt.status = "error";
             notifyStatus(sessionId);
             if (active) {
               addSystem(`${agentLabel(data.agent)} exited with ${data.code ?? data.signal}`, "error");
             }
           }
+          // Per-agent finalize so A2A handoffs don't leave the prior agent on "输出中".
+          // Also drops the agent from liveMessages to avoid remount/history duplicates.
+          if (typeof finalizeLiveAgent === "function") {
+            finalizeLiveAgent(data.agent, sessionId, { error: failed });
+          } else {
+            const item = rt.liveMessages.get(data.agent);
+            if (item && item.setBadge) item.setBadge(failed ? "error" : "done");
+            if (item) rt.liveMessages.delete(data.agent);
+          }
           break;
-        case "a2a-route":
-          if (active) addSystem(`🔄 ${agentLabel(data.from)} → ${agentLabel(data.to)}`);
+        }
+        case "a2a-route": {
+          const fromLabel = agentLabel(data.from);
+          const toLabel = agentLabel(data.to);
+          const degraded = data.handoffDegraded === true;
+          const text = degraded
+            ? `🔄 ${fromLabel} → ${toLabel}（交接包不完整）`
+            : `🔄 ${fromLabel} → ${toLabel}`;
+          // Always buffer for session remount; only paint when this session is visible.
+          // Server also persists this as a system message for hard reloads.
+          if (!Array.isArray(rt.systemNotices)) rt.systemNotices = [];
+          rt.systemNotices.push({ role: "system", agent: "system", content: text, kind: "a2a-route" });
+          if (active) addSystem(text);
           break;
+        }
         case "done":
           finishStream("就绪", sessionId);
           break;

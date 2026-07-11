@@ -11,6 +11,9 @@
       liveMessages: new Map(),
       liveRuns: new Map(),
       liveInvocations: new Map(),
+      // Ephemeral system lines (e.g. a2a-route) for mid-run session remount.
+      // Server also persists these; this buffer covers the live stream path.
+      systemNotices: [],
       lastError: "",
       updatedAt: Date.now(),
     };
@@ -66,6 +69,7 @@
       rt.liveMessages.clear();
       rt.liveRuns.clear();
       rt.liveInvocations.clear();
+      rt.systemNotices = [];
       rt.lastError = "";
       rt.status = "running";
       touch(rt);

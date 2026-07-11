@@ -517,6 +517,17 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
       assert.match(prompts[1], /用户原始请求/);
       assert.match(prompts[1], /build feature/);
       assert.match(prompts[1], /未提供标准/);
+
+      // Handoff system markers must persist so session switch can reload them.
+      const sessionId = (text.match(/"sessionId":"([^"]+)"/) || [])[1];
+      assert.ok(sessionId);
+      const messagesResp = await fetch(`${baseUrl}/api/messages?sessionId=${encodeURIComponent(sessionId)}`);
+      const body = await messagesResp.json();
+      const systemRoutes = (body.messages || []).filter((m) => m.role === "system" && m.kind === "a2a-route");
+      assert.equal(systemRoutes.length, 1);
+      assert.equal(systemRoutes[0].from, "architect");
+      assert.equal(systemRoutes[0].to, "planner");
+      assert.match(systemRoutes[0].content, /→/);
     }
   );
 });
@@ -1548,10 +1559,15 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   });
 
   assert.equal(ok, true);
-  assert.equal(appended.length, 1);
+  assert.equal(appended.length, 2);
   assert.equal(appended[0].msg.role, "assistant");
   assert.equal(appended[0].msg.agent, "architect");
   assert.equal(appended[0].msg.content, "@小谋 请继续实现");
+  assert.equal(appended[1].msg.role, "system");
+  assert.equal(appended[1].msg.kind, "a2a-route");
+  assert.equal(appended[1].msg.from, "architect");
+  assert.equal(appended[1].msg.to, "planner");
+  assert.match(appended[1].msg.content, /architect.*planner/);
   assert.equal(worklist.includes("planner"), true);
   assert.equal(threadCtx.a2aCount, 1);
 
@@ -2351,10 +2367,17 @@ test("frontend keeps per-session runtime status and does not abort on switch", (
   const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   const sessionList = fs.readFileSync(path.join(__dirname, "../public", "session-list-view.js"), "utf8");
   const controllerJs = fs.readFileSync(path.join(__dirname, "../public", "session-controller.js"), "utf8");
+  const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
+  const runtimeJs = fs.readFileSync(path.join(__dirname, "../public", "session-runtime.js"), "utf8");
   const css = readFrontendCss();
   assert.match(controllerJs, /Do not abort the previous session's background run/);
   assert.doesNotMatch(controllerJs, /if \(state\.controller\) \{\s*state\.controller\.abort\(\)/);
   assert.match(messageView, /function remountLiveMessages\(sessionId\)/);
+  assert.match(messageView, /function finalizeLiveAgent\(agent, sessionId/);
+  assert.match(chatJs, /finalizeLiveAgent\(data\.agent, sessionId/);
+  assert.match(chatJs, /systemNotices\.push/);
+  assert.match(runtimeJs, /systemNotices:\s*\[\]/);
+  assert.match(controllerJs, /systemNotices/);
   assert.match(sessionList, /session-run-status/);
   assert.match(css, /\.session-run-status\.status-running/);
 });

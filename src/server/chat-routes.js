@@ -463,6 +463,22 @@ function createChatRoutes({
             if (!worklist.includes(m)) {
               worklist.push(m);
               threadCtx.a2aCount += 1;
+              const fromLabel = AGENTS[agent]?.label || agent;
+              const toLabel = AGENTS[m]?.label || m;
+              const routeText = targetQuality.degraded
+                ? `🔄 ${fromLabel} → ${toLabel}（交接包不完整）`
+                : `🔄 ${fromLabel} → ${toLabel}`;
+              // Persist so session switch / reload keeps the handoff marker.
+              appendToSession(options.sessionsFile || undefined, sessionId, {
+                role: "system",
+                agent: "system",
+                content: routeText,
+                kind: "a2a-route",
+                from: agent,
+                to: m,
+                handoffOk: targetQuality.ok,
+                handoffDegraded: targetQuality.degraded,
+              }, { allowCreate: false });
               sendSse(res, "a2a-route", {
                 from: agent,
                 to: m,
