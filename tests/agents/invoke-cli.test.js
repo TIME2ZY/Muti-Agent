@@ -6,6 +6,17 @@ const path = require("node:path");
 const test = require("node:test");
 const { AGENTS, extractAssistantText, invoke } = require("../../src/agents/invoke-cli");
 
+/** Regex-safe binary prefix in mock stdout (e.g. opencode.exe:run or opencode:run). */
+const OPENCODE_BIN_RE = process.platform === "win32" ? "opencode\\.exe" : "opencode";
+
+function installFakeOpencodeBin(tmpDir) {
+  const fakeOpencodeDir = path.join(tmpDir, "node_modules", "opencode-ai", "bin");
+  fs.mkdirSync(fakeOpencodeDir, { recursive: true });
+  // Seed both names so PATH-based Windows resolution and Linux basename checks stay happy.
+  fs.writeFileSync(path.join(fakeOpencodeDir, "opencode.exe"), "");
+  fs.writeFileSync(path.join(fakeOpencodeDir, "opencode"), "");
+}
+
 function runScript(args) {
   return runScriptWithEnv(args, {});
 }
@@ -14,11 +25,7 @@ function runScriptWithEnv(args, extraEnv) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "minimal-codex-test-"));
   const hookPath = path.join(tmpDir, "spawn-hook.js");
   const sessionPath = path.join(tmpDir, "sessions.json");
-  const fakeOpencodeDir = path.join(tmpDir, "node_modules", "opencode-ai", "bin");
-  const fakeOpencodePath = path.join(fakeOpencodeDir, "opencode.exe");
-
-  fs.mkdirSync(fakeOpencodeDir, { recursive: true });
-  fs.writeFileSync(fakeOpencodePath, "");
+  installFakeOpencodeBin(tmpDir);
 
   fs.writeFileSync(
     hookPath,
@@ -27,20 +34,30 @@ const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
 
+function commandBase(command) {
+  const raw = String(command || "");
+  const parts = raw.split(/[\\\\/]/);
+  return parts[parts.length - 1] || raw;
+}
+
+function isOpencodeCommand(command) {
+  return /^opencode(\\.exe)?$/i.test(commandBase(command));
+}
+
 childProcess.spawn = function spawn(command, args, options = {}) {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
 
   process.nextTick(() => {
-    if (command.endsWith("opencode.exe")) {
+    if (isOpencodeCommand(command)) {
       child.stdout.write(JSON.stringify({
         type: "session.updated",
         session: { id: "opencode-session-1" }
       }) + "\\n");
       child.stdout.write(JSON.stringify({
         type: "message.part.updated",
-        part: { type: "text", text: "opencode.exe:" + args.join(" ") + ":" + options.env.HTTP_PROXY }
+        part: { type: "text", text: commandBase(command) + ":" + args.join(" ") + ":" + options.env.HTTP_PROXY }
       }) + "\\n");
     } else {
       child.stdout.write(JSON.stringify({
@@ -93,11 +110,7 @@ function runScriptWithSession(args, sessions) {
   const resumeSessionId = (sessions[agentId] && sessions[agentId].sessionId) || "";
 
   const hookPath = path.join(tmpDir, "spawn-hook.js");
-  const fakeOpencodeDir = path.join(tmpDir, "node_modules", "opencode-ai", "bin");
-  const fakeOpencodePath = path.join(fakeOpencodeDir, "opencode.exe");
-
-  fs.mkdirSync(fakeOpencodeDir, { recursive: true });
-  fs.writeFileSync(fakeOpencodePath, "");
+  installFakeOpencodeBin(tmpDir);
 
   fs.writeFileSync(
     hookPath,
@@ -191,7 +204,10 @@ test("uses orchestrator agent for deepseek v4 pro", () => {
     parseOutputEvents(result.stdout).map((event) => event.type),
     ["run.started", "text.delta", "run.finished"]
   );
-  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --thinking --model opencode-go\/deepseek-v4-pro hello:undefined/);
+  assert.match(
+    parseOutputEvents(result.stdout)[1].text,
+    new RegExp(`${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/deepseek-v4-pro hello:undefined`)
+  );
   assert.equal(result.stderr, "");
 });
 
@@ -203,7 +219,10 @@ test("uses frontend agent for glm 5.2", () => {
     parseOutputEvents(result.stdout).map((event) => event.type),
     ["run.started", "text.delta", "run.finished"]
   );
-  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --thinking --model opencode-go\/glm-5.2 hello:undefined/);
+  assert.match(
+    parseOutputEvents(result.stdout)[1].text,
+    new RegExp(`${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/glm-5.2 hello:undefined`)
+  );
   assert.equal(result.stderr, "");
 });
 
@@ -215,7 +234,10 @@ test("uses planner agent for mimo v2.5 pro", () => {
     parseOutputEvents(result.stdout).map((event) => event.type),
     ["run.started", "text.delta", "run.finished"]
   );
-  assert.match(parseOutputEvents(result.stdout)[1].text, /opencode\.exe:run --format json --thinking --model opencode-go\/mimo-v2\.5-pro hello:undefined/);
+  assert.match(
+    parseOutputEvents(result.stdout)[1].text,
+    new RegExp(`${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/mimo-v2\\.5-pro hello:undefined`)
+  );
   assert.equal(result.stderr, "");
 });
 
@@ -779,7 +801,10 @@ test("resumes remembered opencode session", () => {
   assert.equal(result.status, 0);
   const events = parseOutputEvents(result.stdout);
   assert.equal(events[0].type, "text.delta");
-  assert.match(events[0].text, /opencode\.exe:run --format json --thinking --model opencode-go\/deepseek-v4-pro --session opencode-session-previous hello again/);
+  assert.match(
+    events[0].text,
+    new RegExp(`${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/deepseek-v4-pro --session opencode-session-previous hello again`)
+  );
   assert.equal(result.stderr, "");
 });
 
