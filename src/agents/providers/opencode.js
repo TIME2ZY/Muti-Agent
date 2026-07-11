@@ -491,6 +491,7 @@ const opencodeProvider = {
     subagents: true,
     reasoning: "toggle",
   },
+  allowedProviderOptions: ["thinking", "modelPrefix"],
   createRuntime: createOpencodeRuntime,
   resolveProxy,
   buildInvocation(config, prompt) {

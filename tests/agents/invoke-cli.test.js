@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { AGENTS, extractAssistantText, invoke } = require("../../src/agents/invoke-cli");
+const { AGENTS, invoke } = require("../../src/agents/invoke-cli");
 
 /** Regex-safe binary prefix in mock stdout (e.g. opencode.exe:run or opencode:run). */
 const OPENCODE_BIN_RE = process.platform === "win32" ? "opencode\\.exe" : "opencode";
@@ -1031,8 +1031,10 @@ test("codex runtime reads text from content and properties.content fallbacks", (
   );
 });
 
-test("extracts codex agent message events", () => {
-  const text = extractAssistantText(
+test("codex runtime maps agent message events to text.delta", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const events = runtime.transform(
     {
       type: "item.completed",
       item: {
@@ -1040,10 +1042,11 @@ test("extracts codex agent message events", () => {
         text: "Hello from Codex",
       },
     },
-    { opencodeParts: new Map() }
+    { agent: "architect", invocationId: "inv-legacy" }
   );
-
-  assert.equal(text, "Hello from Codex");
+  const text = events.find((event) => event.type === "text.delta");
+  assert.ok(text);
+  assert.equal(text.text, "Hello from Codex");
 });
 
 test("resumes remembered codex session", () => {

@@ -3,9 +3,13 @@ const { opencodeProvider } = require("./opencode");
 const { grokProvider } = require("./grok");
 const { requireModelProfile } = require("../catalog");
 const { assertCanonicalEvent, makeEvent, normalizeCanonicalEvent } = require("../event-protocol");
-const { resolveProxy } = require("../proxy");
+const { resolveProxy, proxyEnvVars } = require("../proxy");
 
 const REQUIRED_ADAPTER_METHODS = ["createRuntime", "buildInvocation"];
+
+function isTruthyEnv(value) {
+  return /^(1|true|yes|on)$/i.test(String(value || ""));
+}
 
 function assertProviderAdapter(adapter) {
   if (!adapter || typeof adapter !== "object") {
@@ -21,6 +25,11 @@ function assertProviderAdapter(adapter) {
   }
   if (!adapter.capabilities || typeof adapter.capabilities !== "object") {
     throw new Error(`Provider adapter "${adapter.id}" must declare capabilities.`);
+  }
+  if (!Array.isArray(adapter.allowedProviderOptions)) {
+    throw new Error(
+      `Provider adapter "${adapter.id}" must declare allowedProviderOptions as an array.`
+    );
   }
   return adapter;
 }
@@ -49,10 +58,32 @@ function getProviderAdapter(providerId) {
   return adapter;
 }
 
+function validateProviderOptions(adapter, providerOptions) {
+  const options =
+    providerOptions && typeof providerOptions === "object" && !Array.isArray(providerOptions)
+      ? providerOptions
+      : {};
+  if (Array.isArray(providerOptions)) {
+    throw new Error(`providerOptions for "${adapter.id}" must be an object.`);
+  }
+  const allowed = new Set(adapter.allowedProviderOptions || []);
+  const unknown = Object.keys(options).filter((key) => !allowed.has(key));
+  if (unknown.length) {
+    throw new Error(
+      `Unknown providerOptions for "${adapter.id}": ${unknown.join(", ")}. Allowed: ${[
+        ...allowed,
+      ].join(", ") || "(none)"}.`
+    );
+  }
+  return options;
+}
+
 function validateProviderConfig(config) {
   const providerId = providerIdFrom(config);
   const adapter = getProviderAdapter(providerId);
   const modelProfile = config.model ? requireModelProfile(providerId, config.model) : null;
+
+  validateProviderOptions(adapter, config.providerOptions);
 
   if (config.reasoningEffort && modelProfile && modelProfile.reasoning.supported) {
     const levels = modelProfile.reasoning.levels || [];
@@ -164,6 +195,47 @@ function resolveProviderRunOptions(config, options = {}, env = process.env) {
   return { ...options, proxy };
 }
 
+/**
+ * Build the env patch for a provider CLI child process.
+ * Always injects shared proxy vars; adapters may add provider-owned keys.
+ */
+function buildProviderEnvironment(config, options = {}, env = process.env) {
+  const { adapter } = validateProviderConfig(config);
+  const runOptions = resolveProviderRunOptions(config, options, env);
+  const patch = {
+    ...proxyEnvVars(runOptions.proxy),
+  };
+  if (typeof adapter.buildEnvironment === "function") {
+    Object.assign(patch, adapter.buildEnvironment(runOptions, env) || {});
+  }
+  return { env: { ...env, ...patch }, proxy: runOptions.proxy, runOptions };
+}
+
+/**
+ * Collect diagnostic messages for stderr before spawn.
+ * Shared proxy log + adapter-owned warnings (e.g. missing Grok proxy).
+ */
+function getProviderDiagnostics(config, options = {}, env = process.env) {
+  const { adapter } = validateProviderConfig(config);
+  const runOptions = resolveProviderRunOptions(config, options, env);
+  const messages = [];
+
+  if (runOptions.proxy && isTruthyEnv(env.INVOKE_CLI_PROXY_LOG)) {
+    messages.push(`[invoke-cli] proxy for ${adapter.id}: ${runOptions.proxy}`);
+  }
+
+  if (typeof adapter.diagnostics === "function") {
+    const extra = adapter.diagnostics(runOptions, env);
+    if (Array.isArray(extra)) {
+      for (const line of extra) {
+        if (typeof line === "string" && line.trim()) messages.push(line);
+      }
+    }
+  }
+
+  return messages;
+}
+
 function listSupportedProviders() {
   return Object.keys(PROVIDERS);
 }
@@ -175,8 +247,11 @@ module.exports = {
   assertProviderAdapter,
   getProviderAdapter,
   validateProviderConfig,
+  validateProviderOptions,
   createProviderRuntime,
   buildProviderInvocation,
   resolveProviderRunOptions,
+  buildProviderEnvironment,
+  getProviderDiagnostics,
   listSupportedProviders,
 };

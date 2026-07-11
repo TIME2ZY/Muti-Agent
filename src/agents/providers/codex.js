@@ -276,6 +276,7 @@ const codexProvider = {
     subagents: true,
     reasoning: "levels",
   },
+  allowedProviderOptions: ["sandbox", "approvalPolicy"],
   createRuntime: createCodexRuntime,
   resolveProxy,
   buildInvocation(config, prompt) {

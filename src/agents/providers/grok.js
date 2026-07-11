@@ -198,6 +198,7 @@ const grokProvider = {
     subagents: false,
     reasoning: "levels",
   },
+  allowedProviderOptions: ["alwaysApprove", "autoUpdate", "proxy"],
   createRuntime: createGrokRuntime,
   resolveProxy(options = {}, env = process.env) {
     const providerOptions = options.providerOptions || {};
@@ -210,6 +211,25 @@ const grokProvider = {
       env.GROK_HTTPS_PROXY,
       resolveProxy({}, env)
     );
+  },
+  /**
+   * Keep Grok-only proxy vars visible to nested tools even when the shared
+   * HTTP(S)_PROXY injection comes from GROK_PROXY resolution.
+   */
+  buildEnvironment(_options = {}, env = process.env) {
+    const patch = {};
+    for (const key of ["GROK_PROXY", "INVOKE_GROK_PROXY", "GROK_HTTP_PROXY", "GROK_HTTPS_PROXY"]) {
+      if (typeof env[key] === "string" && env[key].trim()) {
+        patch[key] = env[key].trim();
+      }
+    }
+    return patch;
+  },
+  diagnostics(options = {}) {
+    if (options.proxy) return [];
+    return [
+      "[invoke-cli] no proxy for grok; if requests hang, set GROK_PROXY=http://127.0.0.1:7892 (Grok-only) or INVOKE_CLI_PROXY / HTTPS_PROXY",
+    ];
   },
   validate(config) {
     const effort = config.reasoningEffort || "high";

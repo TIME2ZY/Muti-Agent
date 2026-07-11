@@ -6,6 +6,9 @@ const {
   buildProviderInvocation,
   createProviderRuntime,
   resolveProviderRunOptions,
+  buildProviderEnvironment,
+  getProviderDiagnostics,
+  validateProviderConfig,
 } = require("../../src/agents/providers");
 const { MODEL_PROFILES, getModelProfile } = require("../../src/agents/catalog");
 const {
@@ -13,6 +16,8 @@ const {
   normalizeCanonicalEvent,
   validateCanonicalEvent,
 } = require("../../src/agents/event-protocol");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const CONFIGS = {
   codex: { providerId: "codex", model: "gpt-5.5", reasoningEffort: "high" },
@@ -26,6 +31,7 @@ test("every provider implements the complete adapter contract", () => {
     assert.equal(adapter.id, providerId);
     assert.equal(typeof adapter.capabilities.resume, "boolean");
     assert.equal(typeof adapter.capabilities.thinking, "boolean");
+    assert.ok(Array.isArray(adapter.allowedProviderOptions));
 
     const invocation = buildProviderInvocation(CONFIGS[providerId], "hello");
     assert.equal(typeof invocation.command, "string");
@@ -36,6 +42,10 @@ test("every provider implements the complete adapter contract", () => {
     assert.equal(typeof runtime.extractSessionId, "function");
     assert.equal(typeof runtime.finish, "function");
     assert.ok(Array.isArray(runtime.finish({ agent: "a", invocationId: "i" })));
+
+    const envBundle = buildProviderEnvironment(CONFIGS[providerId], { proxy: "" }, {});
+    assert.equal(typeof envBundle.env, "object");
+    assert.ok(Array.isArray(getProviderDiagnostics(CONFIGS[providerId], { proxy: "" }, {})));
   }
 });
 
@@ -134,4 +144,35 @@ test("progress and tool events expose canonical state fields", () => {
     status: "completed",
   });
   assert.equal(normalizeCanonicalEvent({ type: "tool.finished", status: "error" }).state, "failed");
+});
+
+test("unknown providerOptions fail fast with allowed field names", () => {
+  assert.throws(
+    () =>
+      validateProviderConfig({
+        ...CONFIGS.opencode,
+        providerOptions: { thinkng: false },
+      }),
+    /Unknown providerOptions for "opencode": thinkng/
+  );
+});
+
+test("grok adapter owns missing-proxy diagnostics and GROK_PROXY env patch", () => {
+  const messages = getProviderDiagnostics(CONFIGS.grok, { proxy: "" }, {});
+  assert.ok(messages.some((line) => /no proxy for grok/i.test(line)));
+
+  const { env } = buildProviderEnvironment(
+    CONFIGS.grok,
+    { proxy: "" },
+    { GROK_PROXY: "http://127.0.0.1:7892" }
+  );
+  assert.equal(env.GROK_PROXY, "http://127.0.0.1:7892");
+  assert.equal(env.HTTPS_PROXY, "http://127.0.0.1:7892");
+});
+
+test("invoke-cli entry stays free of provider special cases and server imports", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../src/agents/invoke-cli.js"), "utf8");
+  assert.doesNotMatch(source, /providerId\s*===\s*["']grok["']/);
+  assert.doesNotMatch(source, /require\(["']\.\.\/server\//);
+  assert.doesNotMatch(source, /extractAssistantText/);
 });

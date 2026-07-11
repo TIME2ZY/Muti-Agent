@@ -6,12 +6,10 @@ const {
   createGrokRuntime,
   THINKING_FLUSH_CHARS,
   TEXT_FLUSH_CHARS,
-} = require("../../src/agents/providers/grok");
-const {
-  AGENTS,
-  buildInvocation,
   resolveGrokCommand,
-} = require("../../src/agents/invoke-cli");
+} = require("../../src/agents/providers/grok");
+const { AGENTS } = require("../../src/agents/catalog");
+const { buildInvocation } = require("../../src/agents/invoke-cli");
 const { createProviderRuntime, listSupportedProviders } = require("../../src/agents/providers");
 
 test("provider registry includes grok", () => {
