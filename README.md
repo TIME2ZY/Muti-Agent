@@ -188,7 +188,8 @@ http://127.0.0.1:8787
 - CLI 入口：`invoke-cli.js` 只做参数解析与装配；进程监督、session 持久化、raw event log 分别在 `process-supervisor.js` / `session-persistence.js` / `raw-event-logger.js`
 - 共享基础层：`src/shared/runtime-paths.js`、`src/shared/session-map.js`（agents 与 server 共用；避免 agents → server 反向依赖）
 - 运行参数：超时、重试、代理等公共参数由 `src/agents/run-options.js` 归一化；CLI 特有开关放进 `providerOptions` 并由对应 adapter 解释/校验
-- 事件生命周期：adapter 出口保证 `run.started` 先于内容事件，并由通用 runtime 生成唯一的 `run.finished` / `run.failed` 终态
+- 事件协议：`event-protocol.js` 带 `protocolVersion`、字段类型校验；runtime 信封保证 started→content→唯一终态，终态后丢弃迟到事件
+- 能力降级：`/api/agents` 下发 `capabilities`；前端按 thinking/tools/subagents 隐藏不支持的过程 UI（不写死 provider 名）
 - Provider 会话：resume 记录包含 `providerId:modelId` 指纹，切换厂商或模型时不得复用不兼容 session
 - 完整 ES modules / Vite 尚未接入；新增前端文件时请追加到 `MODULES` 并保证依赖顺序
 - 新增 `src` / `public` / `tests` 下的 `.js` 后，直接 `npm run check` / `npm run lint` 即可

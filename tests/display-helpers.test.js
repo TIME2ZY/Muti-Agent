@@ -34,6 +34,17 @@ test("agent helpers format mention and meta", () => {
   assert.equal(agentRoleSummary({ description: "a".repeat(40) }).length, 33);
 });
 
+test("agentMeta appends capability tags when capabilities are present", () => {
+  const meta = agentMeta({
+    cli: "codex",
+    model: "gpt-5.5",
+    capabilities: { thinking: false, tools: true, subagents: true, resume: true },
+  });
+  assert.match(meta, /工具/);
+  assert.match(meta, /子代理/);
+  assert.doesNotMatch(meta, /思考/);
+});
+
 test("agentColorIndex is stable for known agents and in 1..6", () => {
   assert.equal(agentColorIndex("architect"), 1);
   assert.equal(agentColorIndex("orchestrator"), 2);

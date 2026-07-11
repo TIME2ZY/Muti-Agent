@@ -444,6 +444,7 @@ test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
     toolStarted.find((event) => event.type === "tool.started"),
     {
       type: "tool.started",
+      protocolVersion: 1,
       agent: "architect",
       invocationId: "inv-tool",
       toolName: "web_search",
@@ -790,6 +791,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
     commandStarted.find((event) => event.type === "command.started"),
     {
       type: "command.started",
+      protocolVersion: 1,
       agent: "architect",
       invocationId: "inv-1b",
       command: "Get-Content -Raw skill.md",
@@ -798,6 +800,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   assert.deepEqual(commandFinished, [
     {
       type: "command.finished",
+      protocolVersion: 1,
       agent: "architect",
       invocationId: "inv-1b",
       command: "Get-Content -Raw skill.md",
@@ -808,6 +811,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   assert.deepEqual(fileChanged, [
     {
       type: "file.changed",
+      protocolVersion: 1,
       agent: "architect",
       invocationId: "inv-1b",
       path: "C:\\worktree\\temp.txt",
@@ -817,6 +821,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   assert.deepEqual(transportError, [
     {
       type: "stderr",
+      protocolVersion: 1,
       agent: "architect",
       invocationId: "inv-1b",
       text: "Reconnecting... 2/5 (request timed out)",
@@ -825,6 +830,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   assert.deepEqual(itemError, [
     {
       type: "stderr",
+      protocolVersion: 1,
       agent: "architect",
       invocationId: "inv-1b",
       text: "Falling back from WebSockets to HTTPS transport. request timed out",

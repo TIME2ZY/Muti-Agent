@@ -22,3 +22,44 @@ test("progress helpers", () => {
   assert.equal(helpers.progressItemDone({ status: "done" }), true);
   assert.equal(helpers.progressItemLabel({ text: "step" }), "step");
 });
+
+test("resolveCapabilities defaults optimistically when missing", () => {
+  const caps = helpers.resolveCapabilities(null);
+  assert.equal(caps.thinking, true);
+  assert.equal(caps.tools, true);
+  assert.equal(caps.subagents, true);
+});
+
+test("resolveCapabilities respects explicit false flags", () => {
+  const caps = helpers.resolveCapabilities({
+    capabilities: { thinking: false, tools: false, subagents: true, resume: true },
+  });
+  assert.equal(helpers.shouldRenderThinking(caps), false);
+  assert.equal(helpers.shouldRenderTools(caps), false);
+  assert.equal(helpers.shouldRenderSubagents(caps), true);
+});
+
+test("findAgentCapabilities looks up agent list by id", () => {
+  const agents = [
+    { id: "architect", capabilities: { thinking: false, tools: true, subagents: true } },
+    { id: "grok", capabilities: { thinking: true, tools: false, subagents: false } },
+  ];
+  assert.equal(helpers.findAgentCapabilities(agents, "architect").thinking, false);
+  assert.equal(helpers.findAgentCapabilities(agents, "grok").tools, false);
+  assert.equal(helpers.findAgentCapabilities(agents, "missing").thinking, true);
+});
+
+test("capabilityTagList is capability-driven not provider-name hardcoding", () => {
+  assert.deepEqual(
+    helpers.capabilityTagList({
+      capabilities: { thinking: true, tools: false, subagents: false },
+    }),
+    ["思考"]
+  );
+  assert.deepEqual(
+    helpers.capabilityTagList({
+      capabilities: { thinking: true, tools: true, subagents: true },
+    }),
+    ["思考", "工具", "子代理"]
+  );
+});

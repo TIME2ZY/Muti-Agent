@@ -2,7 +2,12 @@ const { codexProvider } = require("./codex");
 const { opencodeProvider } = require("./opencode");
 const { grokProvider } = require("./grok");
 const { requireModelProfile } = require("../catalog");
-const { assertCanonicalEvent, makeEvent, normalizeCanonicalEvent } = require("../event-protocol");
+const {
+  assertCanonicalEvent,
+  makeEvent,
+  normalizeCanonicalEvent,
+  createRunLifecycle,
+} = require("../event-protocol");
 const { resolveProxy, proxyEnvVars } = require("../proxy");
 
 const REQUIRED_ADAPTER_METHODS = ["createRuntime", "buildInvocation"];
@@ -103,33 +108,38 @@ function createProviderRuntime(config) {
   if (!runtime || typeof runtime.transform !== "function") {
     throw new Error(`Provider runtime "${adapter.id}" must implement transform().`);
   }
-  let started = false;
-  let terminal = false;
+  const lifecycle = createRunLifecycle();
 
   const validateEvents = (events, context, sessionId = "") => {
     if (!Array.isArray(events)) {
       throw new Error(`Provider runtime "${adapter.id}" must return an event array.`);
     }
-    const normalized = events.map(normalizeCanonicalEvent);
-    const hasStarted = normalized.some((event) => event.type === "run.started");
-    if (hasStarted) started = true;
-    const hasTerminal = normalized.some(
-      (event) => event.type === "run.finished" || event.type === "run.failed"
-    );
-    if (hasTerminal) terminal = true;
-    if (normalized.length && !started) {
-      normalized.unshift(
+    if (lifecycle.terminal) return [];
+
+    let normalized = events.map(normalizeCanonicalEvent);
+    const needsStart =
+      normalized.length > 0 &&
+      !lifecycle.started &&
+      !normalized.some((event) => event.type === "run.started");
+    if (needsStart) {
+      normalized = [
         makeEvent("run.started", {
           agent: context.agent,
           invocationId: context.invocationId,
           sessionId,
           provider: adapter.id,
           model: config.model || "",
-        })
-      );
-      started = true;
+        }),
+        ...normalized,
+      ];
     }
-    return normalized.map(assertCanonicalEvent);
+
+    const accepted = [];
+    for (const event of normalized) {
+      if (!lifecycle.accept(event.type)) continue;
+      accepted.push(assertCanonicalEvent(event));
+    }
+    return accepted;
   };
   return {
     extractSessionId:
@@ -137,27 +147,28 @@ function createProviderRuntime(config) {
         ? runtime.extractSessionId.bind(runtime)
         : () => "",
     transform(event, context) {
+      if (lifecycle.terminal) return [];
       const sessionId =
         typeof runtime.extractSessionId === "function" ? runtime.extractSessionId(event) : "";
       return validateEvents(runtime.transform(event, context), context, sessionId);
     },
     finish(context, outcome = {}) {
-      const rawEvents = typeof runtime.finish === "function" ? runtime.finish(context) : [];
+      if (lifecycle.terminal && outcome.terminal !== true) return [];
+      const rawEvents =
+        lifecycle.terminal || typeof runtime.finish !== "function" ? [] : runtime.finish(context);
       const events = validateEvents(rawEvents, context);
-      if (outcome.terminal === true && !terminal) {
-        if (!started) {
-          events.push(
-            assertCanonicalEvent(
-              makeEvent("run.started", {
-                agent: context.agent,
-                invocationId: context.invocationId,
-                sessionId: "",
-                provider: adapter.id,
-                model: config.model || "",
-              })
-            )
+      if (outcome.terminal === true && !lifecycle.terminal) {
+        if (!lifecycle.started) {
+          const started = assertCanonicalEvent(
+            makeEvent("run.started", {
+              agent: context.agent,
+              invocationId: context.invocationId,
+              sessionId: "",
+              provider: adapter.id,
+              model: config.model || "",
+            })
           );
-          started = true;
+          if (lifecycle.accept(started.type)) events.push(started);
         }
         const terminalEvent = outcome.ok
           ? makeEvent("run.finished", {
@@ -173,8 +184,8 @@ function createProviderRuntime(config) {
               exitCode: outcome.exitCode ?? null,
               signal: outcome.signal || null,
             });
-        events.push(assertCanonicalEvent(terminalEvent));
-        terminal = true;
+        const terminal = assertCanonicalEvent(terminalEvent);
+        if (lifecycle.accept(terminal.type)) events.push(terminal);
       }
       return events;
     },

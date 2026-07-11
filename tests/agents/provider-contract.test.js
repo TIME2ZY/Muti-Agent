@@ -64,19 +64,18 @@ test("model catalog separates execution provider from model vendor", () => {
 });
 
 test("canonical event validator rejects missing fields and unknown event types", () => {
-  assert.deepEqual(validateCanonicalEvent({ type: "text.delta", text: "hello" }), [
-    "text.delta.agent is required",
-    "text.delta.invocationId is required",
-  ]);
+  const missing = validateCanonicalEvent({ type: "text.delta", text: "hello" });
+  assert.ok(missing.includes("text.delta.agent is required"));
+  assert.ok(missing.includes("text.delta.invocationId is required"));
   assert.throws(() => assertCanonicalEvent({ type: "vendor.magic" }), /unsupported event type/);
-  assert.doesNotThrow(() =>
-    assertCanonicalEvent({
-      type: "text.delta",
-      agent: "architect",
-      invocationId: "inv-1",
-      text: "hello",
-    })
-  );
+  const ok = assertCanonicalEvent({
+    type: "text.delta",
+    agent: "architect",
+    invocationId: "inv-1",
+    text: "hello",
+  });
+  assert.equal(ok.protocolVersion, 1);
+  assert.equal(typeof ok.text, "string");
 });
 
 test("runtime envelope enforces started-before-content and one terminal event", () => {

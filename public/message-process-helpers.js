@@ -111,6 +111,67 @@
     return false;
   }
 
+  /**
+   * Normalize provider capabilities for UI fallbacks.
+   * Missing capabilities object → optimistic full support (legacy agents / offline).
+   * Explicit false → hide that surface.
+   */
+  function resolveCapabilities(agentOrCaps) {
+    const defaults = {
+      resume: true,
+      thinking: true,
+      tools: true,
+      subagents: true,
+      reasoning: "none",
+    };
+    if (!agentOrCaps || typeof agentOrCaps !== "object") return { ...defaults };
+    const raw =
+      agentOrCaps.capabilities && typeof agentOrCaps.capabilities === "object"
+        ? agentOrCaps.capabilities
+        : agentOrCaps.thinking !== undefined ||
+            agentOrCaps.tools !== undefined ||
+            agentOrCaps.subagents !== undefined ||
+            agentOrCaps.resume !== undefined
+          ? agentOrCaps
+          : null;
+    if (!raw) return { ...defaults };
+    return {
+      resume: raw.resume !== false,
+      thinking: raw.thinking !== false,
+      tools: raw.tools !== false,
+      subagents: raw.subagents !== false,
+      reasoning: raw.reasoning != null ? raw.reasoning : defaults.reasoning,
+    };
+  }
+
+  function findAgentCapabilities(agents, agentId) {
+    const list = Array.isArray(agents) ? agents : [];
+    const agent = list.find((a) => a && a.id === agentId);
+    return resolveCapabilities(agent || null);
+  }
+
+  function shouldRenderThinking(caps) {
+    return Boolean(resolveCapabilities(caps).thinking);
+  }
+
+  function shouldRenderTools(caps) {
+    return Boolean(resolveCapabilities(caps).tools);
+  }
+
+  function shouldRenderSubagents(caps) {
+    return Boolean(resolveCapabilities(caps).subagents);
+  }
+
+  /** Short UI tags for agent panel (capability-driven, not provider-name hardcoding). */
+  function capabilityTagList(agentOrCaps) {
+    const caps = resolveCapabilities(agentOrCaps);
+    const tags = [];
+    if (caps.thinking) tags.push("思考");
+    if (caps.tools) tags.push("工具");
+    if (caps.subagents) tags.push("子代理");
+    return tags;
+  }
+
   const api = {
     collapseWs,
     truncateDisplay,
@@ -121,6 +182,12 @@
     isTaskLikeTool,
     progressItemLabel,
     progressItemDone,
+    resolveCapabilities,
+    findAgentCapabilities,
+    shouldRenderThinking,
+    shouldRenderTools,
+    shouldRenderSubagents,
+    capabilityTagList,
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = api;

@@ -83,7 +83,18 @@
       isTaskLikeTool,
       progressItemLabel,
       progressItemDone,
+      findAgentCapabilities,
+      shouldRenderThinking,
+      shouldRenderTools,
+      shouldRenderSubagents,
     } = processHelpers;
+
+    function capabilitiesFor(agentId) {
+      if (typeof findAgentCapabilities === "function") {
+        return findAgentCapabilities(state.agents || [], agentId);
+      }
+      return { resume: true, thinking: true, tools: true, subagents: true };
+    }
     const L = resolveMsgLocale();
     const msg = L.message || {};
     const badgeText = L.badge || {};
@@ -732,6 +743,7 @@
       if (!event || !event.type || !event.agent) return;
       const sid = sessionId || state.currentSessionId || "_pending";
       const run = ensureLiveRun(event, sid);
+      const caps = capabilitiesFor(event.agent);
 
       if (event.type === "run.started") {
         run.status = "thinking";
@@ -747,7 +759,12 @@
       }
 
       if (event.type === "thinking.delta" || event.type === "thinking.final") {
+        // Capability-driven: still record text for run state, but skip thinking UI
+        // when the provider does not advertise thinking streams (e.g. codex).
         run.thinking += event.text || "";
+        if (typeof shouldRenderThinking === "function" && !shouldRenderThinking(caps)) {
+          return;
+        }
         const rt = sessionRuntime(sid);
         if (!rt.liveMessages.has(event.agent)) showThinking(event.agent, sid);
         const item = rt.liveMessages.get(event.agent);
@@ -776,6 +793,9 @@
       if (event.type === "tool.started" || event.type === "tool.finished") {
         run.tools.push(event);
         setLivePending(event.agent, pendingTextForEvent(event), sid);
+        if (typeof shouldRenderTools === "function" && !shouldRenderTools(caps)) {
+          return;
+        }
         upsertLiveTool(event.agent, event, sid);
         return;
       }
@@ -789,6 +809,9 @@
         if (!Array.isArray(run.subagents)) run.subagents = [];
         run.subagents.push(event);
         setLivePending(event.agent, pendingTextForEvent(event), sid);
+        if (typeof shouldRenderSubagents === "function" && !shouldRenderSubagents(caps)) {
+          return;
+        }
         upsertLiveSubagent(event.agent, event, sid);
         return;
       }
