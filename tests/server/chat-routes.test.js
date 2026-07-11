@@ -46,7 +46,13 @@ function baseDeps(res, overrides = {}) {
     },
     contextHealth: { makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }) },
     sessionSealer: { makeSealer: () => ({ isSealed: () => false, update: () => "active", getState: () => "active", thresholds: { warn: 0.8 } }) },
-    sessionBootstrap: { buildBootstrapPacket: async () => "" },
+    sessionBootstrap: {
+      buildBootstrapPacket: async () => "",
+      buildIdentity: () => "<!-- Session Identity -->\n",
+    },
+    agentIdentity: {
+      renderIdentityBlock: (agentId) => `<!-- Agent Identity: ${agentId} -->\n`,
+    },
     worktreeManager: {},
     worktreeManagerModule: { ensureGitRoot: () => null },
     activeInvocations: new Map(),

@@ -109,6 +109,10 @@ test("serves fixed agent list", async () => {
     // Every agent must surface a non-empty description so the UI can show it.
     for (const agent of body.agents) {
       assert.ok(agent.description && agent.description.length > 0, `Agent ${agent.id} missing description`);
+      // Identity pack metadata (role / duties) comes from src/agents/identities/*.md
+      assert.ok(agent.role && agent.role.length > 0, `Agent ${agent.id} missing role`);
+      assert.ok(Array.isArray(agent.duties) && agent.duties.length > 0, `Agent ${agent.id} missing duties`);
+      assert.ok(Array.isArray(agent.boundaries), `Agent ${agent.id} missing boundaries array`);
     }
   });
 });
@@ -2653,7 +2657,10 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
     );
 
     assert.ok(capturedPrompt, "spawnRunner should have been called");
-    // Identity section
+    // Agent persona identity (from identities/*.md) comes first
+    assert.match(capturedPrompt, /<!-- Agent Identity: planner \/ 小谋 -->/);
+    assert.match(capturedPrompt, /<!-- \/Agent Identity -->/);
+    // Session coords section
     assert.match(capturedPrompt, /<!-- Session Identity -->/);
     assert.match(capturedPrompt, /Thread: bootstrap-test-session/);
     assert.match(capturedPrompt, /Session: bootstrap-test-session/);
@@ -2666,6 +2673,11 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
     assert.match(capturedPrompt, /不要凭印象猜/);
     // User prompt still in there
     assert.match(capturedPrompt, /hello world/);
+    // Order: agent identity before session identity
+    assert.ok(
+      capturedPrompt.indexOf("<!-- Agent Identity:") < capturedPrompt.indexOf("<!-- Session Identity -->"),
+      "agent identity should precede session identity"
+    );
   } finally {
     if (prevDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
     else process.env.CAT_CAFE_TRANSCRIPT_DIR = prevDir;
@@ -2673,7 +2685,7 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
   }
 });
 
-test("A2A-routed agents do NOT get bootstrap packet (handoff block instead)", async () => {
+test("A2A-routed agents get persona identity + light session header, not full bootstrap", async () => {
   const prompts = [];
 
   await withServer(
@@ -2708,10 +2720,17 @@ test("A2A-routed agents do NOT get bootstrap packet (handoff block instead)", as
   );
 
   assert.equal(prompts.length, 2);
+  // First agent: full bootstrap (session + digest + recall) + its persona
+  assert.match(prompts[0], /<!-- Agent Identity: architect \/ Codex -->/);
   assert.match(prompts[0], /<!-- Session Identity -->/);
   assert.match(prompts[0], /<!-- 回忆铁律/);
-  assert.doesNotMatch(prompts[1], /<!-- Session Identity -->/);
+  assert.match(prompts[0], /<!-- Digest/);
+  // A2A agent: own persona + light session header + handoff, but no full digest/recall pack
+  assert.match(prompts[1], /<!-- Agent Identity: planner \/ 小谋 -->/);
+  assert.match(prompts[1], /<!-- Session Identity -->/);
+  assert.match(prompts[1], /Agent: 小谋/);
   assert.doesNotMatch(prompts[1], /<!-- 回忆铁律/);
+  assert.doesNotMatch(prompts[1], /<!-- Digest/);
   assert.match(prompts[1], /任务交接/);
   assert.match(prompts[1], /architect result/);
 });

@@ -13,6 +13,7 @@ function createChatRoutes({
   contextHealth,
   sessionSealer,
   sessionBootstrap,
+  agentIdentity,
   worktreeManager,
   worktreeManagerModule,
   activeInvocations,
@@ -192,12 +193,13 @@ function createChatRoutes({
       activeSkills: skillNames,
     });
 
+    // Session bootstrap (coords + digest + recall) is built once for the first turn.
+    // Agent persona identity is re-rendered every turn so A2A handoffs still know "who I am".
     const bootstrapPacket = await sessionBootstrap.buildBootstrapPacket({
       threadId: sessionId,
       sessionId,
       agent: AGENTS[requestedAgent],
     });
-    const augmentedPromptWithBootstrap = bootstrapPacket + "\n" + augmentedPrompt;
 
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
@@ -240,6 +242,7 @@ function createChatRoutes({
         }
 
         const agent = worklist[i];
+        const agentConfig = AGENTS[agent] || { id: agent, label: agent, description: "" };
         const sessionMap = readSessionMap(sessionId, sessionMapRoot);
         const resumeSessionId = resolveResumeSessionId(sessionMap, agent, workspaceKey);
         let assistantContent = "";
@@ -284,7 +287,28 @@ function createChatRoutes({
           ].join("\n");
         }
 
-        const promptForAgent = (i === 0 ? augmentedPromptWithBootstrap : agentPrompt) + "\n\n" + callbackInstructions;
+        // Prompt layout (top → bottom):
+        //   1. Agent identity (every turn, including A2A)
+        //   2. Session bootstrap (first turn only: coords + digest + recall)
+        //   3. Light session header on later turns (correct agent label)
+        //   4. Task body (user/skills or handoff)
+        //   5. Callback instructions
+        const identityBlock = agentIdentity.renderIdentityBlock(agent, agentConfig);
+        const promptParts = [identityBlock];
+        if (i === 0) {
+          promptParts.push(bootstrapPacket, augmentedPrompt);
+        } else {
+          promptParts.push(
+            sessionBootstrap.buildIdentity({
+              threadId: sessionId,
+              sessionId,
+              agent: agentConfig,
+            }),
+            agentPrompt
+          );
+        }
+        promptParts.push(callbackInstructions);
+        const promptForAgent = promptParts.filter(Boolean).join("\n\n");
         healthTracker.addInput(promptForAgent.length);
         threadCtx.currentInvocationId = invocationId;
         const invocationEnv = {

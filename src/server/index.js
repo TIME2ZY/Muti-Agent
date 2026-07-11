@@ -4,6 +4,7 @@ const http = require("node:http");
 const path = require("node:path");
 const { AGENTS } = require("../agents/invoke-cli");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
+const agentIdentity = require("../agents/identity");
 const callbacks = require("../agents/callbacks");
 const transcript = require("../session/transcript");
 const contextHealth = require("../session/health");
@@ -98,14 +99,20 @@ const activeInvocations = new Map();
 // ── Public helpers ────────────────────────────────────────────
 
 function publicAgents() {
-  return Object.values(AGENTS).map((agent) => ({
-    id: agent.id,
-    label: agent.label,
-    cli: agent.name,
-    model: agent.model,
-    reasoningEffort: agent.reasoningEffort || "",
-    description: agent.description || "",
-  }));
+  return Object.values(AGENTS).map((agent) => {
+    const identity = agentIdentity.getIdentity(agent.id);
+    return {
+      id: agent.id,
+      label: agent.label,
+      cli: agent.name,
+      model: agent.model,
+      reasoningEffort: agent.reasoningEffort || "",
+      description: agent.description || "",
+      role: identity ? identity.role : "",
+      duties: identity ? identity.duties.slice() : [],
+      boundaries: identity ? identity.boundaries.slice() : [],
+    };
+  });
 }
 
 function sendJson(res, status, value) {
@@ -365,6 +372,8 @@ function filterBenignStderr(text) {
 }
 
 function createServer(options = {}) {
+  // Surface missing identity packs early so new agents aren't silent no-ops.
+  agentIdentity.assertIdentitiesForAgents(Object.keys(AGENTS));
   const uiToken = uiSecurity.createUiToken(options.uiToken);
   const spawnRunner = options.spawnRunner || spawn;
   const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
@@ -462,6 +471,7 @@ function createServer(options = {}) {
     contextHealth,
     sessionSealer,
     sessionBootstrap,
+    agentIdentity,
     worktreeManager,
     worktreeManagerModule,
     activeInvocations,
