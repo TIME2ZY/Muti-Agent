@@ -2,100 +2,29 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
-const { createProviderRuntime } = require("./providers");
+const { AGENTS, MODEL_PROFILES } = require("./catalog");
+const {
+  createProviderRuntime,
+  buildProviderInvocation,
+  resolveProviderRunOptions,
+} = require("./providers");
+const { normalizeRunOptions } = require("./run-options");
+const { SUPPORTED_GROK_EFFORTS, resolveGrokCommand } = require("./providers/grok");
 const { resolveProxy, resolveProviderProxy, proxyEnvVars } = require("./proxy");
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_KILL_GRACE_MS = 5000;
 const STDERR_BUFFER_LIMIT = 8192;
-const SUPPORTED_CODEX_MODELS = new Set(["gpt-5.5", "gpt-5.4"]);
-const OPENCODE_GO_MODEL_PREFIX = "opencode-go/";
-const SUPPORTED_OPENCODE_GO_MODELS = new Set([
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "glm-5.1",
-  "glm-5.2",
-  "kimi-k2.6",
-  "kimi-k2.7-code",
-  "mimo-v2.5",
-  "mimo-v2.5-pro",
-  "minimax-m2.7",
-  "minimax-m3",
-  "qwen3.6-plus",
-  "qwen3.7-max",
-  "qwen3.7-plus",
-]);
-const SUPPORTED_GROK_MODELS = new Set(["grok-4.5"]);
-const SUPPORTED_GROK_EFFORTS = new Set(["low", "medium", "high"]);
-const AGENTS = {
-  architect: {
-    id: "architect",
-    label: "Codex",
-    name: "codex",
-    model: "gpt-5.5",
-    reasoningEffort: "high",
-    description: "默认主控 Agent，负责规划与编排。",
-  },
-  orchestrator: {
-    id: "orchestrator",
-    label: "万事通",
-    name: "opencode",
-    model: "deepseek-v4-pro",
-    description: "通才型助手，兜底各种杂活与跨领域问题。",
-  },
-  planner: {
-    id: "planner",
-    label: "小谋",
-    name: "opencode",
-    model: "mimo-v2.5-pro",
-    description: "推理与规划专家，擅长任务拆解、方案设计与决策建议。",
-  },
-  coder: {
-    id: "coder",
-    label: "小码",
-    name: "opencode",
-    model: "minimax-m3",
-    reasoningEffort: "high",
-    description: "Coding 主力，负责服务端与通用代码实现与重构。",
-  },
-  /**
-   * Grok 4.5 via local Grok Build CLI (same pattern as codex / opencode).
-   * Requires `grok` on PATH (`curl -fsSL https://x.ai/cli/install.sh | bash`
-   * or Windows: `irm https://x.ai/cli/install.ps1 | iex`), then `grok login`
-   * or XAI_API_KEY.
-   */
-  grok: {
-    id: "grok",
-    label: "Grok",
-    name: "grok",
-    model: "grok-4.5",
-    reasoningEffort: "high",
-    // Grok 4.5 context window is 500k; use it for sealer thresholds.
-    capacityTokens: 500_000,
-    description: "Grok 4.5 high — 本地 Grok Build CLI 编码与硬推理主力。",
-  },
-  frontend: {
-    id: "frontend",
-    label: "小视",
-    name: "opencode",
-    model: "glm-5.2",
-    description: "前端 Coding 专家，专注 UI、样式、交互与可访问性。",
-  },
-  critic: {
-    id: "critic",
-    label: "小评",
-    name: "opencode",
-    model: "qwen3.7-plus",
-    description: "Review 专家，负责代码评审、问题诊断与质量把关。",
-  },
-};
+const SUPPORTED_GROK_MODELS = new Set(
+  MODEL_PROFILES.filter((model) => model.providerId === "grok").map((model) => model.id)
+);
 
 function parseArgs(argv) {
   const args = [...argv];
   let agentName = "architect";
   const options = {
-    // Prefer explicit INVOKE_CLI_PROXY, else inherit shell HTTPS_PROXY/HTTP_PROXY.
-    proxy: resolveProxy(),
+    // Provider adapters resolve environment-specific proxy fallbacks.
+    proxy: "",
     timeoutMs: DEFAULT_TIMEOUT_MS,
     killGraceMs: DEFAULT_KILL_GRACE_MS,
     retries: 0,
@@ -152,7 +81,10 @@ function parseArgs(argv) {
     }
 
     if (arg.startsWith("--kill-grace-ms=")) {
-      options.killGraceMs = parsePositiveInteger(arg.slice("--kill-grace-ms=".length), "--kill-grace-ms");
+      options.killGraceMs = parsePositiveInteger(
+        arg.slice("--kill-grace-ms=".length),
+        "--kill-grace-ms"
+      );
       args.shift();
       continue;
     }
@@ -174,7 +106,9 @@ function parseArgs(argv) {
 
   const agent = AGENTS[agentName];
   if (!agent) {
-    throw new Error(`Unsupported agent "${agentName}". Use one of: ${Object.keys(AGENTS).join(", ")}.`);
+    throw new Error(
+      `Unsupported agent "${agentName}". Use one of: ${Object.keys(AGENTS).join(", ")}.`
+    );
   }
 
   return {
@@ -206,139 +140,13 @@ function parseNonNegativeInteger(value, name) {
 
 function buildInvocation(cli, prompt) {
   const config = typeof cli === "string" ? { name: cli } : cli;
-
-  if (config.name === "opencode") {
-    validateModel(config.name, config.model);
-
-    // --thinking: stream reasoning/thinking parts as JSON events (otherwise omitted).
-    const args = ["run", "--format", "json", "--thinking"];
-    if (config.model) {
-      const fullModel = config.model.startsWith(OPENCODE_GO_MODEL_PREFIX)
-        ? config.model
-        : `${OPENCODE_GO_MODEL_PREFIX}${config.model}`;
-      args.push("--model", fullModel);
-    }
-    if (config.resumeSessionId) args.push("--session", config.resumeSessionId);
-    args.push(prompt);
-
-    return {
-      command: resolveOpencodeCommand(),
-      args,
-    };
-  }
-
-  if (config.name === "grok") {
-    validateModel(config.name, config.model);
-    const effort = config.reasoningEffort || "high";
-    if (!SUPPORTED_GROK_EFFORTS.has(effort)) {
-      throw new Error(
-        `Unsupported Grok reasoning effort "${effort}". Supported: ${[...SUPPORTED_GROK_EFFORTS].join(", ")}.`
-      );
-    }
-    // Local Grok Build CLI (same pattern as codex / opencode):
-    //   grok -p "..." --output-format streaming-json -m grok-4.5 --reasoning-effort high
-    // Auth: `grok login` or XAI_API_KEY in the environment.
-    const args = [
-      "-p",
-      prompt,
-      "--output-format",
-      "streaming-json",
-      "--always-approve",
-      "--no-auto-update",
-    ];
-    if (config.model) args.push("-m", config.model);
-    if (effort) args.push("--reasoning-effort", effort);
-    if (config.resumeSessionId) {
-      args.push("-r", config.resumeSessionId);
-    }
-    return {
-      command: resolveGrokCommand(),
-      args,
-    };
-  }
-
-  validateModel(config.name, config.model);
-
-  const args = ["-s", "danger-full-access", "-a", "never"];
-  if (config.reasoningEffort) args.push("-c", `model_reasoning_effort="${config.reasoningEffort}"`);
-  if (config.model) args.push("-m", config.model);
-  if (config.resumeSessionId) {
-    args.push("exec", "resume", "--json", config.resumeSessionId, prompt);
-  } else {
-    args.push("exec", "--json", prompt);
-  }
-
-  return {
-    command: "codex",
-    args,
-  };
-}
-
-function validateModel(cliName, model) {
-  if (!model) return;
-
-  if (cliName === "codex" && !SUPPORTED_CODEX_MODELS.has(model)) {
-    throw new Error(
-      `Unsupported codex model "${model}". Supported models: ${[...SUPPORTED_CODEX_MODELS].join(", ")}.`
-    );
-  }
-
-  if (cliName === "opencode" && !SUPPORTED_OPENCODE_GO_MODELS.has(model)) {
-    throw new Error(
-      `Unsupported opencode model "${model}". Supported Go subscription models: ${[...SUPPORTED_OPENCODE_GO_MODELS].join(", ")}.`
-    );
-  }
-
-  if (cliName === "grok" && !SUPPORTED_GROK_MODELS.has(model)) {
-    throw new Error(
-      `Unsupported grok model "${model}". Supported models: ${[...SUPPORTED_GROK_MODELS].join(", ")}.`
-    );
-  }
-}
-
-function resolveOpencodeCommand() {
-  if (process.platform !== "win32") return "opencode";
-
-  const pathEntries = (process.env.PATH || "")
-    .split(path.delimiter)
-    .filter(Boolean);
-
-  for (const entry of pathEntries) {
-    const command = path.join(entry, "node_modules", "opencode-ai", "bin", "opencode.exe");
-    if (fs.existsSync(command)) return command;
-  }
-
-  return "opencode.exe";
-}
-
-/**
- * Resolve the local Grok Build CLI binary.
- * Default install paths: ~/.grok/bin/grok(.exe) or PATH.
- */
-function resolveGrokCommand() {
-  const home = process.env.USERPROFILE || process.env.HOME || "";
-  const candidates = [];
-  if (home) {
-    candidates.push(path.join(home, ".grok", "bin", process.platform === "win32" ? "grok.exe" : "grok"));
-  }
-  for (const entry of (process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
-    candidates.push(path.join(entry, process.platform === "win32" ? "grok.exe" : "grok"));
-  }
-  for (const command of candidates) {
-    try {
-      if (fs.existsSync(command)) return command;
-    } catch {
-      // ignore
-    }
-  }
-  return process.platform === "win32" ? "grok.exe" : "grok";
+  return buildProviderInvocation(config, prompt);
 }
 
 function extractAssistantText(event, state) {
   if (event.type === "assistant") {
-    const content = event.message && Array.isArray(event.message.content)
-      ? event.message.content
-      : [];
+    const content =
+      event.message && Array.isArray(event.message.content) ? event.message.content : [];
 
     return content
       .filter((item) => item.type === "text" && typeof item.text === "string")
@@ -356,9 +164,7 @@ function extractAssistantText(event, state) {
     const previous = state.opencodeParts.get(partId) || "";
     state.opencodeParts.set(partId, part.text);
 
-    return part.text.startsWith(previous)
-      ? part.text.slice(previous.length)
-      : part.text;
+    return part.text.startsWith(previous) ? part.text.slice(previous.length) : part.text;
   }
 
   const content = event.content || (event.properties && event.properties.content);
@@ -379,6 +185,8 @@ function persistSessionId(cli, sessionId) {
   if (!file || !sessionId) return;
   const key = cli.id || cli.name;
   const workspaceKey = process.env.INVOKE_WORKSPACE_KEY || "";
+  const providerId = cli.providerId || cli.name || "";
+  const providerKey = providerId && cli.model ? `${providerId}:${cli.model}` : providerId;
   const { upsertAgentProviderSession } = require("../server/session-map-store");
   let sessions = {};
   try {
@@ -391,37 +199,47 @@ function persistSessionId(cli, sessionId) {
   if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
     sessions = {};
   }
-  upsertAgentProviderSession(sessions, key, sessionId, workspaceKey);
+  upsertAgentProviderSession(sessions, key, sessionId, workspaceKey, providerKey);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(sessions, null, 2)}\n`, "utf8");
 }
 
 function invoke(cli, prompt, options = {}) {
-  const config = typeof cli === "string" ? { name: cli } : cli;
-  const provider = createProviderRuntime(config);
+  const baseConfig = typeof cli === "string" ? { name: cli } : cli;
+  const runOptions = normalizeRunOptions(options, {
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    killGraceMs: DEFAULT_KILL_GRACE_MS,
+    retries: 0,
+  });
+  const config = {
+    ...baseConfig,
+    providerOptions: {
+      ...(baseConfig.providerOptions || {}),
+      ...runOptions.providerOptions,
+    },
+  };
+  const providerId = config.providerId || config.name;
   // Read session ID from env (set by server). If present, resume the previous
   // CLI session; if absent, cold start.
   const resumeSessionId = process.env.INVOKE_SESSION_ID || "";
   const resolvedCli = resumeSessionId ? { ...config, resumeSessionId } : config;
   const { command, args } = buildInvocation(resolvedCli, prompt);
-  const runtime = {
-    // Per-provider proxy: Grok can use GROK_PROXY only; codex/opencode use
-    // shared INVOKE_CLI_PROXY / HTTPS_PROXY (and never pick GROK_PROXY alone).
-    proxy: resolveProviderProxy(config.name, { proxy: options.proxy }),
-    timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS,
-    killGraceMs: options.killGraceMs || DEFAULT_KILL_GRACE_MS,
-    retries: options.retries || 0,
-  };
+  const runtime = resolveProviderRunOptions(config, runOptions);
 
   const invocationId = process.env.CAT_CAFE_INVOCATION_ID || "standalone";
-  const rawEventLogEnabled = /^(1|true|yes|on)$/i.test(String(process.env.INVOKE_RAW_EVENT_LOG || ""));
+  const rawEventLogEnabled = /^(1|true|yes|on)$/i.test(
+    String(process.env.INVOKE_RAW_EVENT_LOG || "")
+  );
   let rawEventLogPath = "";
   if (rawEventLogEnabled) {
     try {
       const { RUNTIME_DATA_DIR } = require("../server/runtime-paths");
       const rawDir = path.join(RUNTIME_DATA_DIR, "raw-events");
       fs.mkdirSync(rawDir, { recursive: true });
-      const safeId = String(invocationId).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) || "standalone";
+      const safeId =
+        String(invocationId)
+          .replace(/[^a-zA-Z0-9._-]/g, "_")
+          .slice(0, 120) || "standalone";
       rawEventLogPath = path.join(rawDir, `${safeId}.jsonl`);
     } catch {
       rawEventLogPath = "";
@@ -440,7 +258,7 @@ function invoke(cli, prompt, options = {}) {
     try {
       fs.appendFileSync(
         rawEventLogPath,
-        `${JSON.stringify({ ts: new Date().toISOString(), provider: config.name, raw })}\n`,
+        `${JSON.stringify({ ts: new Date().toISOString(), provider: providerId, raw })}\n`,
         "utf8"
       );
     } catch {
@@ -450,12 +268,20 @@ function invoke(cli, prompt, options = {}) {
 
   const startAttempt = () => {
     attempt += 1;
+    const providerRuntime = createProviderRuntime(config);
+    const eventContext = {
+      agent: config.id || providerId,
+      invocationId,
+    };
 
     // Avoid noisy stderr on every invoke (tests assert empty stderr). Log only
     // when explicitly requested, or when Grok is likely to hang without a proxy.
-    if (runtime.proxy && /^(1|true|yes|on)$/i.test(String(process.env.INVOKE_CLI_PROXY_LOG || ""))) {
-      console.error(`[invoke-cli] proxy for ${config.name || "cli"}: ${runtime.proxy}`);
-    } else if (!runtime.proxy && config.name === "grok") {
+    if (
+      runtime.proxy &&
+      /^(1|true|yes|on)$/i.test(String(process.env.INVOKE_CLI_PROXY_LOG || ""))
+    ) {
+      console.error(`[invoke-cli] proxy for ${providerId || "cli"}: ${runtime.proxy}`);
+    } else if (!runtime.proxy && providerId === "grok") {
       console.error(
         "[invoke-cli] no proxy for grok; if requests hang, set GROK_PROXY=http://127.0.0.1:7892 (Grok-only) or INVOKE_CLI_PROXY / HTTPS_PROXY"
       );
@@ -468,7 +294,7 @@ function invoke(cli, prompt, options = {}) {
       ...proxyEnvVars(runtime.proxy),
     };
     // Keep GROK_PROXY visible to nested tools if user set it.
-    if (config.name === "grok" && process.env.GROK_PROXY && !childEnv.GROK_PROXY) {
+    if (providerId === "grok" && process.env.GROK_PROXY && !childEnv.GROK_PROXY) {
       childEnv.GROK_PROXY = process.env.GROK_PROXY;
     }
 
@@ -514,16 +340,19 @@ function invoke(cli, prompt, options = {}) {
       child.kill(signal);
     };
 
-    const activityTimer = setInterval(() => {
-      if (Date.now() - lastActivity <= runtime.timeoutMs) return;
+    const activityTimer = setInterval(
+      () => {
+        if (Date.now() - lastActivity <= runtime.timeoutMs) return;
 
-      timedOut = true;
-      process.exitCode = 1;
-      terminate(
-        "SIGTERM",
-        `${command} timed out after ${runtime.timeoutMs}ms of no stdout/stderr activity.`
-      );
-    }, Math.max(10, Math.min(1000, Math.floor(runtime.timeoutMs / 2))));
+        timedOut = true;
+        process.exitCode = 1;
+        terminate(
+          "SIGTERM",
+          `${command} timed out after ${runtime.timeoutMs}ms of no stdout/stderr activity.`
+        );
+      },
+      Math.max(10, Math.min(1000, Math.floor(runtime.timeoutMs / 2)))
+    );
 
     for (const signal of ["SIGINT", "SIGTERM"]) {
       const handler = () => {
@@ -555,13 +384,10 @@ function invoke(cli, prompt, options = {}) {
 
       logRawEvent(event);
 
-      const sessionId = provider.extractSessionId(event);
+      const sessionId = providerRuntime.extractSessionId(event);
       if (sessionId) persistSessionId(config, sessionId);
 
-      const events = provider.transform(event, {
-        agent: config.id || config.name,
-        invocationId,
-      });
+      const events = providerRuntime.transform(event, eventContext);
       for (const outEvent of events) emitEvent(outEvent);
     });
 
@@ -583,9 +409,31 @@ function invoke(cli, prompt, options = {}) {
       cleanupHandlers.forEach((cleanup) => cleanup());
       rl.close();
 
-      if (failedToStart) return;
+      const finishProvider = (outcome) => {
+        for (const outEvent of providerRuntime.finish(eventContext, outcome)) {
+          emitEvent(outEvent);
+        }
+      };
+
+      if (failedToStart) {
+        finishProvider({
+          terminal: true,
+          ok: false,
+          exitCode: code,
+          signal,
+          error: `Failed to start ${command}.`,
+        });
+        return;
+      }
 
       if (signal) {
+        finishProvider({
+          terminal: true,
+          ok: false,
+          exitCode: code,
+          signal,
+          error: `${command} was killed by signal ${signal}.`,
+        });
         console.error(`\n${command} process was killed by signal ${signal}`);
         process.exitCode = 1;
         return;
@@ -593,6 +441,7 @@ function invoke(cli, prompt, options = {}) {
 
       if (code !== 0) {
         if (!timedOut && attempt <= runtime.retries) {
+          finishProvider({ terminal: false });
           console.error(
             `${command} ${args.join(" ")} exited with code ${code}; retrying ${attempt}/${runtime.retries}.`
           );
@@ -604,19 +453,29 @@ function invoke(cli, prompt, options = {}) {
         if (stderrTail.trim()) {
           console.error(`Recent stderr:\n${stderrTail.trim()}`);
         }
+        finishProvider({
+          terminal: true,
+          ok: false,
+          exitCode: code,
+          signal: null,
+          error: stderrTail.trim() || `${command} exited with code ${code}.`,
+        });
         process.exitCode = code;
         return;
       }
 
-      if (timedOut) return;
+      if (timedOut) {
+        finishProvider({
+          terminal: true,
+          ok: false,
+          exitCode: code,
+          signal: null,
+          error: `${command} timed out.`,
+        });
+        return;
+      }
 
-      emitEvent({
-        type: "run.finished",
-        agent: config.id || config.name,
-        invocationId,
-        exitCode: 0,
-        signal: null,
-      });
+      finishProvider({ terminal: true, ok: true, exitCode: 0, signal: null });
     });
 
     return child;

@@ -1,4 +1,4 @@
-const { AGENTS } = require("./invoke-cli");
+const { AGENTS } = require("./catalog");
 
 const DEFAULT_MAX_A2A_DEPTH = 15;
 
@@ -19,9 +19,7 @@ function parseA2AMentions(text, currentAgentId) {
 
   // Step 1: Strip fenced code blocks (backtick and tilde)
   // This prevents @mentions inside code examples from triggering routing
-  const stripped = text
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/~~~[\s\S]*?~~~/g, "");
+  const stripped = text.replace(/```[\s\S]*?```/g, "").replace(/~~~[\s\S]*?~~~/g, "");
 
   // Step 2: Line-start matching for each agent's id and label
   // Frontend allows users to mention either @id or @label; agents may also

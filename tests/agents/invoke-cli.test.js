@@ -104,13 +104,16 @@ childProcess.spawn = function spawn(command, args, options = {}) {
     "utf8"
   );
 
-  const env = withoutAmbientProxy({
-    ...process.env,
-    PATH: `${tmpDir}${path.delimiter}${process.env.PATH}`,
-    NODE_OPTIONS: `--require ${hookPath}`,
-    INVOKE_SESSION_FILE: sessionPath,
-    ...extraEnv,
-  }, extraEnv);
+  const env = withoutAmbientProxy(
+    {
+      ...process.env,
+      PATH: `${tmpDir}${path.delimiter}${process.env.PATH}`,
+      NODE_OPTIONS: `--require ${hookPath}`,
+      INVOKE_SESSION_FILE: sessionPath,
+      ...extraEnv,
+    },
+    extraEnv
+  );
 
   const result = spawnSync(process.execPath, ["src/agents/invoke-cli.js", ...args], {
     cwd: path.resolve(__dirname, "../.."),
@@ -228,7 +231,9 @@ test("uses orchestrator agent for deepseek v4 pro", () => {
   );
   assert.match(
     parseOutputEvents(result.stdout)[1].text,
-    new RegExp(`${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/deepseek-v4-pro hello:undefined`)
+    new RegExp(
+      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/deepseek-v4-pro hello:undefined`
+    )
   );
   assert.equal(result.stderr, "");
 });
@@ -243,7 +248,9 @@ test("uses frontend agent for glm 5.2", () => {
   );
   assert.match(
     parseOutputEvents(result.stdout)[1].text,
-    new RegExp(`${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/glm-5.2 hello:undefined`)
+    new RegExp(
+      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/glm-5.2 hello:undefined`
+    )
   );
   assert.equal(result.stderr, "");
 });
@@ -258,7 +265,9 @@ test("uses planner agent for mimo v2.5 pro", () => {
   );
   assert.match(
     parseOutputEvents(result.stdout)[1].text,
-    new RegExp(`${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/mimo-v2\\.5-pro hello:undefined`)
+    new RegExp(
+      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/mimo-v2\\.5-pro hello:undefined`
+    )
   );
   assert.equal(result.stderr, "");
 });
@@ -323,29 +332,38 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
   const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
   const invocationId = "inv-1";
 
-  const started = runtime.transform({
-    type: "thread.started",
-    thread_id: "codex-session-1",
-  }, { invocationId, agent: "architect" });
-
-  const todo = runtime.transform({
-    type: "item.completed",
-    item: {
-      type: "todo_list",
-      items: [
-        { text: "Inspect parser", done: true },
-        { text: "Render timeline", done: false },
-      ],
+  const started = runtime.transform(
+    {
+      type: "thread.started",
+      thread_id: "codex-session-1",
     },
-  }, { invocationId, agent: "architect" });
+    { invocationId, agent: "architect" }
+  );
 
-  const text = runtime.transform({
-    type: "item.completed",
-    item: {
-      type: "agent_message",
-      text: "Hello from Codex",
+  const todo = runtime.transform(
+    {
+      type: "item.completed",
+      item: {
+        type: "todo_list",
+        items: [
+          { text: "Inspect parser", done: true },
+          { text: "Render timeline", done: false },
+        ],
+      },
     },
-  }, { invocationId, agent: "architect" });
+    { invocationId, agent: "architect" }
+  );
+
+  const text = runtime.transform(
+    {
+      type: "item.completed",
+      item: {
+        type: "agent_message",
+        text: "Hello from Codex",
+      },
+    },
+    { invocationId, agent: "architect" }
+  );
 
   assert.equal(started[0].type, "run.started");
   assert.equal(todo[0].type, "progress.update");
@@ -358,66 +376,82 @@ test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
   const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
   const ctx = { invocationId: "inv-tool", agent: "architect" };
 
-  const toolStarted = runtime.transform({
-    type: "item.started",
-    item: {
-      id: "call-1",
-      type: "mcp_tool_call",
-      tool: "web_search",
-      arguments: { query: "codex events" },
-      status: "in_progress",
-    },
-  }, ctx);
-
-  const subStarted = runtime.transform({
-    type: "item.started",
-    item: {
-      id: "call-2",
-      type: "mcp_tool_call",
-      tool: "task",
-      arguments: {
-        subagent_type: "explore",
-        prompt: "Find where session runtime is defined",
+  const toolStarted = runtime.transform(
+    {
+      type: "item.started",
+      item: {
+        id: "call-1",
+        type: "mcp_tool_call",
+        tool: "web_search",
+        arguments: { query: "codex events" },
+        status: "in_progress",
       },
-      status: "in_progress",
     },
-  }, ctx);
+    ctx
+  );
 
-  const subDone = runtime.transform({
-    type: "item.completed",
-    item: {
-      id: "call-2",
-      type: "mcp_tool_call",
-      tool: "task",
-      arguments: {
-        subagent_type: "explore",
-        prompt: "Find where session runtime is defined",
+  const subStarted = runtime.transform(
+    {
+      type: "item.started",
+      item: {
+        id: "call-2",
+        type: "mcp_tool_call",
+        tool: "task",
+        arguments: {
+          subagent_type: "explore",
+          prompt: "Find where session runtime is defined",
+        },
+        status: "in_progress",
       },
-      result: { summary: "Defined in public/session-runtime.js" },
-      status: "completed",
     },
-  }, ctx);
+    ctx
+  );
 
-  const subFailed = runtime.transform({
-    type: "item.completed",
-    item: {
-      id: "call-3",
-      type: "function_call",
-      name: "spawn_agent",
-      arguments: { agent: "general-purpose", prompt: "do work" },
-      error: "timeout",
-      status: "failed",
+  const subDone = runtime.transform(
+    {
+      type: "item.completed",
+      item: {
+        id: "call-2",
+        type: "mcp_tool_call",
+        tool: "task",
+        arguments: {
+          subagent_type: "explore",
+          prompt: "Find where session runtime is defined",
+        },
+        result: { summary: "Defined in public/session-runtime.js" },
+        status: "completed",
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  assert.deepEqual(toolStarted, [{
-    type: "tool.started",
-    agent: "architect",
-    invocationId: "inv-tool",
-    toolName: "web_search",
-    args: { query: "codex events" },
-    toolId: "call-1",
-  }]);
+  const subFailed = runtime.transform(
+    {
+      type: "item.completed",
+      item: {
+        id: "call-3",
+        type: "function_call",
+        name: "spawn_agent",
+        arguments: { agent: "general-purpose", prompt: "do work" },
+        error: "timeout",
+        status: "failed",
+      },
+    },
+    ctx
+  );
+
+  assert.deepEqual(
+    toolStarted.find((event) => event.type === "tool.started"),
+    {
+      type: "tool.started",
+      agent: "architect",
+      invocationId: "inv-tool",
+      toolName: "web_search",
+      args: { query: "codex events" },
+      toolId: "call-1",
+      state: "running",
+    }
+  );
 
   assert.equal(subStarted.length, 2);
   assert.equal(subStarted[0].type, "tool.started");
@@ -425,156 +459,262 @@ test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
   assert.equal(subStarted[1].name, "explore");
   assert.match(subStarted[1].task, /session runtime/);
 
-  assert.equal(subDone.some((e) => e.type === "subagent.completed"), true);
-  assert.equal(subDone.find((e) => e.type === "subagent.completed").summary.includes("session-runtime"), true);
+  assert.equal(
+    subDone.some((e) => e.type === "subagent.completed"),
+    true
+  );
+  assert.equal(
+    subDone.find((e) => e.type === "subagent.completed").summary.includes("session-runtime"),
+    true
+  );
 
-  assert.equal(subFailed.some((e) => e.type === "subagent.failed"), true);
+  assert.equal(
+    subFailed.some((e) => e.type === "subagent.failed"),
+    true
+  );
   assert.equal(subFailed.find((e) => e.type === "subagent.failed").error, "timeout");
 });
 
 test("opencode runtime maps tool/task parts into tool and subagent events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const runtime = createProviderRuntime({
+    name: "opencode",
+    id: "planner",
+    model: "mimo-v2.5-pro",
+  });
   const ctx = { invocationId: "inv-oc", agent: "planner" };
 
-  const started = runtime.transform({
-    type: "message.part.updated",
-    part: {
-      id: "part-1",
-      type: "tool",
-      tool: "task",
-      status: "running",
-      arguments: { subagent_type: "explore", prompt: "scan providers" },
+  const started = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: {
+        id: "part-1",
+        type: "tool",
+        tool: "task",
+        status: "running",
+        arguments: { subagent_type: "explore", prompt: "scan providers" },
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  const done = runtime.transform({
-    type: "message.part.updated",
-    part: {
-      id: "part-1",
-      type: "tool",
-      tool: "task",
-      status: "completed",
-      arguments: { subagent_type: "explore", prompt: "scan providers" },
-      output: "found codex + opencode",
+  const done = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: {
+        id: "part-1",
+        type: "tool",
+        tool: "task",
+        status: "completed",
+        arguments: { subagent_type: "explore", prompt: "scan providers" },
+        output: "found codex + opencode",
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  assert.equal(started.some((e) => e.type === "tool.started"), true);
-  assert.equal(started.some((e) => e.type === "subagent.started"), true);
-  assert.equal(done.some((e) => e.type === "tool.finished"), true);
-  assert.equal(done.some((e) => e.type === "subagent.completed"), true);
+  assert.equal(
+    started.some((e) => e.type === "tool.started"),
+    true
+  );
+  assert.equal(
+    started.some((e) => e.type === "subagent.started"),
+    true
+  );
+  assert.equal(
+    done.some((e) => e.type === "tool.finished"),
+    true
+  );
+  assert.equal(
+    done.some((e) => e.type === "subagent.completed"),
+    true
+  );
 });
 
 test("opencode runtime maps real tool_use events from current CLI schema", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const runtime = createProviderRuntime({
+    name: "opencode",
+    id: "planner",
+    model: "mimo-v2.5-pro",
+  });
   const ctx = { invocationId: "inv-oc-tool-use", agent: "planner" };
 
-  const events = runtime.transform({
-    type: "tool_use",
-    timestamp: 1783690684796,
-    sessionID: "ses_sample",
-    part: {
-      type: "tool",
-      tool: "task",
-      callID: "call_424f09b8b6e04590b7a594f5",
-      state: {
-        status: "completed",
-        input: {
-          description: "查看git状态和最近提交",
-          subagent_type: "general",
-          prompt: "请执行 git status 与 git log",
-        },
-        output: "<task_result>git status ok</task_result>",
-        title: "查看git状态和最近提交",
-        time: { start: 1, end: 2 },
-      },
-      id: "prt_sample",
+  const events = runtime.transform(
+    {
+      type: "tool_use",
+      timestamp: 1783690684796,
       sessionID: "ses_sample",
-      messageID: "msg_sample",
+      part: {
+        type: "tool",
+        tool: "task",
+        callID: "call_424f09b8b6e04590b7a594f5",
+        state: {
+          status: "completed",
+          input: {
+            description: "查看git状态和最近提交",
+            subagent_type: "general",
+            prompt: "请执行 git status 与 git log",
+          },
+          output: "<task_result>git status ok</task_result>",
+          title: "查看git状态和最近提交",
+          time: { start: 1, end: 2 },
+        },
+        id: "prt_sample",
+        sessionID: "ses_sample",
+        messageID: "msg_sample",
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  assert.equal(events.some((e) => e.type === "tool.started" && e.toolName === "task"), true);
-  assert.equal(events.some((e) => e.type === "tool.finished" && e.status === "ok"), true);
-  assert.equal(events.some((e) => e.type === "subagent.started" && e.name === "general"), true);
-  assert.equal(events.some((e) => e.type === "subagent.completed"), true);
-  assert.equal(events.find((e) => e.type === "tool.started").toolId, "call_424f09b8b6e04590b7a594f5");
+  assert.equal(
+    events.some((e) => e.type === "tool.started" && e.toolName === "task"),
+    true
+  );
+  assert.equal(
+    events.some((e) => e.type === "tool.finished" && e.status === "ok"),
+    true
+  );
+  assert.equal(
+    events.some((e) => e.type === "subagent.started" && e.name === "general"),
+    true
+  );
+  assert.equal(
+    events.some((e) => e.type === "subagent.completed"),
+    true
+  );
+  assert.equal(
+    events.find((e) => e.type === "tool.started").toolId,
+    "call_424f09b8b6e04590b7a594f5"
+  );
   assert.match(events.find((e) => e.type === "subagent.completed").summary, /git status ok/);
 });
 
 test("opencode runtime maps read/bash tools and nests state.input", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const runtime = createProviderRuntime({
+    name: "opencode",
+    id: "planner",
+    model: "mimo-v2.5-pro",
+  });
   const ctx = { invocationId: "inv-oc-tools", agent: "planner" };
 
-  const readStarted = runtime.transform({
-    type: "message.part.updated",
-    part: {
-      id: "t-read",
-      type: "tool",
-      tool: "read",
-      state: {
-        status: "running",
-        input: { path: "public/app.js" },
+  const readStarted = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: {
+        id: "t-read",
+        type: "tool",
+        tool: "read",
+        state: {
+          status: "running",
+          input: { path: "public/app.js" },
+        },
       },
     },
-  }, ctx);
+    ctx
+  );
 
-  const bashDone = runtime.transform({
-    type: "message.part.updated",
-    part: {
-      id: "t-bash",
-      type: "tool",
-      tool: "bash",
-      status: "completed",
-      arguments: { command: "npm test" },
-      output: "ok",
+  const bashDone = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: {
+        id: "t-bash",
+        type: "tool",
+        tool: "bash",
+        status: "completed",
+        arguments: { command: "npm test" },
+        output: "ok",
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  assert.equal(readStarted.some((e) => e.type === "tool.started" && e.toolName === "read"), true);
+  assert.equal(
+    readStarted.some((e) => e.type === "tool.started" && e.toolName === "read"),
+    true
+  );
   assert.equal(readStarted.find((e) => e.type === "tool.started").args.path, "public/app.js");
-  assert.equal(bashDone.some((e) => e.type === "tool.started" && e.toolName === "bash"), true);
-  assert.equal(bashDone.some((e) => e.type === "command.started" && e.command === "npm test"), true);
-  assert.equal(bashDone.some((e) => e.type === "command.finished" && e.exitCode === 0), true);
-  assert.equal(bashDone.some((e) => e.type === "tool.finished"), true);
+  assert.equal(
+    bashDone.some((e) => e.type === "tool.started" && e.toolName === "bash"),
+    true
+  );
+  assert.equal(
+    bashDone.some((e) => e.type === "command.started" && e.command === "npm test"),
+    true
+  );
+  assert.equal(
+    bashDone.some((e) => e.type === "command.finished" && e.exitCode === 0),
+    true
+  );
+  assert.equal(
+    bashDone.some((e) => e.type === "tool.finished"),
+    true
+  );
 });
 
 test("opencode runtime emits a single run.started and step progress updates", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const runtime = createProviderRuntime({
+    name: "opencode",
+    id: "planner",
+    model: "mimo-v2.5-pro",
+  });
   const ctx = { invocationId: "inv-oc-steps", agent: "planner" };
 
-  const firstSession = runtime.transform({
-    type: "session.updated",
-    session: { id: "ses_steps" },
-  }, ctx);
-  const secondSession = runtime.transform({
-    type: "session.updated",
-    session: { id: "ses_steps" },
-  }, ctx);
-  const step0 = runtime.transform({
-    type: "step_start",
-    sessionID: "ses_steps",
-    step: 0,
-  }, ctx);
-  const step1 = runtime.transform({
-    type: "step_start",
-    sessionID: "ses_steps",
-    step: 1,
-  }, ctx);
-  const step1Again = runtime.transform({
-    type: "step_start",
-    sessionID: "ses_steps",
-    step: 1,
-  }, ctx);
+  const firstSession = runtime.transform(
+    {
+      type: "session.updated",
+      session: { id: "ses_steps" },
+    },
+    ctx
+  );
+  const secondSession = runtime.transform(
+    {
+      type: "session.updated",
+      session: { id: "ses_steps" },
+    },
+    ctx
+  );
+  const step0 = runtime.transform(
+    {
+      type: "step_start",
+      sessionID: "ses_steps",
+      step: 0,
+    },
+    ctx
+  );
+  const step1 = runtime.transform(
+    {
+      type: "step_start",
+      sessionID: "ses_steps",
+      step: 1,
+    },
+    ctx
+  );
+  const step1Again = runtime.transform(
+    {
+      type: "step_start",
+      sessionID: "ses_steps",
+      step: 1,
+    },
+    ctx
+  );
 
-  assert.deepEqual(firstSession.map((e) => e.type), ["run.started"]);
+  assert.deepEqual(
+    firstSession.map((e) => e.type),
+    ["run.started"]
+  );
   assert.deepEqual(secondSession, []);
-  assert.equal(step0.some((e) => e.type === "run.started"), false);
-  assert.equal(step0.some((e) => e.type === "progress.update"), true);
+  assert.equal(
+    step0.some((e) => e.type === "run.started"),
+    false
+  );
+  assert.equal(
+    step0.some((e) => e.type === "progress.update"),
+    true
+  );
   assert.match(step0.find((e) => e.type === "progress.update").items[0].text, /第 0 步/);
   assert.equal(step1.find((e) => e.type === "progress.update").items[0].text, "第 1 步");
   assert.deepEqual(step1Again, []);
@@ -585,126 +725,180 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
   const ctx = { invocationId: "inv-1b", agent: "architect" };
 
-  const commandStarted = runtime.transform({
-    type: "item.started",
-    item: {
-      id: "item-1",
-      type: "command_execution",
-      command: "Get-Content -Raw skill.md",
-      status: "in_progress",
+  const commandStarted = runtime.transform(
+    {
+      type: "item.started",
+      item: {
+        id: "item-1",
+        type: "command_execution",
+        command: "Get-Content -Raw skill.md",
+        status: "in_progress",
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  const commandFinished = runtime.transform({
-    type: "item.completed",
-    item: {
-      id: "item-1",
-      type: "command_execution",
-      command: "Get-Content -Raw skill.md",
-      aggregated_output: "skill body",
-      exit_code: 0,
-      status: "completed",
+  const commandFinished = runtime.transform(
+    {
+      type: "item.completed",
+      item: {
+        id: "item-1",
+        type: "command_execution",
+        command: "Get-Content -Raw skill.md",
+        aggregated_output: "skill body",
+        exit_code: 0,
+        status: "completed",
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  const fileChanged = runtime.transform({
-    type: "item.completed",
-    item: {
-      id: "item-2",
-      type: "file_change",
-      changes: [
-        { path: "C:\\worktree\\temp.txt", kind: "add" },
-      ],
-      status: "completed",
+  const fileChanged = runtime.transform(
+    {
+      type: "item.completed",
+      item: {
+        id: "item-2",
+        type: "file_change",
+        changes: [{ path: "C:\\worktree\\temp.txt", kind: "add" }],
+        status: "completed",
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  const transportError = runtime.transform({
-    type: "error",
-    message: "Reconnecting... 2/5 (request timed out)",
-  }, ctx);
-
-  const itemError = runtime.transform({
-    type: "item.completed",
-    item: {
-      id: "item-3",
+  const transportError = runtime.transform(
+    {
       type: "error",
-      message: "Falling back from WebSockets to HTTPS transport. request timed out",
+      message: "Reconnecting... 2/5 (request timed out)",
     },
-  }, ctx);
+    ctx
+  );
 
-  assert.deepEqual(commandStarted, [{
-    type: "command.started",
-    agent: "architect",
-    invocationId: "inv-1b",
-    command: "Get-Content -Raw skill.md",
-  }]);
-  assert.deepEqual(commandFinished, [{
-    type: "command.finished",
-    agent: "architect",
-    invocationId: "inv-1b",
-    command: "Get-Content -Raw skill.md",
-    output: "skill body",
-    exitCode: 0,
-  }]);
-  assert.deepEqual(fileChanged, [{
-    type: "file.changed",
-    agent: "architect",
-    invocationId: "inv-1b",
-    path: "C:\\worktree\\temp.txt",
-    changeType: "add",
-  }]);
-  assert.deepEqual(transportError, [{
-    type: "stderr",
-    agent: "architect",
-    invocationId: "inv-1b",
-    text: "Reconnecting... 2/5 (request timed out)",
-  }]);
-  assert.deepEqual(itemError, [{
-    type: "stderr",
-    agent: "architect",
-    invocationId: "inv-1b",
-    text: "Falling back from WebSockets to HTTPS transport. request timed out",
-  }]);
+  const itemError = runtime.transform(
+    {
+      type: "item.completed",
+      item: {
+        id: "item-3",
+        type: "error",
+        message: "Falling back from WebSockets to HTTPS transport. request timed out",
+      },
+    },
+    ctx
+  );
+
+  assert.deepEqual(
+    commandStarted.find((event) => event.type === "command.started"),
+    {
+      type: "command.started",
+      agent: "architect",
+      invocationId: "inv-1b",
+      command: "Get-Content -Raw skill.md",
+    }
+  );
+  assert.deepEqual(commandFinished, [
+    {
+      type: "command.finished",
+      agent: "architect",
+      invocationId: "inv-1b",
+      command: "Get-Content -Raw skill.md",
+      output: "skill body",
+      exitCode: 0,
+    },
+  ]);
+  assert.deepEqual(fileChanged, [
+    {
+      type: "file.changed",
+      agent: "architect",
+      invocationId: "inv-1b",
+      path: "C:\\worktree\\temp.txt",
+      changeType: "add",
+    },
+  ]);
+  assert.deepEqual(transportError, [
+    {
+      type: "stderr",
+      agent: "architect",
+      invocationId: "inv-1b",
+      text: "Reconnecting... 2/5 (request timed out)",
+    },
+  ]);
+  assert.deepEqual(itemError, [
+    {
+      type: "stderr",
+      agent: "architect",
+      invocationId: "inv-1b",
+      text: "Falling back from WebSockets to HTTPS transport. request timed out",
+    },
+  ]);
 });
 
 test("opencode runtime emits incremental text deltas from repeated parts", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const runtime = createProviderRuntime({
+    name: "opencode",
+    id: "planner",
+    model: "mimo-v2.5-pro",
+  });
   const ctx = { invocationId: "inv-2", agent: "planner" };
 
-  const first = runtime.transform({
-    type: "message.part.updated",
-    part: { id: "p1", type: "text", text: "hello" },
-  }, ctx);
+  const first = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: { id: "p1", type: "text", text: "hello" },
+    },
+    ctx
+  );
 
-  const second = runtime.transform({
-    type: "message.part.updated",
-    part: { id: "p1", type: "text", text: "hello world" },
-  }, ctx);
+  const second = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: { id: "p1", type: "text", text: "hello world" },
+    },
+    ctx
+  );
 
-  assert.deepEqual(first.map((event) => event.text), ["hello"]);
-  assert.deepEqual(second.map((event) => event.text), [" world"]);
+  assert.deepEqual(
+    first.filter((event) => event.type === "text.delta").map((event) => event.text),
+    ["hello"]
+  );
+  assert.deepEqual(
+    second.map((event) => event.text),
+    [" world"]
+  );
 });
 
 test("opencode runtime reads text deltas from properties.part fallback", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const runtime = createProviderRuntime({
+    name: "opencode",
+    id: "planner",
+    model: "mimo-v2.5-pro",
+  });
   const ctx = { invocationId: "inv-3", agent: "planner" };
 
-  const events = runtime.transform({
-    type: "message.part.updated",
-    properties: {
-      part: { id: "p2", type: "text", text: "fallback text" },
+  const events = runtime.transform(
+    {
+      type: "message.part.updated",
+      properties: {
+        part: { id: "p2", type: "text", text: "fallback text" },
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  assert.deepEqual(events.map((event) => event.text), ["fallback text"]);
+  assert.deepEqual(
+    events.filter((event) => event.type === "text.delta").map((event) => event.text),
+    ["fallback text"]
+  );
 });
 
 test("opencode runtime extracts sessionID and text events from current cli schema", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const runtime = createProviderRuntime({
+    name: "opencode",
+    id: "planner",
+    model: "mimo-v2.5-pro",
+  });
   const ctx = { invocationId: "inv-3b", agent: "planner" };
 
   const rawStart = {
@@ -725,49 +919,74 @@ test("opencode runtime extracts sessionID and text events from current cli schem
   // First step may also open the run, but subsequent progress is not another run.started.
   assert.equal(started.filter((e) => e.type === "run.started").length, 1);
   assert.equal(started.find((e) => e.type === "run.started").sessionId, "ses_current_schema");
-  assert.equal(started.some((e) => e.type === "progress.update"), true);
-  assert.deepEqual(text.map((event) => event.text), ["Hello from current schema"]);
+  assert.equal(
+    started.some((e) => e.type === "progress.update"),
+    true
+  );
+  assert.deepEqual(
+    text.map((event) => event.text),
+    ["Hello from current schema"]
+  );
 });
 
 test("opencode runtime maps reasoning events (from --thinking) to thinking.delta", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "opencode", id: "planner", model: "mimo-v2.5-pro" });
+  const runtime = createProviderRuntime({
+    name: "opencode",
+    id: "planner",
+    model: "mimo-v2.5-pro",
+  });
   const ctx = { invocationId: "inv-think", agent: "planner" };
 
   // Real CLI shape observed with: opencode run --format json --thinking
-  const full = runtime.transform({
-    type: "reasoning",
-    sessionID: "ses_think",
-    part: {
-      id: "prt_reason_1",
+  const full = runtime.transform(
+    {
       type: "reasoning",
-      text: "The user wants exactly one word.",
+      sessionID: "ses_think",
+      part: {
+        id: "prt_reason_1",
+        type: "reasoning",
+        text: "The user wants exactly one word.",
+      },
     },
-  }, ctx);
+    ctx
+  );
 
-  assert.equal(full.length, 1);
-  assert.equal(full[0].type, "thinking.delta");
-  assert.equal(full[0].text, "The user wants exactly one word.");
-  assert.equal(full[0].agent, "planner");
-  assert.equal(full[0].invocationId, "inv-think");
+  const thinking = full.find((event) => event.type === "thinking.delta");
+  assert.ok(thinking);
+  assert.equal(thinking.text, "The user wants exactly one word.");
+  assert.equal(thinking.agent, "planner");
+  assert.equal(thinking.invocationId, "inv-think");
 
   // Streaming growth on the same part id should emit only the delta suffix.
-  const more = runtime.transform({
-    type: "message.part.updated",
-    part: {
-      id: "prt_reason_1",
-      type: "reasoning",
-      text: "The user wants exactly one word. Keep it short.",
+  const more = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: {
+        id: "prt_reason_1",
+        type: "reasoning",
+        text: "The user wants exactly one word. Keep it short.",
+      },
     },
-  }, ctx);
-  assert.deepEqual(more.map((e) => e.type), ["thinking.delta"]);
-  assert.deepEqual(more.map((e) => e.text), [" Keep it short."]);
+    ctx
+  );
+  assert.deepEqual(
+    more.map((e) => e.type),
+    ["thinking.delta"]
+  );
+  assert.deepEqual(
+    more.map((e) => e.text),
+    [" Keep it short."]
+  );
 
   // Without text body, no event.
-  const empty = runtime.transform({
-    type: "reasoning",
-    part: { id: "prt_empty", type: "reasoning" },
-  }, ctx);
+  const empty = runtime.transform(
+    {
+      type: "reasoning",
+      part: { id: "prt_empty", type: "reasoning" },
+    },
+    ctx
+  );
   assert.deepEqual(empty, []);
 });
 
@@ -784,20 +1003,32 @@ test("codex runtime reads text from content and properties.content fallbacks", (
   const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
   const ctx = { invocationId: "inv-4", agent: "architect" };
 
-  const direct = runtime.transform({
-    type: "response.output_text.delta",
-    content: { type: "text", text: "direct content" },
-  }, ctx);
-
-  const nested = runtime.transform({
-    type: "response.output_text.delta",
-    properties: {
-      content: { type: "text", text: "nested content" },
+  const direct = runtime.transform(
+    {
+      type: "response.output_text.delta",
+      content: { type: "text", text: "direct content" },
     },
-  }, ctx);
+    ctx
+  );
 
-  assert.deepEqual(direct.map((event) => event.text), ["direct content"]);
-  assert.deepEqual(nested.map((event) => event.text), ["nested content"]);
+  const nested = runtime.transform(
+    {
+      type: "response.output_text.delta",
+      properties: {
+        content: { type: "text", text: "nested content" },
+      },
+    },
+    ctx
+  );
+
+  assert.deepEqual(
+    direct.filter((event) => event.type === "text.delta").map((event) => event.text),
+    ["direct content"]
+  );
+  assert.deepEqual(
+    nested.map((event) => event.text),
+    ["nested content"]
+  );
 });
 
 test("extracts codex agent message events", () => {
@@ -822,8 +1053,9 @@ test("resumes remembered codex session", () => {
 
   assert.equal(result.status, 0);
   const events = parseOutputEvents(result.stdout);
-  assert.equal(events[0].type, "text.delta");
-  assert.match(events[0].text, /exec resume --json codex-session-previous hello again/);
+  const text = events.find((event) => event.type === "text.delta");
+  assert.ok(text);
+  assert.match(text.text, /exec resume --json codex-session-previous hello again/);
   assert.equal(result.stderr, "");
 });
 
@@ -834,10 +1066,13 @@ test("resumes remembered opencode session", () => {
 
   assert.equal(result.status, 0);
   const events = parseOutputEvents(result.stdout);
-  assert.equal(events[0].type, "text.delta");
+  const text = events.find((event) => event.type === "text.delta");
+  assert.ok(text);
   assert.match(
-    events[0].text,
-    new RegExp(`${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/deepseek-v4-pro --session opencode-session-previous hello again`)
+    text.text,
+    new RegExp(
+      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/deepseek-v4-pro --session opencode-session-previous hello again`
+    )
   );
   assert.equal(result.stderr, "");
 });
@@ -936,6 +1171,10 @@ childProcess.spawn = function spawn() {
   );
 
   assert.equal(result.status, 1);
+  assert.equal(
+    parseOutputEvents(result.stdout).some((event) => event.type === "run.failed"),
+    true
+  );
   assert.match(result.stderr, /timed out after 20ms of no stdout\/stderr activity/);
   assert.match(result.stderr, /killed:SIGTERM/);
 });
@@ -975,8 +1214,9 @@ childProcess.spawn = function spawn() {
 
   assert.equal(result.status, 0);
   const events = parseOutputEvents(result.stdout);
-  assert.equal(events[0].type, "text.delta");
-  assert.equal(events[0].text, "done");
+  const text = events.find((event) => event.type === "text.delta");
+  assert.ok(text);
+  assert.equal(text.text, "done");
   assert.match(result.stderr, /thinking/);
   assert.doesNotMatch(result.stderr, /unexpected-kill/);
 });
@@ -1022,8 +1262,14 @@ childProcess.spawn = function spawn() {
 
   assert.equal(result.status, 0);
   const events = parseOutputEvents(result.stdout);
-  assert.equal(events[0].type, "text.delta");
-  assert.equal(events[0].text, "retry-success");
+  const text = events.find((event) => event.type === "text.delta");
+  assert.ok(text);
+  assert.equal(text.text, "retry-success");
+  assert.equal(events.filter((event) => event.type === "run.finished").length, 1);
+  assert.equal(
+    events.some((event) => event.type === "run.failed"),
+    false
+  );
   assert.match(result.stderr, /temporary failure/);
   assert.match(result.stderr, /retrying 1\/1/);
 });

@@ -9,7 +9,11 @@
   function resolveProcessHelpers() {
     if (globalScope.MessageProcessHelpers) return globalScope.MessageProcessHelpers;
     if (typeof module !== "undefined" && module.exports && typeof require === "function") {
-      try { return require("./message-process-helpers.js"); } catch { /* ignore */ }
+      try {
+        return require("./message-process-helpers.js");
+      } catch {
+        /* ignore */
+      }
     }
     return null;
   }
@@ -18,7 +22,11 @@
     const pack = globalScope.Locale || globalScope.LocaleZhCN;
     if (pack && pack.locale && pack.locale.message) return pack.locale;
     if (typeof module !== "undefined" && module.exports && typeof require === "function") {
-      try { return require("./locale-zh-CN.js").locale; } catch { /* ignore */ }
+      try {
+        return require("./locale-zh-CN.js").locale;
+      } catch {
+        /* ignore */
+      }
     }
     return {
       badge: { thinking: "思考中", writing: "输出中", error: "异常退出" },
@@ -111,21 +119,31 @@
     function copyToClipboard(text, btn, okText = "✓", failText = "Failed") {
       const orig = btn.textContent;
       const html = btn && btn.dataset && btn.dataset.copyHtml;
-      const write = writeClipboard({
-        clipboard: typeof getClipboard === "function" ? getClipboard() : navigator.clipboard,
-        ClipboardItem: ClipboardItem || (typeof window !== "undefined" ? window.ClipboardItem : undefined),
-      }, {
-        text,
-        html,
-      });
-      return write.then(() => {
-        btn.textContent = okText;
-        btn.classList.add("copied");
-      }).catch(() => {
-        btn.textContent = failText;
-      }).finally(() => {
-        setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1200);
-      });
+      const write = writeClipboard(
+        {
+          clipboard: typeof getClipboard === "function" ? getClipboard() : navigator.clipboard,
+          ClipboardItem:
+            ClipboardItem || (typeof window !== "undefined" ? window.ClipboardItem : undefined),
+        },
+        {
+          text,
+          html,
+        }
+      );
+      return write
+        .then(() => {
+          btn.textContent = okText;
+          btn.classList.add("copied");
+        })
+        .catch(() => {
+          btn.textContent = failText;
+        })
+        .finally(() => {
+          setTimeout(() => {
+            btn.textContent = orig;
+            btn.classList.remove("copied");
+          }, 1200);
+        });
     }
 
     function makeSetBadge(badgeEl) {
@@ -138,15 +156,13 @@
         badgeEl.style.display = "";
         const configs = {
           thinking: { cls: "badge-thinking", text: badgeText.thinking || "思考中", dot: true },
-          writing:  { cls: "badge-writing",  text: badgeText.writing || "输出中", dot: true },
-          done:     { cls: "badge-done",     text: "",        dot: false },
-          error:    { cls: "badge-error",    text: badgeText.error || "异常退出", dot: false },
+          writing: { cls: "badge-writing", text: badgeText.writing || "输出中", dot: true },
+          done: { cls: "badge-done", text: "", dot: false },
+          error: { cls: "badge-error", text: badgeText.error || "异常退出", dot: false },
         };
         const cfg = configs[badgeState] || configs.thinking;
         badgeEl.className = "msg-badge " + cfg.cls;
-        badgeEl.innerHTML = cfg.dot
-          ? `<span class="badge-dot"></span>${cfg.text}`
-          : cfg.text;
+        badgeEl.innerHTML = cfg.dot ? `<span class="badge-dot"></span>${cfg.text}` : cfg.text;
       };
     }
 
@@ -273,11 +289,12 @@
       if (summary) {
         const chars = text.length;
         const base = msg.thinkingProcess || "思考过程";
-        summary.textContent = chars > 0
-          ? (typeof msg.thinkingProcessChars === "function"
-            ? msg.thinkingProcessChars(chars)
-            : `${base} · ${chars} 字`)
-          : base;
+        summary.textContent =
+          chars > 0
+            ? typeof msg.thinkingProcessChars === "function"
+              ? msg.thinkingProcessChars(chars)
+              : `${base} · ${chars} 字`
+            : base;
       }
     }
 
@@ -311,14 +328,16 @@
       }
       const list = ensureProgressList(liveItem);
       if (!list) return;
-      list.replaceChildren(...listItems.map((item, index) => {
-        const li = document.createElement("li");
-        const done = progressItemDone(item);
-        const active = !done && listItems.findIndex((x) => !progressItemDone(x)) === index;
-        li.className = done ? "is-done" : (active ? "is-active" : "is-pending");
-        li.textContent = progressItemLabel(item) || "(step)";
-        return li;
-      }));
+      list.replaceChildren(
+        ...listItems.map((item, index) => {
+          const li = document.createElement("li");
+          const done = progressItemDone(item);
+          const active = !done && listItems.findIndex((x) => !progressItemDone(x)) === index;
+          li.className = done ? "is-done" : active ? "is-active" : "is-pending";
+          li.textContent = progressItemLabel(item) || "(step)";
+          return li;
+        })
+      );
     }
 
     function showThinking(agent, sessionId) {
@@ -351,7 +370,9 @@
     }
 
     function trimLiveStatus(text, max = 140) {
-      const singleLine = String(text || "").replace(/\s+/g, " ").trim();
+      const singleLine = String(text || "")
+        .replace(/\s+/g, " ")
+        .trim();
       if (!singleLine) return "";
       return singleLine.length > max ? `${singleLine.slice(0, max - 1)}…` : singleLine;
     }
@@ -360,25 +381,24 @@
       if (!event || !event.type) return "";
 
       if (event.type === "run.started") return "正在执行…";
-      if (event.type === "command.started") return `执行命令: ${trimLiveStatus(event.command || "")}`;
-      if (event.type === "command.finished") return `命令完成: ${trimLiveStatus(event.command || "")}`;
+      if (event.type === "run.failed") return trimLiveStatus(event.error || "执行失败");
+      if (event.type === "command.started")
+        return `执行命令: ${trimLiveStatus(event.command || "")}`;
+      if (event.type === "command.finished")
+        return `命令完成: ${trimLiveStatus(event.command || "")}`;
       if (event.type === "file.changed") return `修改文件: ${trimLiveStatus(event.path || "")}`;
       if (event.type === "stderr") return trimLiveStatus(event.text || "");
       if (event.type === "tool.started") {
         const args = event.args && typeof event.args === "object" ? event.args : {};
         const detail = args.path || args.file || args.pattern || args.command || args.cmd || "";
-        const label = detail
-          ? `${event.toolName || "tool"} ${detail}`
-          : (event.toolName || "tool");
+        const label = detail ? `${event.toolName || "tool"} ${detail}` : event.toolName || "tool";
         return `工具: ${trimLiveStatus(label)}`;
       }
       if (event.type === "tool.finished") {
         const status = event.status === "error" ? "失败" : "完成";
         const args = event.args && typeof event.args === "object" ? event.args : {};
         const detail = args.path || args.file || args.pattern || args.command || args.cmd || "";
-        const label = detail
-          ? `${event.toolName || "tool"} ${detail}`
-          : (event.toolName || "tool");
+        const label = detail ? `${event.toolName || "tool"} ${detail}` : event.toolName || "tool";
         return `工具${status}: ${trimLiveStatus(label)}`;
       }
       if (event.type === "subagent.started") {
@@ -410,8 +430,9 @@
 
     function updateProcessDetailsLabel(details) {
       if (!details) return;
-      const summary = details.querySelector(":scope > .msg-process-summary")
-        || details.querySelector(".msg-process-summary");
+      const summary =
+        details.querySelector(":scope > .msg-process-summary") ||
+        details.querySelector(".msg-process-summary");
       if (!summary) return;
       const panel = details.querySelector(".live-subagents");
       const n = countProcessSteps(panel);
@@ -547,13 +568,18 @@
         statusText = msg.running || "运行中";
       }
       const key = `subagent:${event.subagentId || event.toolId || event.name || "subagent"}`;
-      upsertProcessRow(agent, key, {
-        name: event.name || event.toolName || "subagent",
-        status,
-        statusText,
-        task: truncateDisplay(event.task || "", 120),
-        summary: processSummaryFromEvent(event),
-      }, sessionId);
+      upsertProcessRow(
+        agent,
+        key,
+        {
+          name: event.name || event.toolName || "subagent",
+          status,
+          statusText,
+          task: truncateDisplay(event.task || "", 120),
+          summary: processSummaryFromEvent(event),
+        },
+        sessionId
+      );
     }
 
     function upsertLiveTool(agent, event, sessionId) {
@@ -564,20 +590,24 @@
       let status = "running";
       let statusText = msg.running || "运行中";
       if (event.type === "tool.finished" || event.type === "command.finished") {
-        const failed = event.status === "error" || (event.exitCode !== undefined && event.exitCode !== 0);
+        const failed =
+          event.status === "error" || (event.exitCode !== undefined && event.exitCode !== 0);
         status = failed ? "error" : "done";
-        statusText = failed ? (msg.failed || "失败") : (msg.done || "完成");
+        statusText = failed ? msg.failed || "失败" : msg.done || "完成";
       }
-      const name = event.type.startsWith("command.")
-        ? "command"
-        : (event.toolName || "tool");
-      upsertProcessRow(agent, id, {
-        name,
-        status,
-        statusText,
-        task: detail || (event.toolName || ""),
-        summary: processSummaryFromEvent(event),
-      }, sessionId);
+      const name = event.type.startsWith("command.") ? "command" : event.toolName || "tool";
+      upsertProcessRow(
+        agent,
+        id,
+        {
+          name,
+          status,
+          statusText,
+          task: detail || event.toolName || "",
+          summary: processSummaryFromEvent(event),
+        },
+        sessionId
+      );
     }
 
     function setLivePending(agent, text, sessionId) {
@@ -676,9 +706,10 @@
 
     function ensureLiveRun(event, sessionId) {
       const rt = sessionRuntime(sessionId);
-      const invocationId = event && event.invocationId
-        ? event.invocationId
-        : rt.liveInvocations.get(event.agent) || event.agent;
+      const invocationId =
+        event && event.invocationId
+          ? event.invocationId
+          : rt.liveInvocations.get(event.agent) || event.agent;
       if (!rt.liveRuns.has(invocationId)) {
         rt.liveRuns.set(invocationId, {
           invocationId,
@@ -750,10 +781,10 @@
       }
 
       if (
-        event.type === "subagent.started"
-        || event.type === "subagent.progress"
-        || event.type === "subagent.completed"
-        || event.type === "subagent.failed"
+        event.type === "subagent.started" ||
+        event.type === "subagent.progress" ||
+        event.type === "subagent.completed" ||
+        event.type === "subagent.failed"
       ) {
         if (!Array.isArray(run.subagents)) run.subagents = [];
         run.subagents.push(event);
@@ -786,6 +817,13 @@
       if (event.type === "run.finished") {
         run.status = event.exitCode === 0 ? "done" : "error";
         if (run.status === "error") sessionRuntime(sid).status = "error";
+        return;
+      }
+
+      if (event.type === "run.failed") {
+        run.status = "error";
+        if (event.error) run.stderr.push(event.error);
+        sessionRuntime(sid).status = "error";
       }
     }
 
@@ -831,8 +869,12 @@
         const done = evt.type === "subagent.completed" || failed;
         appendTraceRow(panel, {
           name: evt.name || evt.toolName || "subagent",
-          status: failed ? "error" : (done ? "done" : "running"),
-          statusText: failed ? (msg.failed || "失败") : (done ? (msg.success || "成功") : (msg.running || "运行中")),
+          status: failed ? "error" : done ? "done" : "running",
+          statusText: failed
+            ? msg.failed || "失败"
+            : done
+              ? msg.success || "成功"
+              : msg.running || "运行中",
           task: truncateDisplay(evt.task || "", 100),
           summary: processSummaryFromEvent(evt),
         });
@@ -846,22 +888,28 @@
         const done = evt.type === "tool.finished" || evt.result != null || evt.output != null;
         appendTraceRow(panel, {
           name: evt.toolName || "tool",
-          status: failed ? "error" : (done ? "done" : "running"),
-          statusText: failed ? (msg.failed || "失败") : (done ? (msg.done || "完成") : (msg.running || "运行中")),
+          status: failed ? "error" : done ? "done" : "running",
+          statusText: failed
+            ? msg.failed || "失败"
+            : done
+              ? msg.done || "完成"
+              : msg.running || "运行中",
           task: detail,
           // Final cards stay compact: only errors get a summary line.
           summary: failed ? processSummaryFromEvent(evt) : "",
         });
       }
 
-      const toolDetails = new Set([...toolById.values()].map((t) => toolDetailFromEvent(t)).filter(Boolean));
+      const toolDetails = new Set(
+        [...toolById.values()].map((t) => toolDetailFromEvent(t)).filter(Boolean)
+      );
       for (const evt of commandByKey.values()) {
         if (toolDetails.has(evt.command)) continue;
         const failed = evt.exitCode !== undefined && evt.exitCode !== 0;
         appendTraceRow(panel, {
           name: "command",
           status: failed ? "error" : "done",
-          statusText: failed ? (msg.failed || "失败") : (msg.done || "完成"),
+          statusText: failed ? msg.failed || "失败" : msg.done || "完成",
           task: truncateDisplay(evt.command, 120),
           summary: failed ? processSummaryFromEvent(evt) : "",
         });
@@ -989,9 +1037,10 @@
               _hydrateRunning = false;
               return;
             }
-            const ric = typeof requestIdleCallback === "function"
-              ? requestIdleCallback
-              : (cb) => setTimeout(cb, 16);
+            const ric =
+              typeof requestIdleCallback === "function"
+                ? requestIdleCallback
+                : (cb) => setTimeout(cb, 16);
             ric(() => step());
           });
       };
@@ -1029,9 +1078,14 @@
       const done = progressEl.querySelectorAll
         ? progressEl.querySelectorAll("li.is-done").length
         : 0;
-      summary.textContent = done === n
-        ? (typeof msg.progressDone === "function" ? msg.progressDone(n) : `进度 · ${n} 步已完成`)
-        : (typeof msg.progressPartial === "function" ? msg.progressPartial(done, n) : `进度 · ${done}/${n}`);
+      summary.textContent =
+        done === n
+          ? typeof msg.progressDone === "function"
+            ? msg.progressDone(n)
+            : `进度 · ${n} 步已完成`
+          : typeof msg.progressPartial === "function"
+            ? msg.progressPartial(done, n)
+            : `进度 · ${done}/${n}`;
       details.append(summary, progressEl);
       return details;
     }
@@ -1048,7 +1102,9 @@
       const error = options.error === true;
 
       // Drop ephemeral live status chips — they don't belong on the final card.
-      item.bubble.querySelectorAll(".live-process-status, .live-process-chips").forEach((el) => el.remove());
+      item.bubble
+        .querySelectorAll(".live-process-status, .live-process-chips")
+        .forEach((el) => el.remove());
 
       const preservedProcess = item.bubble.querySelector(".msg-process");
       const preservedSubagents = item.bubble.querySelector(".live-subagents");
@@ -1090,7 +1146,7 @@
       if (!processEl && preservedProcess) {
         processEl = wrapProcessDetails(
           preservedProcess.classList.contains("msg-process")
-            ? (preservedProcess.querySelector(".live-subagents") || preservedProcess)
+            ? preservedProcess.querySelector(".live-subagents") || preservedProcess
             : preservedProcess,
           { open: false, live: false }
         );
@@ -1193,7 +1249,8 @@
       if (typeof onRuntimeStatusChange === "function") onRuntimeStatusChange(sid);
       if (!isViewingSession(sid)) return;
       if (statusText && typeof setStatus === "function") setStatus(statusText);
-      const sessionController = typeof getSessionController === "function" ? getSessionController() : null;
+      const sessionController =
+        typeof getSessionController === "function" ? getSessionController() : null;
       if (sessionController && typeof sessionController.loadSessions === "function") {
         sessionController.loadSessions();
       }

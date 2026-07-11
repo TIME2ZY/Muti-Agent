@@ -68,11 +68,7 @@ function resolveProviderProxy(provider, options = {}, env = process.env) {
   const name = String(provider || "").toLowerCase();
   if (name === "grok") {
     // Prefer Grok-only vars, then explicit --proxy, then global shared proxy.
-    return firstNonEmpty(
-      options.proxy,
-      resolveGrokOnlyProxy(env),
-      resolveProxy({}, env)
-    );
+    return firstNonEmpty(options.proxy, resolveGrokOnlyProxy(env), resolveProxy({}, env));
   }
   // codex / opencode / others: never pick GROK_PROXY automatically
   return resolveProxy(options, env);
@@ -97,6 +93,7 @@ function proxyEnvVars(proxy) {
 }
 
 module.exports = {
+  firstNonEmpty,
   resolveProxy,
   resolveGrokOnlyProxy,
   resolveProviderProxy,

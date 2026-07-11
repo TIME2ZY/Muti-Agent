@@ -131,7 +131,11 @@ function createChatRoutes({
         sendJson(res, 400, { error: error.message });
         return true;
       }
-      session = setSessionProjectDir(options.sessionsFile || undefined, sessionId, resolvedProjectDir);
+      session = setSessionProjectDir(
+        options.sessionsFile || undefined,
+        sessionId,
+        resolvedProjectDir
+      );
     }
     const sessionProjectDir = session && session.projectDir ? session.projectDir : rootDir;
 
@@ -146,14 +150,26 @@ function createChatRoutes({
       }
     }
 
-    if (useWorktree && sessionWorktree && !sessionWorktree.previewPid && !process.env.CAT_CAFE_PREVIEW) {
+    if (
+      useWorktree &&
+      sessionWorktree &&
+      !sessionWorktree.previewPid &&
+      !process.env.CAT_CAFE_PREVIEW
+    ) {
       let targetGitRoot = null;
-      try { targetGitRoot = worktreeManagerModule.ensureGitRoot(sessionProjectDir); }
-      catch { targetGitRoot = null; }
+      try {
+        targetGitRoot = worktreeManagerModule.ensureGitRoot(sessionProjectDir);
+      } catch {
+        targetGitRoot = null;
+      }
       if (targetGitRoot && targetGitRoot === selfGitRoot) {
         try {
           sessionWorktree = await worktreeManager.startPreview(sessionId);
-          session = setSessionWorktree(options.sessionsFile || undefined, sessionId, sessionWorktree);
+          session = setSessionWorktree(
+            options.sessionsFile || undefined,
+            sessionId,
+            sessionWorktree
+          );
         } catch (error) {
           console.warn("Preview server failed to start:", error.message);
         }
@@ -181,13 +197,18 @@ function createChatRoutes({
     const worklist = [requestedAgent];
     const maxDepth = getMaxA2ADepth();
 
-    appendToSession(options.sessionsFile || undefined, sessionId, {
-      role: "user",
-      agent: requestedAgent,
-      content: rawPrompt,
-      augmentedPrompt,
-      activeSkills: skillNames,
-    }, { allowCreate: false });
+    appendToSession(
+      options.sessionsFile || undefined,
+      sessionId,
+      {
+        role: "user",
+        agent: requestedAgent,
+        content: rawPrompt,
+        augmentedPrompt,
+        activeSkills: skillNames,
+      },
+      { allowCreate: false }
+    );
     transcript.appendEvent(sessionId, "_user_prompt", "user-prompt", {
       agent: requestedAgent,
       content: rawPrompt,
@@ -237,7 +258,10 @@ function createChatRoutes({
           break;
         }
         if (sealer.isSealed()) {
-          sendSse(res, "sealed", { reason: "context overflow", ratio: healthTracker.getFillRatio() });
+          sendSse(res, "sealed", {
+            reason: "context overflow",
+            ratio: healthTracker.getFillRatio(),
+          });
           aborted = true;
           break;
         }
@@ -245,7 +269,15 @@ function createChatRoutes({
         const agent = worklist[i];
         const agentConfig = AGENTS[agent] || { id: agent, label: agent, description: "" };
         const sessionMap = readSessionMap(sessionId, sessionMapRoot);
-        const resumeSessionId = resolveResumeSessionId(sessionMap, agent, workspaceKey);
+        const providerId = agentConfig.providerId || agentConfig.name || "";
+        const providerKey =
+          providerId && agentConfig.model ? `${providerId}:${agentConfig.model}` : providerId;
+        const resumeSessionId = resolveResumeSessionId(
+          sessionMap,
+          agent,
+          workspaceKey,
+          providerKey
+        );
         let assistantContent = "";
         let contextWarned = false;
         let contextSealedSseSent = false;
@@ -387,14 +419,19 @@ function createChatRoutes({
           break;
         }
 
-        appendToSession(options.sessionsFile || undefined, sessionId, {
-          role: "assistant",
-          agent,
-          content: assistantContent,
-          exitCode: code,
-          signal,
-          invocationId,
-        }, { allowCreate: false });
+        appendToSession(
+          options.sessionsFile || undefined,
+          sessionId,
+          {
+            role: "assistant",
+            agent,
+            content: assistantContent,
+            exitCode: code,
+            signal,
+            invocationId,
+          },
+          { allowCreate: false }
+        );
         transcript.appendEvent(sessionId, invocationId, "invocation-end", {
           agent,
           code,
@@ -469,16 +506,21 @@ function createChatRoutes({
                 ? `🔄 ${fromLabel} → ${toLabel}（交接包不完整）`
                 : `🔄 ${fromLabel} → ${toLabel}`;
               // Persist so session switch / reload keeps the handoff marker.
-              appendToSession(options.sessionsFile || undefined, sessionId, {
-                role: "system",
-                agent: "system",
-                content: routeText,
-                kind: "a2a-route",
-                from: agent,
-                to: m,
-                handoffOk: targetQuality.ok,
-                handoffDegraded: targetQuality.degraded,
-              }, { allowCreate: false });
+              appendToSession(
+                options.sessionsFile || undefined,
+                sessionId,
+                {
+                  role: "system",
+                  agent: "system",
+                  content: routeText,
+                  kind: "a2a-route",
+                  from: agent,
+                  to: m,
+                  handoffOk: targetQuality.ok,
+                  handoffDegraded: targetQuality.degraded,
+                },
+                { allowCreate: false }
+              );
               sendSse(res, "a2a-route", {
                 from: agent,
                 to: m,
