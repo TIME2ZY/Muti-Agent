@@ -1,8 +1,10 @@
 const { assertValidOpaqueId } = require("./id-policy");
-const { resolveResumeSessionId } = require("./session-map-store");
+const { resolveResumeSessionId, abandonProviderSession } = require("./session-map-store");
 
 const NOOP_DURABLE_RECORDER = Object.freeze({
   ensureWindow: () => null,
+  sealWindow: () => null,
+  sealAndRotateWindow: () => null,
   startInvocation: () => null,
   appendInvocationEvent: () => false,
   finishInvocation: () => null,
@@ -445,6 +447,10 @@ function createChatRoutes({
             } else if (state === sessionSealer.STATE.SEALED && !contextSealedSseSent) {
               sendSse(res, "sealed", { agent, ratio, reason: "context overflow" });
               contextSealedSseSent = true;
+              if (durableRun?.window?.id) {
+                durable.sealWindow(durableRun.window.id, "context overflow");
+                abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+              }
             }
           },
           shouldStop: () => sealer.isSealed(),
@@ -455,14 +461,20 @@ function createChatRoutes({
             inputChars: promptForAgent.length,
             outputChars: assistantContent.length,
           });
-          const updatedSessionMap = readSessionMap(sessionId, sessionMapRoot);
-          const persistedProviderSessionId = resolveResumeSessionId(
-            updatedSessionMap,
-            agent,
-            workspaceKey,
-            providerKey
-          );
-          durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
+          if (sealer.isSealed()) {
+            // Persist seal + abandon provider session so the next call cold-starts.
+            durable.sealWindow(durableRun.window.id, "context overflow");
+            abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+          } else {
+            const updatedSessionMap = readSessionMap(sessionId, sessionMapRoot);
+            const persistedProviderSessionId = resolveResumeSessionId(
+              updatedSessionMap,
+              agent,
+              workspaceKey,
+              providerKey
+            );
+            durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
+          }
         }
 
         finalizeInvocationEvent(invocationEvents, invocationId, code, signal);

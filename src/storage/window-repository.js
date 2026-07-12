@@ -1,3 +1,5 @@
+const ALLOWED_STATES = new Set(["active", "sealing", "sealed"]);
+
 function createWindowRepository(db) {
   const insert = db.prepare(`
     INSERT INTO context_windows
@@ -21,16 +23,48 @@ function createWindowRepository(db) {
     WHERE thread_id = ?
     ORDER BY generation ASC, created_at ASC
   `);
+  const maxGeneration = db.prepare(`
+    SELECT COALESCE(MAX(generation), 0) AS max_generation
+    FROM context_windows
+    WHERE thread_id = ? AND agent_id = ? AND provider_key = ? AND workspace_key = ?
+  `);
   const bindProvider = db.prepare(`
     UPDATE context_windows
     SET provider_session_id = ?
     WHERE id = ? AND state IN ('active', 'sealing')
+  `);
+  const clearProvider = db.prepare(`
+    UPDATE context_windows
+    SET provider_session_id = NULL
+    WHERE id = ?
   `);
   const addUsage = db.prepare(`
     UPDATE context_windows
     SET input_chars = input_chars + ?, output_chars = output_chars + ?
     WHERE id = ? AND state IN ('active', 'sealing')
   `);
+  const markSealing = db.prepare(`
+    UPDATE context_windows
+    SET state = 'sealing'
+    WHERE id = ? AND state = 'active'
+  `);
+  const sealOpen = db.prepare(`
+    UPDATE context_windows
+    SET state = 'sealed',
+        seal_reason = ?,
+        sealed_at = ?,
+        provider_session_id = NULL
+    WHERE id = ? AND state IN ('active', 'sealing')
+  `);
+
+  function coordinateArgs(coordinate) {
+    return [
+      requiredString(coordinate.threadId, "thread id"),
+      requiredString(coordinate.agentId, "agent id"),
+      requiredString(coordinate.providerKey, "provider key"),
+      requiredString(coordinate.workspaceKey, "workspace key"),
+    ];
+  }
 
   return {
     create(input) {
@@ -43,7 +77,7 @@ function createWindowRepository(db) {
         workspaceKey: requiredString(input.workspaceKey, "workspace key"),
         generation: positiveInteger(input.generation, "generation"),
         providerSessionId: nullableString(input.providerSessionId),
-        state: input.state || "active",
+        state: normalizeState(input.state),
         capacityTokens: positiveInteger(input.capacityTokens, "capacity tokens"),
         inputChars: nonNegativeInteger(input.inputChars || 0, "input chars"),
         outputChars: nonNegativeInteger(input.outputChars || 0, "output chars"),
@@ -66,16 +100,79 @@ function createWindowRepository(db) {
       return listByThread.all(threadId).map(mapWindow);
     },
 
+    nextGeneration(coordinate) {
+      const row = maxGeneration.get(...coordinateArgs(coordinate));
+      return Number(row?.max_generation || 0) + 1;
+    },
+
     bindProviderSession(id, providerSessionId) {
       return (
         bindProvider.run(requiredString(providerSessionId, "provider session id"), id).changes > 0
       );
     },
 
+    clearProviderSession(id) {
+      return clearProvider.run(id).changes > 0;
+    },
+
     addUsage(id, { inputChars = 0, outputChars = 0 } = {}) {
       const input = nonNegativeInteger(inputChars, "input chars");
       const output = nonNegativeInteger(outputChars, "output chars");
       return addUsage.run(input, output, id).changes > 0;
+    },
+
+    markSealing(id) {
+      return markSealing.run(id).changes > 0;
+    },
+
+    /**
+     * Seal an open window and abandon its provider session id.
+     * Returns the sealed window, or null if it was not open.
+     */
+    seal(id, { reason = null, sealedAt = null } = {}) {
+      const sealedTimestamp = sealedAt || new Date().toISOString();
+      const changes = sealOpen.run(nullableString(reason), sealedTimestamp, id).changes;
+      if (changes === 0) return null;
+      return this.get(id);
+    },
+
+    /**
+     * Atomically seal the open window for a coordinate (if any) and open the
+     * next generation with a clean provider session. Original sealed rows stay.
+     */
+    sealAndRotate(input) {
+      return db.transaction(() => {
+        const coordinate = {
+          threadId: requiredString(input.threadId, "thread id"),
+          agentId: requiredString(input.agentId, "agent id"),
+          providerKey: requiredString(input.providerKey, "provider key"),
+          workspaceKey: requiredString(input.workspaceKey, "workspace key"),
+        };
+        const open = this.getOpen(coordinate);
+        let sealed = null;
+        if (open) {
+          sealed = this.seal(open.id, {
+            reason: input.reason,
+            sealedAt: input.sealedAt,
+          });
+        } else if (input.windowId) {
+          sealed = this.seal(input.windowId, {
+            reason: input.reason,
+            sealedAt: input.sealedAt,
+          });
+        }
+
+        const next = this.create({
+          id: requiredString(input.nextId, "next window id"),
+          ...coordinate,
+          generation: this.nextGeneration(coordinate),
+          capacityTokens: positiveInteger(input.capacityTokens, "capacity tokens"),
+          providerSessionId: null,
+          state: "active",
+          createdAt: input.createdAt,
+        });
+        return { sealed, next };
+      })();
     },
   };
 }
@@ -100,6 +197,14 @@ function mapWindow(row) {
   };
 }
 
+function normalizeState(value) {
+  const state = typeof value === "string" && value ? value : "active";
+  if (!ALLOWED_STATES.has(state)) {
+    throw new Error(`window state must be one of ${[...ALLOWED_STATES].join(", ")}.`);
+  }
+  return state;
+}
+
 function requiredString(value, label) {
   if (typeof value !== "string" || !value) throw new Error(`${label} is required.`);
   return value;
@@ -122,4 +227,4 @@ function nonNegativeInteger(value, label) {
   return value;
 }
 
-module.exports = { createWindowRepository };
+module.exports = { createWindowRepository, ALLOWED_STATES };

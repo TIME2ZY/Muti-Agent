@@ -98,11 +98,24 @@ function createRecallRepository(db) {
     })();
   }
 
+  /**
+   * Rebuild the external-content FTS index from recall_items after corruption.
+   * Source tables (messages / events / memory) are left untouched.
+   */
+  function rebuildFts() {
+    return db.transaction(() => {
+      db.exec(`INSERT INTO recall_fts(recall_fts) VALUES('rebuild')`);
+      const count = db.prepare("SELECT COUNT(*) AS count FROM recall_items").get().count;
+      return { items: count };
+    })();
+  }
+
   return {
     upsert,
     getBySource,
     search,
     rebuildThread,
+    rebuildFts,
     deleteBySource(sourceKind, sourceId) {
       return deleteBySource.run(sourceKind, sourceId).changes > 0;
     },
@@ -178,7 +191,9 @@ function kindFilter(kinds, alias = "") {
 
 function buildFtsQuery(query) {
   const tokens = query.match(/[\p{L}\p{N}_-]+/gu) || [];
-  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
+  // AND keeps multi-token search closer to transcript substring semantics and
+  // avoids loose single-token hits crowding out true matches.
+  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" AND ");
 }
 
 function makeSnippet(content, query) {
@@ -217,9 +232,18 @@ function mapRecallItem(row) {
     snippet: row.snippet || row.content.slice(0, 200),
     agentId: row.agent_id,
     createdAt: row.created_at,
-    metadata: row.metadata_json ? JSON.parse(row.metadata_json) : null,
+    metadata: parseJsonSafe(row.metadata_json),
     rank: typeof row.rank === "number" ? row.rank : null,
   };
+}
+
+function parseJsonSafe(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function messageToRecall(row) {

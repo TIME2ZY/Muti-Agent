@@ -6,6 +6,7 @@ const {
   getByWorkspaceMap,
   resolveResumeSessionId,
   upsertAgentProviderSession,
+  clearAgentProviderSession,
 } = require("../shared/session-map");
 
 function sanitizeDir(id) {
@@ -26,6 +27,24 @@ function readSessionMap(chatSessionId, sessionMapRoot) {
   }
 }
 
+function writeSessionMap(chatSessionId, sessionMapRoot, sessions) {
+  const file = getSessionMapPath(chatSessionId, sessionMapRoot);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(sessions || {}, null, 2)}\n`, "utf8");
+  return file;
+}
+
+/**
+ * Drop the provider session for agent × workspace after a window seal so the
+ * next invocation does not resume the abandoned provider chain.
+ */
+function abandonProviderSession(chatSessionId, sessionMapRoot, agentKey, workspaceKey = "") {
+  const sessions = readSessionMap(chatSessionId, sessionMapRoot);
+  clearAgentProviderSession(sessions, agentKey, workspaceKey);
+  writeSessionMap(chatSessionId, sessionMapRoot, sessions);
+  return sessions;
+}
+
 function deleteSessionMap(chatSessionId, sessionMapRoot) {
   fs.rmSync(path.dirname(getSessionMapPath(chatSessionId, sessionMapRoot)), {
     recursive: true,
@@ -38,8 +57,11 @@ module.exports = {
   sanitizeDir,
   getSessionMapPath,
   readSessionMap,
+  writeSessionMap,
+  abandonProviderSession,
   deleteSessionMap,
   getByWorkspaceMap,
   resolveResumeSessionId,
   upsertAgentProviderSession,
+  clearAgentProviderSession,
 };

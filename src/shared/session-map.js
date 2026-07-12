@@ -147,6 +147,42 @@ function upsertAgentProviderSession(
   return sessions;
 }
 
+/**
+ * Forget a provider session for agent × workspace so the next invocation
+ * cold-starts (used after a context window is sealed).
+ */
+function clearAgentProviderSession(sessions, agentKey, workspaceKey = "") {
+  if (!sessions || typeof sessions !== "object" || !agentKey) return sessions;
+  const prev =
+    sessions[agentKey] && typeof sessions[agentKey] === "object" ? sessions[agentKey] : null;
+  if (!prev) return sessions;
+
+  const byWorkspace = getByWorkspaceMap(prev);
+  const slotKey = workspaceKey || LEGACY_WORKSPACE_KEY;
+  if (workspaceKey) {
+    delete byWorkspace[slotKey];
+    if (workspaceKey.startsWith("base:")) delete byWorkspace[LEGACY_WORKSPACE_KEY];
+  } else {
+    for (const key of Object.keys(byWorkspace)) delete byWorkspace[key];
+  }
+
+  const remaining = Object.entries(byWorkspace);
+  if (remaining.length === 0) {
+    delete sessions[agentKey];
+    return sessions;
+  }
+
+  const [firstKey, firstSlot] = remaining[0];
+  sessions[agentKey] = {
+    sessionId: firstSlot.sessionId,
+    updatedAt: firstSlot.updatedAt || new Date().toISOString(),
+    workspaceKey: firstKey === LEGACY_WORKSPACE_KEY ? "" : firstKey,
+    ...(firstSlot.providerKey ? { providerKey: firstSlot.providerKey } : {}),
+    byWorkspace,
+  };
+  return sessions;
+}
+
 function providerKeyFromConfig(config = {}) {
   const providerId = config.providerId || config.name || "";
   return providerId && config.model ? `${providerId}:${config.model}` : providerId;
@@ -157,5 +193,6 @@ module.exports = {
   getByWorkspaceMap,
   resolveResumeSessionId,
   upsertAgentProviderSession,
+  clearAgentProviderSession,
   providerKeyFromConfig,
 };

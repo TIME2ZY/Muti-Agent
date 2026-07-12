@@ -1,4 +1,6 @@
 function createMessageRepository(db) {
+  // Idempotent upsert: replaying dual-write / migration must not create
+  // duplicate message rows (PRIMARY KEY id + UNIQUE thread/sequence).
   const insert = db.prepare(`
     INSERT INTO messages
       (id, thread_id, window_id, invocation_id, sequence_no, role,
@@ -6,6 +8,16 @@ function createMessageRepository(db) {
     VALUES
       (@id, @threadId, @windowId, @invocationId, @sequenceNo, @role,
        @agentId, @content, @metadataJson, @createdAt)
+    ON CONFLICT(id) DO UPDATE SET
+      thread_id = excluded.thread_id,
+      window_id = excluded.window_id,
+      invocation_id = excluded.invocation_id,
+      sequence_no = excluded.sequence_no,
+      role = excluded.role,
+      agent_id = excluded.agent_id,
+      content = excluded.content,
+      metadata_json = excluded.metadata_json,
+      created_at = excluded.created_at
   `);
   const findById = db.prepare("SELECT * FROM messages WHERE id = ?");
   const listByThread = db.prepare(`
