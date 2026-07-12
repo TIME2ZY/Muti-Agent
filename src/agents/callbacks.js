@@ -119,7 +119,7 @@ function validateToken(threadId, invocationId, callbackToken) {
  *  - broadcast as an SSE message event
  *  - scanned for @mentions; any new target agents are appended to the worklist
  */
-function postMessage(threadId, invocationId, content, { appendToSession } = {}) {
+function postMessage(threadId, invocationId, content, { appendToSession, durableRecorder } = {}) {
   const thread = activeThreads.get(threadId);
   if (!thread) return false;
 
@@ -151,6 +151,7 @@ function postMessage(threadId, invocationId, content, { appendToSession } = {}) 
       agent,
       content,
     });
+    durableRecorder?.appendInvocationEvent(currentInvocationId, "callback-post", { agent, content });
   }
 
   sendSse(thread.res, "message", { agent, role: "assistant", text: content });
@@ -178,6 +179,10 @@ function postMessage(threadId, invocationId, content, { appendToSession } = {}) 
       sendSse(thread.res, "a2a-route", { from: agent, to: target });
       if (currentInvocationId) {
         transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "a2a-route", {
+          from: agent,
+          to: target,
+        });
+        durableRecorder?.appendInvocationEvent(currentInvocationId, "a2a-route", {
           from: agent,
           to: target,
         });

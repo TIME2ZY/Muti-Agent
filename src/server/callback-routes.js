@@ -26,6 +26,7 @@ function createCallbackRoutes({
   sessionsFile,
   sendJson,
   readJsonBody,
+  durableRecorder,
 }) {
   return async function handleCallbackRoutes(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/callbacks/post-message") {
@@ -51,7 +52,9 @@ function createCallbackRoutes({
         return true;
       }
 
-      const ok = callbacks.postMessage(sessionId, invocationId, content, { appendToSession });
+      const postOptions = { appendToSession };
+      if (durableRecorder) postOptions.durableRecorder = durableRecorder;
+      const ok = callbacks.postMessage(sessionId, invocationId, content, postOptions);
       if (!ok) {
         sendJson(res, 410, { error: "Thread no longer active; message was not delivered." });
         return true;

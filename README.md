@@ -139,16 +139,18 @@ http://127.0.0.1:8787
 
 ### 服务与 UI
 
-| 变量                      | 默认                       | 说明                                                                |
-| ------------------------- | -------------------------- | ------------------------------------------------------------------- |
-| `PORT`                    | `8787`                     | HTTP 监听端口                                                       |
-| `CAT_CAFE_UI_TOKEN`       | 进程启动时随机             | UI 请求头 `X-Cat-Cafe-UI-Token`；不设则每次启动新 token 并注入 HTML |
-| `CAT_CAFE_API_URL`        | 由请求 host 推导           | 写入 Agent 环境，供回调 curl 示例使用                               |
-| `CAT_CAFE_TOKEN_TTL_MS`   | 内置默认                   | 回调 token 有效期（毫秒）                                           |
-| `CAT_CAFE_TRANSCRIPT_DIR` | `data/runtime/transcripts` | transcript 根目录                                                   |
-| `CAT_CAFE_TEST_CAPACITY`  | （测试用）                 | 覆盖上下文容量相关测试参数                                          |
-| `CAT_CAFE_PREVIEW`        | 未设                       | 预览子进程标记；设为时影响 preview 启动逻辑                         |
-| `MAX_A2A_DEPTH`           | `15`                       | Agent 间 @ 接力最大深度                                             |
+| 变量                      | 默认                         | 说明                                                                |
+| ------------------------- | ---------------------------- | ------------------------------------------------------------------- |
+| `PORT`                    | `8787`                       | HTTP 监听端口                                                       |
+| `CAT_CAFE_UI_TOKEN`       | 进程启动时随机               | UI 请求头 `X-Cat-Cafe-UI-Token`；不设则每次启动新 token 并注入 HTML |
+| `CAT_CAFE_API_URL`        | 由请求 host 推导             | 写入 Agent 环境，供回调 curl 示例使用                               |
+| `CAT_CAFE_TOKEN_TTL_MS`   | 内置默认                     | 回调 token 有效期（毫秒）                                           |
+| `CAT_CAFE_TRANSCRIPT_DIR` | `data/runtime/transcripts`   | transcript 根目录                                                   |
+| `CAT_CAFE_TEST_CAPACITY`  | （测试用）                   | 覆盖上下文容量相关测试参数                                          |
+| `CAT_CAFE_PREVIEW`        | 未设                         | 预览子进程标记；设为时影响 preview 启动逻辑                         |
+| `CAT_CAFE_STORAGE_MODE`   | `dual`                       | `dual` 同步镜像到 SQLite；`files` 仅使用原文件存储                  |
+| `CAT_CAFE_MEMORY_DB`      | `data/runtime/memory.sqlite` | SQLite 记忆数据库路径                                               |
+| `MAX_A2A_DEPTH`           | `15`                         | Agent 间 @ 接力最大深度                                             |
 
 ### 调用 CLI 时由服务注入（一般无需手设）
 
@@ -181,6 +183,7 @@ http://127.0.0.1:8787
 - 消息流：过程卡纯函数在 `public/message-process-helpers.js`，`message-view.js` 负责 DOM 组合
 - 服务端入口：`src/server/index.js` 仅负责实例状态与依赖装配；HTTP 编解码、静态资源、CLI 参数、子进程流和 invocation registry 分别由同目录的独立模块负责
 - 服务端状态：`activeInvocations` 与 invocation registry 必须是 server 实例级状态；不要在模块顶层新增请求相关的可变 Map/Set
+- 存储过渡：默认 `dual` 模式仍从 JSON/JSONL 读取，同时把新 thread、message、window、invocation/event 镜像到 SQLite；镜像失败不得中断聊天
 - Skill 系统：`src/server/skills.js`（frontmatter / 匹配 / prompt 增强 / 只读规则）
 - Agent 身份：`src/agents/identities/*.md` + `src/agents/identity.js`；**每一轮** invoke（含 A2A）注入对应身份块
 - A2A 交接：`src/agents/handoff.js` 解析 ` ```handoff ` 块；软约束（缺字段 degraded 仍路由），结构化注入下一位 Agent

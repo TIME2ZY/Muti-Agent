@@ -1,6 +1,15 @@
 const { assertValidOpaqueId } = require("./id-policy");
 const { resolveResumeSessionId } = require("./session-map-store");
 
+const NOOP_DURABLE_RECORDER = Object.freeze({
+  ensureWindow: () => null,
+  startInvocation: () => null,
+  appendInvocationEvent: () => false,
+  finishInvocation: () => null,
+  bindProviderSession: () => false,
+  addWindowUsage: () => false,
+});
+
 function createChatRoutes({
   rootDir,
   selfGitRoot,
@@ -40,7 +49,9 @@ function createChatRoutes({
   recordInvocationEvent,
   finalizeInvocationEvent,
   persistInvocations,
+  durableRecorder,
 }) {
+  const durable = durableRecorder || NOOP_DURABLE_RECORDER;
   return async function handleChatRoutes(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/invoke") {
       let args;
@@ -184,6 +195,20 @@ function createChatRoutes({
       branch: "",
     };
     const workspaceKey = `${activeWorktree ? "worktree" : "base"}:${runWorkspace.worktreeDir}`;
+    const requestedAgentConfig = AGENTS[requestedAgent];
+    const requestedProviderId = requestedAgentConfig.providerId || requestedAgentConfig.name || "";
+    const requestedProviderKey =
+      requestedProviderId && requestedAgentConfig.model
+        ? `${requestedProviderId}:${requestedAgentConfig.model}`
+        : requestedProviderId;
+    const initialWindow = durable.ensureWindow({
+      session,
+      threadId: sessionId,
+      agentId: requestedAgent,
+      providerKey: requestedProviderKey,
+      workspaceKey,
+      capacityTokens: contextHealth.getAgentCapacity(requestedAgent),
+    });
 
     const existing = activeInvocations.get(sessionId);
     if (existing) existing.abort();
@@ -207,7 +232,7 @@ function createChatRoutes({
         augmentedPrompt,
         activeSkills: skillNames,
       },
-      { allowCreate: false }
+      { allowCreate: false, windowId: initialWindow?.id }
     );
     transcript.appendEvent(sessionId, "_user_prompt", "user-prompt", {
       agent: requestedAgent,
@@ -283,20 +308,32 @@ function createChatRoutes({
         let contextSealedSseSent = false;
 
         const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
+        const startedAt = new Date().toISOString();
         invocationEvents.set(invocationId, {
           invocationId,
           sessionId,
           agent,
-          startedAt: new Date().toISOString(),
+          startedAt,
           endedAt: null,
           state: "active",
           events: [
             {
-              ts: new Date().toISOString(),
+              ts: startedAt,
               kind: "invocation-start",
               payload: { agent, resumeSessionId: resumeSessionId || null },
             },
           ],
+        });
+        const durableRun = durable.startInvocation({
+          session,
+          invocationId,
+          threadId: sessionId,
+          agentId: agent,
+          providerKey,
+          workspaceKey,
+          capacityTokens: contextHealth.getAgentCapacity(agent),
+          resumeSessionId,
+          startedAt,
         });
         sendSse(res, "agent-start", { agent, invocationId });
 
@@ -382,6 +419,7 @@ function createChatRoutes({
           onEvent(event) {
             transcript.appendEvent(sessionId, invocationId, event.type, event);
             recordInvocationEvent(invocationEvents, invocationId, event.type, event);
+            durable.appendInvocationEvent(invocationId, event.type, event);
             sendSse(res, "agent-event", event);
 
             if (event.type === "text.delta") {
@@ -393,6 +431,7 @@ function createChatRoutes({
           onStderr(text) {
             transcript.appendEvent(sessionId, invocationId, "stderr", { agent, text });
             recordInvocationEvent(invocationEvents, invocationId, "stderr", { text });
+            durable.appendInvocationEvent(invocationId, "stderr", { agent, text });
             const visible = filterBenignStderr(text);
             if (visible) sendSse(res, "stderr", { agent, text: visible });
           },
@@ -411,8 +450,24 @@ function createChatRoutes({
           shouldStop: () => sealer.isSealed(),
         });
 
+        if (durableRun) {
+          durable.addWindowUsage(durableRun.window.id, {
+            inputChars: promptForAgent.length,
+            outputChars: assistantContent.length,
+          });
+          const updatedSessionMap = readSessionMap(sessionId, sessionMapRoot);
+          const persistedProviderSessionId = resolveResumeSessionId(
+            updatedSessionMap,
+            agent,
+            workspaceKey,
+            providerKey
+          );
+          durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
+        }
+
         finalizeInvocationEvent(invocationEvents, invocationId, code, signal);
         persistInvocations();
+        durable.finishInvocation(invocationId, code, signal);
 
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
           aborted = true;
@@ -430,7 +485,7 @@ function createChatRoutes({
             signal,
             invocationId,
           },
-          { allowCreate: false }
+          { allowCreate: false, windowId: durableRun?.window.id }
         );
         transcript.appendEvent(sessionId, invocationId, "invocation-end", {
           agent,
