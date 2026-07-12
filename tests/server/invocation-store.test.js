@@ -7,7 +7,7 @@ const test = require("node:test");
 const invocationStore = require("../../src/server/invocation-store.js");
 
 test("readInvocationsFile returns persisted invocation records", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cat-cafe-invocations-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-invocations-"));
   const file = path.join(tempDir, "invocations.json");
   invocationStore.writeInvocationsFile(file, {
     inv1: { invocationId: "inv1", sessionId: "s1", events: [] },

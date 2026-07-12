@@ -1,6 +1,6 @@
-# Multi-Agent Invoke UI（多 Agent 协作台）
+# Shift（交班台）
 
-基于本地 Node HTTP 服务的多 Agent 协作控制台：在浏览器里选择 Agent、发送任务、观察 SSE 流式输出，并通过 skills / worktree / A2A 回调组织跨 Agent 协作。
+本地多 Agent 协作控制台：在浏览器里选择 Agent、发送任务、观察 SSE 流式输出，并通过 skills / worktree / A2A 回调组织跨 Agent 协作。你发令排班，Agent 上工交班。
 
 运行时通过子进程调用本机已安装的 **Codex** / **OpenCode** CLI（本仓库不打包这些 CLI）。
 
@@ -137,32 +137,34 @@ http://127.0.0.1:8787
 
 未设置时使用合理默认值。密钥类勿提交仓库（`.env` 已在 `.gitignore`）。
 
+品牌前缀为 `SHIFT_*`（HTTP 头 `X-Shift-UI-Token`）。若本地仍有旧的 `CAT_CAFE_*` / `X-Cat-Cafe-UI-Token`，请改名为上表对应项后重启。
+
 ### 服务与 UI
 
 | 变量                      | 默认                         | 说明                                                                  |
 | ------------------------- | ---------------------------- | --------------------------------------------------------------------- |
 | `PORT`                    | `8787`                       | HTTP 监听端口                                                         |
-| `CAT_CAFE_UI_TOKEN`       | 进程启动时随机               | UI 请求头 `X-Cat-Cafe-UI-Token`；不设则每次启动新 token 并注入 HTML   |
-| `CAT_CAFE_API_URL`        | 由请求 host 推导             | 写入 Agent 环境，供回调 curl 示例使用                                 |
-| `CAT_CAFE_TOKEN_TTL_MS`   | 内置默认                     | 回调 token 有效期（毫秒）                                             |
-| `CAT_CAFE_TRANSCRIPT_DIR` | `data/runtime/transcripts`   | transcript 根目录                                                     |
-| `CAT_CAFE_TEST_CAPACITY`  | （测试用）                   | 覆盖上下文容量相关测试参数                                            |
-| `CAT_CAFE_PREVIEW`        | 未设                         | 预览子进程标记；设为时影响 preview 启动逻辑                           |
-| `CAT_CAFE_STORAGE_MODE`   | `dual`                       | `files` 仅文件；`dual` 文件主读并镜像；`sqlite` SQLite 主读、文件回退 |
-| `CAT_CAFE_MEMORY_DB`      | `data/runtime/memory.sqlite` | SQLite 记忆数据库路径                                                 |
+| `SHIFT_UI_TOKEN`       | 进程启动时随机               | UI 请求头 `X-Shift-UI-Token`；不设则每次启动新 token 并注入 HTML   |
+| `SHIFT_API_URL`        | 由请求 host 推导             | 写入 Agent 环境，供回调 curl 示例使用                                 |
+| `SHIFT_TOKEN_TTL_MS`   | 内置默认                     | 回调 token 有效期（毫秒）                                             |
+| `SHIFT_TRANSCRIPT_DIR` | `data/runtime/transcripts`   | transcript 根目录                                                     |
+| `SHIFT_TEST_CAPACITY`  | （测试用）                   | 覆盖上下文容量相关测试参数                                            |
+| `SHIFT_PREVIEW`        | 未设                         | 预览子进程标记；设为时影响 preview 启动逻辑                           |
+| `SHIFT_STORAGE_MODE`   | `dual`                       | `files` 仅文件；`dual` 文件主读并镜像；`sqlite` SQLite 主读、文件回退 |
+| `SHIFT_MEMORY_DB`      | `data/runtime/memory.sqlite` | SQLite 记忆数据库路径                                                 |
 | `MAX_A2A_DEPTH`           | `15`                         | Agent 间 @ 接力最大深度                                               |
 
 ### 调用 CLI 时由服务注入（一般无需手设）
 
 | 变量                      | 说明                   |
 | ------------------------- | ---------------------- |
-| `CAT_CAFE_THREAD_ID`      | 当前会话 ID            |
-| `CAT_CAFE_INVOCATION_ID`  | 本次调用 ID            |
-| `CAT_CAFE_CALLBACK_TOKEN` | 回调鉴权 token         |
-| `CAT_CAFE_WORKTREE`       | `1` 表示在 worktree 中 |
-| `CAT_CAFE_BASE_DIR`       | 项目基目录             |
-| `CAT_CAFE_WORKTREE_DIR`   | worktree 路径          |
-| `CAT_CAFE_BRANCH`         | worktree 分支名        |
+| `SHIFT_THREAD_ID`      | 当前会话 ID            |
+| `SHIFT_INVOCATION_ID`  | 本次调用 ID            |
+| `SHIFT_CALLBACK_TOKEN` | 回调鉴权 token         |
+| `SHIFT_WORKTREE`       | `1` 表示在 worktree 中 |
+| `SHIFT_BASE_DIR`       | 项目基目录             |
+| `SHIFT_WORKTREE_DIR`   | worktree 路径          |
+| `SHIFT_BRANCH`         | worktree 分支名        |
 | `INVOKE_SESSION_ID`       | CLI 侧 resume session  |
 | `INVOKE_SESSION_FILE`     | session map 文件路径   |
 | `INVOKE_WORKSPACE_KEY`    | workspace 键           |
@@ -184,8 +186,8 @@ http://127.0.0.1:8787
 - 服务端入口：`src/server/index.js` 仅负责实例状态与依赖装配；HTTP 编解码、静态资源、CLI 参数、子进程流和 invocation registry 分别由同目录的独立模块负责
 - 服务端状态：`activeInvocations` 与 invocation registry 必须是 server 实例级状态；不要在模块顶层新增请求相关的可变 Map/Set
 - 存储过渡：默认 `dual` 模式把新 thread、message、window、invocation/event 镜像到 SQLite，memory entry 与召回投影同事务持久化；recall API 合并 SQLite FTS5 与 JSONL 结果，SQLite-only 时仍可检索用户消息、调用事件与正式记忆，镜像失败不得中断聊天
-- SQLite 主读：`CAT_CAFE_STORAGE_MODE=sqlite` 时 session/message/invocation/recall 优先从 SQLite 读取，旧 JSON/JSONL 只补充未入库记录；会话文件丢失后会在首次继续写入时按需恢复兼容影子，不需要迁移工具
-- SQLite 运维：启动时执行 `quick_check`，正常关闭时执行 `wal_checkpoint(TRUNCATE)`；备份应先停止服务再复制 `CAT_CAFE_MEMORY_DB`，运行中不要直接复制数据库或单独复制 `-wal`/`-shm` 文件
+- SQLite 主读：`SHIFT_STORAGE_MODE=sqlite` 时 session/message/invocation/recall 优先从 SQLite 读取，旧 JSON/JSONL 只补充未入库记录；会话文件丢失后会在首次继续写入时按需恢复兼容影子，不需要迁移工具
+- SQLite 运维：启动时执行 `quick_check`，正常关闭时执行 `wal_checkpoint(TRUNCATE)`；备份应先停止服务再复制 `SHIFT_MEMORY_DB`，运行中不要直接复制数据库或单独复制 `-wal`/`-shm` 文件
 - 窗口分代：context window 按 agent × provider × workspace 独立维护 `generation`/`capacity`；封存后事务性开新代、强制废弃旧 `provider_session_id`；原始消息/事件跨窗口永久保留，检索目录（`recall_items`）可从源表重建
 - Skill 系统：`src/server/skills.js`（frontmatter / 匹配 / prompt 增强 / 只读规则）
 - Agent 身份：`src/agents/identities/*.md` + `src/agents/identity.js`；**每一轮** invoke（含 A2A）注入对应身份块

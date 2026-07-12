@@ -293,7 +293,7 @@ function invoke(cli, prompt, options = {}) {
 
     const events = provider.transform(rawEvent, {
       agent: config.id || config.name,
-      invocationId: process.env.CAT_CAFE_INVOCATION_ID || "standalone",
+      invocationId: process.env.SHIFT_INVOCATION_ID || "standalone",
     });
 
     for (const event of events) emitEvent(event);

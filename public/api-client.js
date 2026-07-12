@@ -1,11 +1,11 @@
 (function initApiClient(globalScope) {
   "use strict";
 
-  const UI_TOKEN_HEADER = "X-Cat-Cafe-UI-Token";
+  const UI_TOKEN_HEADER = "X-Shift-UI-Token";
 
   function readUiToken(documentRef) {
     const meta = documentRef && documentRef.querySelector
-      ? documentRef.querySelector('meta[name="cat-cafe-ui-token"]')
+      ? documentRef.querySelector('meta[name="shift-ui-token"]')
       : null;
     return meta ? meta.getAttribute("content") || "" : "";
   }

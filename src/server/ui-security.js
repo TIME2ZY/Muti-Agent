@@ -1,10 +1,10 @@
 const crypto = require("node:crypto");
+const { UI_TOKEN_HEADER, ENV } = require("../shared/brand");
 
-const UI_TOKEN_HEADER = "x-cat-cafe-ui-token";
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
 function createUiToken(explicitToken) {
-  return explicitToken || process.env.CAT_CAFE_UI_TOKEN || crypto.randomBytes(32).toString("base64url");
+  return explicitToken || process.env[ENV.UI_TOKEN] || crypto.randomBytes(32).toString("base64url");
 }
 
 function safeEqual(left, right) {

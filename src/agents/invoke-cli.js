@@ -14,6 +14,7 @@ const {
   DEFAULT_KILL_GRACE_MS,
   superviseProviderProcess,
 } = require("./process-supervisor");
+const { ENV } = require("../shared/brand");
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -165,7 +166,7 @@ function invoke(cli, prompt, options = {}) {
     process.env
   );
 
-  const invocationId = process.env.CAT_CAFE_INVOCATION_ID || "standalone";
+  const invocationId = process.env[ENV.INVOCATION_ID] || "standalone";
   const rawLogger = createRawEventLogger({
     invocationId,
     providerId,

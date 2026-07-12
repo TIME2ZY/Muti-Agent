@@ -69,7 +69,7 @@
     },
 
     shell: {
-      title: "多 Agent 协作台",
+      title: "Shift · 交班台",
       skillsActive: "已激活能力",
       tabAgents: "Agents",
       tabWorkspace: "工作区",

@@ -14,7 +14,7 @@ const UI_TOKEN = "dual-write-test-token";
 
 function apiFetch(url, init = {}) {
   const headers = new Headers(init.headers || {});
-  headers.set("X-Cat-Cafe-UI-Token", UI_TOKEN);
+  headers.set("X-Shift-UI-Token", UI_TOKEN);
   if (init.method === "POST") headers.set("content-type", "application/json");
   return fetch(url, { ...init, headers });
 }
@@ -50,8 +50,8 @@ function worktreeManager() {
 
 test("chat keeps file reads while mirroring durable records into SQLite", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dual-write-server-"));
-  const previousTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
-  process.env.CAT_CAFE_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
+  const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
+  process.env.SHIFT_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   const storage = createStorage({ file: ":memory:" });
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
@@ -96,7 +96,7 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
       ["invocation-start", "text.delta", "invocation-end"]
     );
 
-    fs.rmSync(process.env.CAT_CAFE_TRANSCRIPT_DIR, { recursive: true, force: true });
+    fs.rmSync(process.env.SHIFT_TRANSCRIPT_DIR, { recursive: true, force: true });
     const search = await apiFetch(
       `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=hello`
     ).then((response) => response.json());
@@ -131,8 +131,8 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
   } finally {
     await new Promise((resolve) => server.close(resolve));
     storage.close();
-    if (previousTranscriptDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
-    else process.env.CAT_CAFE_TRANSCRIPT_DIR = previousTranscriptDir;
+    if (previousTranscriptDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
+    else process.env.SHIFT_TRANSCRIPT_DIR = previousTranscriptDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -213,8 +213,8 @@ test("chat seals from cumulative window usage and starts the next generation", a
 test("files mode abandons an exhausted provider session", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "files-window-server-"));
   const mapRoot = path.join(tmpDir, "session-maps");
-  const previousCapacity = process.env.CAT_CAFE_TEST_CAPACITY;
-  process.env.CAT_CAFE_TEST_CAPACITY = "20";
+  const previousCapacity = process.env.SHIFT_TEST_CAPACITY;
+  process.env.SHIFT_TEST_CAPACITY = "20";
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
@@ -244,8 +244,8 @@ test("files mode abandons an exhausted provider session", async () => {
     assert.equal(readSessionMap(session.id, mapRoot).architect, undefined);
   } finally {
     await new Promise((resolve) => server.close(resolve));
-    if (previousCapacity === undefined) delete process.env.CAT_CAFE_TEST_CAPACITY;
-    else process.env.CAT_CAFE_TEST_CAPACITY = previousCapacity;
+    if (previousCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
+    else process.env.SHIFT_TEST_CAPACITY = previousCapacity;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -255,8 +255,8 @@ test("sqlite mode restores sessions after file loss and continues the message se
   const sessionsFile = path.join(tmpDir, "sessions.json");
   const memoryDbFile = path.join(tmpDir, "memory.sqlite");
   const transcriptDir = path.join(tmpDir, "transcripts");
-  const previousTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
-  process.env.CAT_CAFE_TRANSCRIPT_DIR = transcriptDir;
+  const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
+  process.env.SHIFT_TRANSCRIPT_DIR = transcriptDir;
 
   function startServer() {
     const server = createServer({
@@ -338,8 +338,8 @@ test("sqlite mode restores sessions after file loss and continues the message se
   } finally {
     if (firstServer) await new Promise((resolve) => firstServer.close(resolve));
     if (secondServer) await new Promise((resolve) => secondServer.close(resolve));
-    if (previousTranscriptDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
-    else process.env.CAT_CAFE_TRANSCRIPT_DIR = previousTranscriptDir;
+    if (previousTranscriptDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
+    else process.env.SHIFT_TRANSCRIPT_DIR = previousTranscriptDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

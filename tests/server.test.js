@@ -24,7 +24,7 @@ function readFrontendCss() {
 
 function fetch(input, init = {}) {
   const headers = new Headers(init.headers || {});
-  headers.set("X-Cat-Cafe-UI-Token", TEST_UI_TOKEN);
+  headers.set("X-Shift-UI-Token", TEST_UI_TOKEN);
   const method = String(init.method || "GET").toUpperCase();
   let body = init.body;
   if (["POST", "PUT", "PATCH"].includes(method) && !headers.has("content-type")) {
@@ -73,9 +73,9 @@ async function withServer(options, fn) {
   const serverOptions = { ...options };
   delete serverOptions.initialSessionIds;
   for (const sessionId of initialSessionIds) ensureSession(sessionsFile, sessionId);
-  const prevTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
+  const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   if (!prevTranscriptDir) {
-    process.env.CAT_CAFE_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
+    process.env.SHIFT_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   }
   const server = createServer({
     sessionsFile,
@@ -93,7 +93,7 @@ async function withServer(options, fn) {
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (!prevTranscriptDir) {
-      delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
+      delete process.env.SHIFT_TRANSCRIPT_DIR;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -122,8 +122,8 @@ test("index injects the per-process UI token and loads the authenticated API cli
     const response = await nativeFetch(`${baseUrl}/`);
     const html = await response.text();
     assert.equal(response.status, 200);
-    assert.match(html, new RegExp(`name="cat-cafe-ui-token" content="${TEST_UI_TOKEN}"`));
-    assert.doesNotMatch(html, /__CAT_CAFE_UI_TOKEN__/);
+    assert.match(html, new RegExp(`name="shift-ui-token" content="${TEST_UI_TOKEN}"`));
+    assert.doesNotMatch(html, /__SHIFT_UI_TOKEN__/);
     assert.match(html, /src="\/public\/boot\.js"/);
     const boot = require("../public/boot.js");
     assert.ok(boot.MODULES.includes("/public/api-client.js"));
@@ -143,7 +143,7 @@ test("UI API rejects cross-origin requests even with a valid token", async () =>
     const response = await nativeFetch(`${baseUrl}/api/agents`, {
       headers: {
         Origin: "https://evil.example",
-        "X-Cat-Cafe-UI-Token": TEST_UI_TOKEN,
+        "X-Shift-UI-Token": TEST_UI_TOKEN,
       },
     });
     assert.equal(response.status, 403);
@@ -163,7 +163,7 @@ test("UI API rejects non-JSON mutation requests before spawning an agent", async
       method: "POST",
       headers: {
         "content-type": "text/plain",
-        "X-Cat-Cafe-UI-Token": TEST_UI_TOKEN,
+        "X-Shift-UI-Token": TEST_UI_TOKEN,
       },
       body: JSON.stringify({ agent: "architect", prompt: "probe" }),
     });
@@ -899,10 +899,10 @@ test("chat endpoint does not create a worktree by default", async () => {
       assert.equal(response.status, 200);
       assert.equal(calls.length, 1);
       assert.equal(calls[0].cwd, baseDir);
-      assert.equal(calls[0].env.CAT_CAFE_WORKTREE, "0");
-      assert.equal(calls[0].env.CAT_CAFE_BASE_DIR, baseDir);
-      assert.equal(calls[0].env.CAT_CAFE_WORKTREE_DIR, baseDir);
-      assert.equal(calls[0].env.CAT_CAFE_BRANCH, "");
+      assert.equal(calls[0].env.SHIFT_WORKTREE, "0");
+      assert.equal(calls[0].env.SHIFT_BASE_DIR, baseDir);
+      assert.equal(calls[0].env.SHIFT_WORKTREE_DIR, baseDir);
+      assert.equal(calls[0].env.SHIFT_BRANCH, "");
     }
   );
 });
@@ -952,8 +952,8 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
       assert.equal(worktreeCalls[0].requestedBaseDir, baseDir);
       assert.equal(worktreeCalls[0].sessionId, sessionId);
       assert.equal(calls[0].cwd, worktreeDir);
-      assert.equal(calls[0].env.CAT_CAFE_WORKTREE, "1");
-      assert.equal(calls[0].env.CAT_CAFE_WORKTREE_DIR, worktreeDir);
+      assert.equal(calls[0].env.SHIFT_WORKTREE, "1");
+      assert.equal(calls[0].env.SHIFT_WORKTREE_DIR, worktreeDir);
     }
   );
 });
@@ -1060,13 +1060,13 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
 
       assert.equal(runs.length, 2);
       assert.equal(runs[0].cwd, worktreeDir);
-      assert.equal(runs[0].env.CAT_CAFE_WORKTREE, "1");
-      assert.equal(runs[0].env.CAT_CAFE_WORKTREE_DIR, worktreeDir);
+      assert.equal(runs[0].env.SHIFT_WORKTREE, "1");
+      assert.equal(runs[0].env.SHIFT_WORKTREE_DIR, worktreeDir);
 
       assert.equal(runs[1].cwd, baseDir);
-      assert.equal(runs[1].env.CAT_CAFE_WORKTREE, "0");
-      assert.equal(runs[1].env.CAT_CAFE_WORKTREE_DIR, baseDir);
-      assert.equal(runs[1].env.CAT_CAFE_BRANCH, "");
+      assert.equal(runs[1].env.SHIFT_WORKTREE, "0");
+      assert.equal(runs[1].env.SHIFT_WORKTREE_DIR, baseDir);
+      assert.equal(runs[1].env.SHIFT_BRANCH, "");
     }
   );
 });
@@ -1077,12 +1077,12 @@ test("chat endpoint does not reuse a readonly provider session after switching t
   const invocationsFile = path.join(tmpDir, "invocations.json");
   const sessionMapRoot = path.join(tmpDir, "session-maps");
   const transcriptsDir = path.join(tmpDir, "transcripts");
-  const prevTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
+  const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-resume-base-"));
   const worktreeDir = path.join(os.tmpdir(), "server-worktree-resume-session");
   const runs = [];
 
-  if (!prevTranscriptDir) process.env.CAT_CAFE_TRANSCRIPT_DIR = transcriptsDir;
+  if (!prevTranscriptDir) process.env.SHIFT_TRANSCRIPT_DIR = transcriptsDir;
 
   const server = createServer({
     uiToken: TEST_UI_TOKEN,
@@ -1151,7 +1151,7 @@ test("chat endpoint does not reuse a readonly provider session after switching t
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (!prevTranscriptDir) {
-      delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
+      delete process.env.SHIFT_TRANSCRIPT_DIR;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1163,12 +1163,12 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
   const invocationsFile = path.join(tmpDir, "invocations.json");
   const sessionMapRoot = path.join(tmpDir, "session-maps");
   const transcriptsDir = path.join(tmpDir, "transcripts");
-  const prevTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
+  const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-base-"));
   const worktreeDir = path.join(os.tmpdir(), "server-workspace-roundtrip-wt");
   const runs = [];
 
-  if (!prevTranscriptDir) process.env.CAT_CAFE_TRANSCRIPT_DIR = transcriptsDir;
+  if (!prevTranscriptDir) process.env.SHIFT_TRANSCRIPT_DIR = transcriptsDir;
 
   const server = createServer({
     uiToken: TEST_UI_TOKEN,
@@ -1277,7 +1277,7 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (!prevTranscriptDir) {
-      delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
+      delete process.env.SHIFT_TRANSCRIPT_DIR;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1492,8 +1492,8 @@ test("stale aborted chat cleanup does not unregister the replacement chat callba
         const callbackResp = await fetch(
           `${baseUrl}/api/callbacks/thread-context?` +
             `sessionId=${encodeURIComponent(session.id)}&` +
-            `invocationId=${encodeURIComponent(env.CAT_CAFE_INVOCATION_ID)}`,
-          { headers: { "X-Callback-Token": env.CAT_CAFE_CALLBACK_TOKEN } }
+            `invocationId=${encodeURIComponent(env.SHIFT_INVOCATION_ID)}`,
+          { headers: { "X-Callback-Token": env.SHIFT_CALLBACK_TOKEN } }
         );
         assert.equal(callbackResp.status, 200);
       } finally {
@@ -1626,7 +1626,7 @@ test("createInvocation returns expiresAt and stamps expiresAt on the token", () 
   callbacks.unregisterThread(sessionId);
 });
 
-test("CAT_CAFE_TOKEN_TTL_MS overrides the default TTL", () => {
+test("SHIFT_TOKEN_TTL_MS overrides the default TTL", () => {
   const sessionId = "session-ttl-2";
   const threadCtx = {
     res: { destroyed: false, writableEnded: false, write() { return true; } },
@@ -1638,15 +1638,15 @@ test("CAT_CAFE_TOKEN_TTL_MS overrides the default TTL", () => {
   };
   callbacks.registerThread(sessionId, threadCtx);
 
-  const prev = process.env.CAT_CAFE_TOKEN_TTL_MS;
-  process.env.CAT_CAFE_TOKEN_TTL_MS = "60000";
+  const prev = process.env.SHIFT_TOKEN_TTL_MS;
+  process.env.SHIFT_TOKEN_TTL_MS = "60000";
   try {
     const { expiresAt } = callbacks.createInvocation(sessionId, "architect");
     const expected = Date.now() + 60000;
     assert.ok(Math.abs(expiresAt - expected) < 100, `expiresAt should be ~60s in the future, got diff ${Math.abs(expiresAt - expected)}ms`);
   } finally {
-    if (prev === undefined) delete process.env.CAT_CAFE_TOKEN_TTL_MS;
-    else process.env.CAT_CAFE_TOKEN_TTL_MS = prev;
+    if (prev === undefined) delete process.env.SHIFT_TOKEN_TTL_MS;
+    else process.env.SHIFT_TOKEN_TTL_MS = prev;
     callbacks.unregisterThread(sessionId);
   }
 });
@@ -1768,10 +1768,10 @@ test("postMessage allows callbacks for the bound thread (stamped by registerThre
   callbacks.unregisterThread(sessionId);
 });
 
-test("prompt template injects CAT_CAFE_THREAD_ID and sessionId in the curl command", () => {
+test("prompt template injects SHIFT_THREAD_ID and sessionId in the curl command", () => {
   const instructions = callbacks.buildCallbackInstructions("http://127.0.0.1:8787");
-  assert.match(instructions, /\$CAT_CAFE_THREAD_ID/);
-  assert.match(instructions, /\\"sessionId\\": \\"\$CAT_CAFE_THREAD_ID\\"/);
+  assert.match(instructions, /\$SHIFT_THREAD_ID/);
+  assert.match(instructions, /\\"sessionId\\": \\"\$SHIFT_THREAD_ID\\"/);
   assert.match(instructions, /TTL/);
 });
 
@@ -1780,8 +1780,8 @@ test("prompt template injects CAT_CAFE_THREAD_ID and sessionId in the curl comma
 test("chat endpoint writes transcript events (invocation-start, stdout, invocation-end)", async () => {
   const transcript = require("../src/session/transcript");
   const tmpTranscriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-transcript-"));
-  const prevDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
-  process.env.CAT_CAFE_TRANSCRIPT_DIR = tmpTranscriptDir;
+  const prevDir = process.env.SHIFT_TRANSCRIPT_DIR;
+  process.env.SHIFT_TRANSCRIPT_DIR = tmpTranscriptDir;
   try {
     let capturedSessionId = null;
 
@@ -1850,8 +1850,8 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
     const hits = await transcript.searchTranscript(capturedSessionId, "transcript");
     assert.ok(hits.length >= 1, "search should find the user prompt");
   } finally {
-    if (prevDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
-    else process.env.CAT_CAFE_TRANSCRIPT_DIR = prevDir;
+    if (prevDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
+    else process.env.SHIFT_TRANSCRIPT_DIR = prevDir;
     fs.rmSync(tmpTranscriptDir, { recursive: true, force: true });
   }
 });
@@ -1860,8 +1860,8 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
 
 test("chat endpoint emits context-warning when fillRatio crosses warn threshold", async () => {
   // Tiny capacity so even a small chunk triggers the warn threshold.
-  const prevCapacity = process.env.CAT_CAFE_TEST_CAPACITY;
-  process.env.CAT_CAFE_TEST_CAPACITY = "20";
+  const prevCapacity = process.env.SHIFT_TEST_CAPACITY;
+  process.env.SHIFT_TEST_CAPACITY = "20";
 
   try {
     await withServer(
@@ -1893,15 +1893,15 @@ test("chat endpoint emits context-warning when fillRatio crosses warn threshold"
       }
     );
   } finally {
-    if (prevCapacity === undefined) delete process.env.CAT_CAFE_TEST_CAPACITY;
-    else process.env.CAT_CAFE_TEST_CAPACITY = prevCapacity;
+    if (prevCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
+    else process.env.SHIFT_TEST_CAPACITY = prevCapacity;
   }
 });
 
 test("chat endpoint terminates the chain with sealed event when action threshold crossed", async () => {
   // Very tiny capacity so the very first stdout chunk pushes ratio past 0.90.
-  const prevCapacity = process.env.CAT_CAFE_TEST_CAPACITY;
-  process.env.CAT_CAFE_TEST_CAPACITY = "20";
+  const prevCapacity = process.env.SHIFT_TEST_CAPACITY;
+  process.env.SHIFT_TEST_CAPACITY = "20";
 
   try {
     await withServer(
@@ -1930,8 +1930,8 @@ test("chat endpoint terminates the chain with sealed event when action threshold
       }
     );
   } finally {
-    if (prevCapacity === undefined) delete process.env.CAT_CAFE_TEST_CAPACITY;
-    else process.env.CAT_CAFE_TEST_CAPACITY = prevCapacity;
+    if (prevCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
+    else process.env.SHIFT_TEST_CAPACITY = prevCapacity;
   }
 });
 
@@ -1945,8 +1945,8 @@ test("chat endpoint terminates the chain with sealed event when action threshold
  */
 async function withActiveChat(fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "phase3-"));
-  const prevDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
-  process.env.CAT_CAFE_TRANSCRIPT_DIR = tmpDir;
+  const prevDir = process.env.SHIFT_TRANSCRIPT_DIR;
+  process.env.SHIFT_TRANSCRIPT_DIR = tmpDir;
 
   const captured = { env: null, kill: null };
 
@@ -2002,8 +2002,8 @@ async function withActiveChat(fn) {
       }
     );
   } finally {
-    if (prevDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
-    else process.env.CAT_CAFE_TRANSCRIPT_DIR = prevDir;
+    if (prevDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
+    else process.env.SHIFT_TRANSCRIPT_DIR = prevDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
@@ -2028,8 +2028,8 @@ test("/api/callbacks/session-search rejects invalid token with 401", async () =>
 test("/api/callbacks/session-search rejects missing query with 400", async () => {
   await withActiveChat(async (baseUrl, sid, captured) => {
     const resp = await fetch(
-      `${baseUrl}/api/callbacks/session-search?sessionId=${sid}&invocationId=${captured.env.CAT_CAFE_INVOCATION_ID}`,
-      { headers: { "X-Callback-Token": captured.env.CAT_CAFE_CALLBACK_TOKEN } }
+      `${baseUrl}/api/callbacks/session-search?sessionId=${sid}&invocationId=${captured.env.SHIFT_INVOCATION_ID}`,
+      { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
     );
     assert.equal(resp.status, 400);
   });
@@ -2037,8 +2037,8 @@ test("/api/callbacks/session-search rejects missing query with 400", async () =>
 
 test("/api/callbacks/session-search returns hits during active chat", async () => {
   await withActiveChat(async (baseUrl, sid, captured) => {
-    const invId = captured.env.CAT_CAFE_INVOCATION_ID;
-    const token = captured.env.CAT_CAFE_CALLBACK_TOKEN;
+    const invId = captured.env.SHIFT_INVOCATION_ID;
+    const token = captured.env.SHIFT_CALLBACK_TOKEN;
 
     // Give the user-prompt transcript event time to flush
     await new Promise((r) => setTimeout(r, 200));
@@ -2065,9 +2065,9 @@ test("/api/callbacks/session-search caps limit at 200", async () => {
     const resp = await fetch(
       `${baseUrl}/api/callbacks/session-search?` +
         `sessionId=${encodeURIComponent(sid)}&` +
-        `invocationId=${encodeURIComponent(captured.env.CAT_CAFE_INVOCATION_ID)}&` +
+        `invocationId=${encodeURIComponent(captured.env.SHIFT_INVOCATION_ID)}&` +
         `query=redis&limit=99999`,
-      { headers: { "X-Callback-Token": captured.env.CAT_CAFE_CALLBACK_TOKEN } }
+      { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
     );
     assert.equal(resp.status, 200);
     const body = await resp.json();
@@ -2083,14 +2083,14 @@ test("/api/callbacks/list-invocations returns agent + state metadata", async () 
     const resp = await fetch(
       `${baseUrl}/api/callbacks/list-invocations?` +
         `sessionId=${encodeURIComponent(sid)}&` +
-        `invocationId=${encodeURIComponent(captured.env.CAT_CAFE_INVOCATION_ID)}`,
-      { headers: { "X-Callback-Token": captured.env.CAT_CAFE_CALLBACK_TOKEN } }
+        `invocationId=${encodeURIComponent(captured.env.SHIFT_INVOCATION_ID)}`,
+      { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
     );
     assert.equal(resp.status, 200);
     const body = await resp.json();
     assert.ok(Array.isArray(body.invocations));
     // The active invocation should appear (in-flight, no end event yet)
-    const active = body.invocations.find((i) => i.invocationId === captured.env.CAT_CAFE_INVOCATION_ID);
+    const active = body.invocations.find((i) => i.invocationId === captured.env.SHIFT_INVOCATION_ID);
     assert.ok(active, `active invocation should be listed, got: ${JSON.stringify(body.invocations)}`);
     assert.equal(active.agent, "planner");
     assert.ok(active.startedAt);
@@ -2105,14 +2105,14 @@ test("/api/callbacks/read-invocation returns paginated events", async () => {
     // Give invocation-start time to flush
     await new Promise((r) => setTimeout(r, 200));
 
-    const invId = captured.env.CAT_CAFE_INVOCATION_ID;
+    const invId = captured.env.SHIFT_INVOCATION_ID;
     const resp = await fetch(
       `${baseUrl}/api/callbacks/read-invocation?` +
         `sessionId=${encodeURIComponent(sid)}&` +
         `invocationId=${encodeURIComponent(invId)}&` +
         `targetInvocationId=${encodeURIComponent(invId)}&` +
         `from=0&limit=10`,
-      { headers: { "X-Callback-Token": captured.env.CAT_CAFE_CALLBACK_TOKEN } }
+      { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
     );
     assert.equal(resp.status, 200);
     const body = await resp.json();
@@ -2131,8 +2131,8 @@ test("/api/callbacks/read-invocation requires targetInvocationId", async () => {
     const resp = await fetch(
       `${baseUrl}/api/callbacks/read-invocation?` +
         `sessionId=${encodeURIComponent(sid)}&` +
-        `invocationId=${encodeURIComponent(captured.env.CAT_CAFE_INVOCATION_ID)}`,
-      { headers: { "X-Callback-Token": captured.env.CAT_CAFE_CALLBACK_TOKEN } }
+        `invocationId=${encodeURIComponent(captured.env.SHIFT_INVOCATION_ID)}`,
+      { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
     );
     assert.equal(resp.status, 400);
   });
@@ -2142,7 +2142,7 @@ test("/api/callbacks/read-invocation pagination slices correctly", async () => {
   await withActiveChat(async (baseUrl, sid, captured) => {
     // Inject a bunch of stdout events so pagination has something to slice
     const transcript = require("../src/session/transcript");
-    const invId = captured.env.CAT_CAFE_INVOCATION_ID;
+    const invId = captured.env.SHIFT_INVOCATION_ID;
     for (let i = 0; i < 10; i++) {
       transcript.appendEvent(sid, invId, "stdout", { text: `chunk-${i}` });
     }
@@ -2154,7 +2154,7 @@ test("/api/callbacks/read-invocation pagination slices correctly", async () => {
         `invocationId=${encodeURIComponent(invId)}&` +
         `targetInvocationId=${encodeURIComponent(invId)}&` +
         `from=2&limit=3`,
-      { headers: { "X-Callback-Token": captured.env.CAT_CAFE_CALLBACK_TOKEN } }
+      { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
     );
     assert.equal(resp.status, 200);
     const body = await resp.json();
@@ -2261,7 +2261,7 @@ test("frontend keeps session-level recall entry only inside the right-side tabs"
 
 test("frontend uses unified Chinese console copy in the main shell", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  assert.match(html, /多 Agent 协作台/);
+  assert.match(html, /Shift · 交班台/);
   assert.match(html, /已激活能力/);
   assert.match(html, />Agents</);
   assert.doesNotMatch(html, /agent-panel-title/);
@@ -2647,8 +2647,8 @@ test("frontend styles.css gives the recall panel a full-height scroll layout", (
 
 test("chat endpoint injects bootstrap packet (identity + recall rule) into first agent's prompt", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bootstrap-inject-"));
-  const prevDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
-  process.env.CAT_CAFE_TRANSCRIPT_DIR = tmpDir;
+  const prevDir = process.env.SHIFT_TRANSCRIPT_DIR;
+  process.env.SHIFT_TRANSCRIPT_DIR = tmpDir;
 
   let capturedPrompt = null;
 
@@ -2704,8 +2704,8 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
       "agent identity should precede session identity"
     );
   } finally {
-    if (prevDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
-    else process.env.CAT_CAFE_TRANSCRIPT_DIR = prevDir;
+    if (prevDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
+    else process.env.SHIFT_TRANSCRIPT_DIR = prevDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -2839,8 +2839,8 @@ test("A2A-routed agents receive structured handoff fields when present", async (
 test("bootstrap digest lists prior invocations when chat is re-entered with same sessionId", async () => {
   const transcript = require("../src/session/transcript");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bootstrap-resume-"));
-  const prevDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
-  process.env.CAT_CAFE_TRANSCRIPT_DIR = tmpDir;
+  const prevDir = process.env.SHIFT_TRANSCRIPT_DIR;
+  process.env.SHIFT_TRANSCRIPT_DIR = tmpDir;
 
   const sessionId = "bootstrap-resume-test";
   let firstPrompts = null;
@@ -2900,19 +2900,19 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
     assert.match(secondPrompt, /<!-- Digest/);
     assert.doesNotMatch(secondPrompt, /第一个 invocation/);
   } finally {
-    if (prevDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
-    else process.env.CAT_CAFE_TRANSCRIPT_DIR = prevDir;
+    if (prevDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
+    else process.env.SHIFT_TRANSCRIPT_DIR = prevDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 // ── Recall (memory/回忆) tests ────────────────────────────────
 
-test("buildCallbackInstructions includes sessionId, CAT_CAFE_THREAD_ID and recall routes", () => {
+test("buildCallbackInstructions includes sessionId, SHIFT_THREAD_ID and recall routes", () => {
   const instructions = callbacks.buildCallbackInstructions("http://example.test", "session-xyz");
-  assert.match(instructions, /\$CAT_CAFE_THREAD_ID/);
-  assert.ok(instructions.includes("sessionId=$CAT_CAFE_THREAD_ID"), "should reference sessionId=$CAT_CAFE_THREAD_ID");
-  assert.ok(instructions.includes('\\"sessionId\\": \\"$CAT_CAFE_THREAD_ID\\"'), "post-message body should include sessionId");
+  assert.match(instructions, /\$SHIFT_THREAD_ID/);
+  assert.ok(instructions.includes("sessionId=$SHIFT_THREAD_ID"), "should reference sessionId=$SHIFT_THREAD_ID");
+  assert.ok(instructions.includes('\\"sessionId\\": \\"$SHIFT_THREAD_ID\\"'), "post-message body should include sessionId");
   assert.match(instructions, /\/api\/callbacks\/list-invocations/);
   assert.match(instructions, /\/api\/callbacks\/session-search/);
   assert.match(instructions, /\/api\/callbacks\/read-invocation/);

@@ -10,7 +10,7 @@ module.exports = [
       "public/vendor/**",
       "dist/**",
       "build/**",
-      ".cat-cafe/**",
+      ".shift/**",
       "src/session/data/**",
     ],
   },

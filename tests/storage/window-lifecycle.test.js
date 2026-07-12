@@ -176,7 +176,7 @@ test("different agents and base/worktree workspaces keep independent windows", (
     const architectWorktree = recorder.ensureWindow({
       session,
       threadId: session.id,
-      ...baseCoordinate({ workspaceKey: "worktree:C:/repo/.cat-cafe/wt-1" }),
+      ...baseCoordinate({ workspaceKey: "worktree:C:/repo/.shift/wt-1" }),
     });
 
     assert.notEqual(architectBase.id, coderBase.id);
@@ -207,7 +207,7 @@ test("different agents and base/worktree workspaces keep independent windows", (
         threadId: session.id,
         agentId: "architect",
         providerKey: "codex:gpt-5.5",
-        workspaceKey: "worktree:C:/repo/.cat-cafe/wt-1",
+        workspaceKey: "worktree:C:/repo/.shift/wt-1",
       }).id,
       architectWorktree.id
     );

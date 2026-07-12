@@ -17,6 +17,7 @@ credentials*
 *secret*
 
 # Tool cache & state
+.shift/
 .cat-cafe/
 .sisyphus/
 .invoke-chat-invocations.json

@@ -35,7 +35,7 @@ test("ensureWorktree creates a managed git worktree for a session", () => {
   assert.ok(meta.worktreeDir.startsWith(path.resolve(`${baseDir}.worktrees`) + path.sep));
   assert.ok(fs.existsSync(path.join(meta.worktreeDir, ".git")));
   assert.ok(fs.existsSync(path.join(meta.worktreeDir, ".env.local")));
-  assert.match(fs.readFileSync(path.join(meta.worktreeDir, ".env.local"), "utf8"), /CAT_CAFE_WORKTREE=1/);
+  assert.match(fs.readFileSync(path.join(meta.worktreeDir, ".env.local"), "utf8"), /SHIFT_WORKTREE=1/);
 });
 
 test("ensureWorktree reuses the same worktree for the same session", () => {

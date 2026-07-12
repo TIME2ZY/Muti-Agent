@@ -1,9 +1,10 @@
 const { parseA2AMentions, getMaxA2ADepth } = require("./routing");
 const transcript = require("../session/transcript");
+const { ENV } = require("../shared/brand");
 
 // Default token TTL: 30 minutes. Long enough for most invocations, short
 // enough to prevent stale tokens from accumulating after the worklist exits.
-// Override via CAT_CAFE_TOKEN_TTL_MS (positive integer ms).
+// Override via SHIFT_TOKEN_TTL_MS (positive integer ms).
 const DEFAULT_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 // Active chat threads that can receive MCP-style HTTP callbacks.
@@ -25,7 +26,7 @@ function generateToken() {
 }
 
 function getTokenTtlMs() {
-  const env = Number(process.env.CAT_CAFE_TOKEN_TTL_MS);
+  const env = Number(process.env[ENV.TOKEN_TTL_MS]);
   return Number.isFinite(env) && env > 0 ? env : DEFAULT_TOKEN_TTL_MS;
 }
 
@@ -209,27 +210,27 @@ function postMessage(threadId, invocationId, content, { appendToSession, durable
 /**
  * Build the HTTP callback instruction block that gets injected into agent prompts.
  * This teaches agents without native dynamic MCP support (Codex, opencode, etc.)
- * how to call back into the Cat Café server via curl.
+ * how to call back into the Shift server via curl.
  *
  * sessionId is the active chat thread id. It is injected both into the curl
- * examples and (by the server) as the CAT_CAFE_THREAD_ID env var, so agents can
- * quote $CAT_CAFE_THREAD_ID instead of hard-coding it.
+ * examples and (by the server) as the SHIFT_THREAD_ID env var, so agents can
+ * quote $SHIFT_THREAD_ID instead of hard-coding it.
  */
 function buildCallbackInstructions(apiUrl, _sessionId) {
-  // Curl examples intentionally use $CAT_CAFE_THREAD_ID so agents do not hard-code ids.
+  // Curl examples intentionally use $SHIFT_THREAD_ID so agents do not hard-code ids.
   return `<!-- ═══════════════════════════════════════════════════════════ -->
 <!-- MCP 回调工具说明（通过 HTTP 调用）                            -->
 <!-- 你可以在执行过程中主动发消息、查阅历史，不需要等执行结束      -->
 <!-- 环境变量已注入：                                              -->
-<!--   $CAT_CAFE_THREAD_ID        标识当前对话（不要伪造）          -->
-<!--   $CAT_CAFE_INVOCATION_ID    标识本次调用                      -->
-<!--   $CAT_CAFE_CALLBACK_TOKEN   本次调用的密码                    -->
+<!--   $SHIFT_THREAD_ID        标识当前对话（不要伪造）          -->
+<!--   $SHIFT_INVOCATION_ID    标识本次调用                      -->
+<!--   $SHIFT_CALLBACK_TOKEN   本次调用的密码                    -->
 <!-- ═══════════════════════════════════════════════════════════ -->
 
 ## 发送消息到聊天室
 
 \`\`\`bash
-curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/json" -d "{\\"sessionId\\": \\"$CAT_CAFE_THREAD_ID\\", \\"invocationId\\": \\"$CAT_CAFE_INVOCATION_ID\\", \\"callbackToken\\": \\"$CAT_CAFE_CALLBACK_TOKEN\\", \\"content\\": \\"你的消息\\"}"
+curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/json" -d "{\\"sessionId\\": \\"$SHIFT_THREAD_ID\\", \\"invocationId\\": \\"$SHIFT_INVOCATION_ID\\", \\"callbackToken\\": \\"$SHIFT_CALLBACK_TOKEN\\", \\"content\\": \\"你的消息\\"}"
 \`\`\`
 
 用法示例：
@@ -242,19 +243,19 @@ curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/
 - @mention 必须单独出现在行首才会触发路由（例如 \`@Codex 请 review\`）
 - 代码块内的 @mention 不会被路由
 - 不要 @ 自己
-- \`sessionId\` 必须使用 \`$CAT_CAFE_THREAD_ID\`，不要伪造
+- \`sessionId\` 必须使用 \`$SHIFT_THREAD_ID\`，不要伪造
 - callbackToken 有 TTL（默认 30 分钟），过期会 401
 
 ## 获取当前对话上下文
 
 \`\`\`bash
-curl -G ${apiUrl}/api/callbacks/thread-context -H "X-Callback-Token: $CAT_CAFE_CALLBACK_TOKEN" --data-urlencode "sessionId=$CAT_CAFE_THREAD_ID" --data-urlencode "invocationId=$CAT_CAFE_INVOCATION_ID"
+curl -G ${apiUrl}/api/callbacks/thread-context -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" --data-urlencode "sessionId=$SHIFT_THREAD_ID" --data-urlencode "invocationId=$SHIFT_INVOCATION_ID"
 \`\`\`
 
 ## 列出本会话所有 invocation（谁跑了什么、什么状态）
 
 \`\`\`bash
-curl -G ${apiUrl}/api/callbacks/list-invocations -H "X-Callback-Token: $CAT_CAFE_CALLBACK_TOKEN" --data-urlencode "sessionId=$CAT_CAFE_THREAD_ID" --data-urlencode "invocationId=$CAT_CAFE_INVOCATION_ID"
+curl -G ${apiUrl}/api/callbacks/list-invocations -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" --data-urlencode "sessionId=$SHIFT_THREAD_ID" --data-urlencode "invocationId=$SHIFT_INVOCATION_ID"
 \`\`\`
 
 返回：\`{ invocations: [{ invocationId, agent, startedAt, endedAt, state, eventCount }] }\`
@@ -263,9 +264,9 @@ curl -G ${apiUrl}/api/callbacks/list-invocations -H "X-Callback-Token: $CAT_CAFE
 
 \`\`\`bash
 curl -G ${apiUrl}/api/callbacks/session-search \\
-  -H "X-Callback-Token: $CAT_CAFE_CALLBACK_TOKEN" \\
-  --data-urlencode "sessionId=$CAT_CAFE_THREAD_ID" \\
-  --data-urlencode "invocationId=$CAT_CAFE_INVOCATION_ID" \\
+  -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" \\
+  --data-urlencode "sessionId=$SHIFT_THREAD_ID" \\
+  --data-urlencode "invocationId=$SHIFT_INVOCATION_ID" \\
   --data-urlencode "query=redis 端口" \\
   --data-urlencode "limit=10"
 \`\`\`
@@ -276,9 +277,9 @@ curl -G ${apiUrl}/api/callbacks/session-search \\
 
 \`\`\`bash
 curl -G ${apiUrl}/api/callbacks/read-invocation \\
-  -H "X-Callback-Token: $CAT_CAFE_CALLBACK_TOKEN" \\
-  --data-urlencode "sessionId=$CAT_CAFE_THREAD_ID" \\
-  --data-urlencode "invocationId=$CAT_CAFE_INVOCATION_ID" \\
+  -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" \\
+  --data-urlencode "sessionId=$SHIFT_THREAD_ID" \\
+  --data-urlencode "invocationId=$SHIFT_INVOCATION_ID" \\
   --data-urlencode "targetInvocationId=<invocationId>" \\
   --data-urlencode "from=0" \\
   --data-urlencode "limit=200"

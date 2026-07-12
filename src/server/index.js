@@ -355,7 +355,7 @@ function createServer(options = {}) {
 if (require.main === module) {
   const server = createServer();
   server.listen(DEFAULT_PORT, "127.0.0.1", () => {
-    console.log(`Invoke UI listening at http://127.0.0.1:${DEFAULT_PORT}`);
+    console.log(`Shift listening at http://127.0.0.1:${DEFAULT_PORT}`);
     for (const line of collectProviderStartupDiagnostics()) {
       console.log(line);
     }

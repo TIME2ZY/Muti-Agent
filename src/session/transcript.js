@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { DEFAULT_TRANSCRIPT_DIR } = require("../shared/runtime-paths");
 const { isValidOpaqueId, resolveInside } = require("../server/id-policy");
+const { ENV } = require("../shared/brand");
 const MAX_LINE_BYTES = 256 * 1024;
 
 // Single global write queue. Serializing all appends through one chain
@@ -10,11 +11,11 @@ const MAX_LINE_BYTES = 256 * 1024;
 let writeChain = Promise.resolve();
 
 function getTranscriptDir() {
-  return process.env.CAT_CAFE_TRANSCRIPT_DIR || DEFAULT_TRANSCRIPT_DIR;
+  return process.env[ENV.TRANSCRIPT_DIR] || DEFAULT_TRANSCRIPT_DIR;
 }
 
 function setTranscriptDir(dir) {
-  process.env.CAT_CAFE_TRANSCRIPT_DIR = dir;
+  process.env[ENV.TRANSCRIPT_DIR] = dir;
 }
 
 function sanitizeId(id) {

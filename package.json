@@ -1,6 +1,7 @@
 {
-  "name": "multi-agent-invoke-ui",
+  "name": "shift-console",
   "version": "0.1.0",
+  "description": "Shift — local multi-agent console (交班台)",
   "private": true,
   "type": "commonjs",
   "engines": {

@@ -21,7 +21,7 @@
 ```js
 test("frontend uses unified Chinese console copy in the main shell", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  assert.match(html, /多 Agent 协作台/);
+  assert.match(html, /Shift/);
   assert.match(html, /已激活能力/);
   assert.match(html, /参与 Agent/);
   assert.match(html, />清空</);
@@ -57,7 +57,7 @@ Expected: FAIL because the current UI still contains `Agent Chat`, `Rules`, `Mod
 
 ```js
 // index.html
-<span class="main-title">多 Agent 协作台</span>
+<span class="main-title">Shift</span>
 <span class="skills-bar-label">已激活能力</span>
 <div class="agent-panel-title">参与 Agent</div>
 <button id="btn-clear" class="btn-cmd" type="button">清空</button>

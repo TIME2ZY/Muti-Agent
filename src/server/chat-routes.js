@@ -1,5 +1,6 @@
 const { assertValidOpaqueId } = require("./id-policy");
 const { resolveResumeSessionId, abandonProviderSession } = require("./session-map-store");
+const { ENV } = require("../shared/brand");
 
 const NOOP_DURABLE_RECORDER = Object.freeze({
   ensureWindow: () => null,
@@ -168,7 +169,7 @@ function createChatRoutes({
       useWorktree &&
       sessionWorktree &&
       !sessionWorktree.previewPid &&
-      !process.env.CAT_CAFE_PREVIEW
+      !process.env[ENV.PREVIEW]
     ) {
       let targetGitRoot = null;
       try {
@@ -220,7 +221,7 @@ function createChatRoutes({
 
     const { augmentedPrompt, skillNames } = augmentPrompt(rawPrompt, useWorktree);
     const protocol = req.headers["x-forwarded-proto"] || "http";
-    const apiUrl = process.env.CAT_CAFE_API_URL || `${protocol}://${req.headers.host}`;
+    const apiUrl = process.env[ENV.API_URL] || `${protocol}://${req.headers.host}`;
     const callbackInstructions = callbacks.buildCallbackInstructions(apiUrl, sessionId);
     const worklist = [requestedAgent];
     const maxDepth = getMaxA2ADepth();
@@ -390,14 +391,14 @@ function createChatRoutes({
         healthTracker.addInput(promptForAgent.length);
         threadCtx.currentInvocationId = invocationId;
         const invocationEnv = {
-          CAT_CAFE_API_URL: apiUrl,
-          CAT_CAFE_THREAD_ID: sessionId,
-          CAT_CAFE_INVOCATION_ID: invocationId,
-          CAT_CAFE_CALLBACK_TOKEN: callbackToken,
-          CAT_CAFE_WORKTREE: activeWorktree ? "1" : "0",
-          CAT_CAFE_BASE_DIR: runWorkspace.baseDir,
-          CAT_CAFE_WORKTREE_DIR: runWorkspace.worktreeDir,
-          CAT_CAFE_BRANCH: runWorkspace.branch || "",
+          [ENV.API_URL]: apiUrl,
+          [ENV.THREAD_ID]: sessionId,
+          [ENV.INVOCATION_ID]: invocationId,
+          [ENV.CALLBACK_TOKEN]: callbackToken,
+          [ENV.WORKTREE]: activeWorktree ? "1" : "0",
+          [ENV.BASE_DIR]: runWorkspace.baseDir,
+          [ENV.WORKTREE_DIR]: runWorkspace.worktreeDir,
+          [ENV.BRANCH]: runWorkspace.branch || "",
           INVOKE_SESSION_ID: resumeSessionId,
           INVOKE_SESSION_FILE: getSessionMapPath(sessionId, sessionMapRoot),
           INVOKE_WORKSPACE_KEY: workspaceKey,

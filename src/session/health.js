@@ -1,4 +1,5 @@
 const { AGENTS, DEFAULT_CONTEXT_TOKENS, getAgentModelProfile } = require("../agents/catalog");
+const { ENV } = require("../shared/brand");
 
 // Rough rule of thumb: 1 token ≈ 4 characters for English/CJK-mixed text.
 // This is intentionally conservative — overestimating token count means we
@@ -12,7 +13,7 @@ const DEFAULT_CAPACITY_TOKENS = DEFAULT_CONTEXT_TOKENS;
 function getAgentCapacity(agentId) {
   // Test override: lets integration tests force tiny capacities to exercise
   // warn/action thresholds without producing megabytes of stdout.
-  const envOverride = Number(process.env.CAT_CAFE_TEST_CAPACITY);
+  const envOverride = Number(process.env[ENV.TEST_CAPACITY]);
   if (Number.isFinite(envOverride) && envOverride > 0) return envOverride;
 
   const agent = AGENTS[agentId];

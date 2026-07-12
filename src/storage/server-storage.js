@@ -1,10 +1,11 @@
 const path = require("node:path");
 const { DEFAULT_MEMORY_DB_FILE, DEFAULT_SESSIONS_FILE } = require("../shared/runtime-paths");
+const { ENV } = require("../shared/brand");
 const { createDualWriteRecorder } = require("./dual-write-recorder");
 const { createStorage } = require("./index");
 
 function createServerStorage(options = {}, sessionsFile, logger = console) {
-  const mode = options.storageMode || process.env.CAT_CAFE_STORAGE_MODE || "dual";
+  const mode = options.storageMode || process.env[ENV.STORAGE_MODE] || "dual";
   if (!new Set(["files", "dual", "sqlite"]).has(mode)) {
     throw new Error(`Unsupported storage mode "${mode}". Use files, dual, or sqlite.`);
   }
@@ -22,7 +23,7 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
   if (!storage) {
     const file =
       options.memoryDbFile ||
-      process.env.CAT_CAFE_MEMORY_DB ||
+      process.env[ENV.MEMORY_DB] ||
       (sessionsFile && path.resolve(sessionsFile) !== path.resolve(DEFAULT_SESSIONS_FILE)
         ? path.join(path.dirname(sessionsFile), "memory.sqlite")
         : DEFAULT_MEMORY_DB_FILE);

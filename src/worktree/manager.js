@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const { assertValidOpaqueId, resolveInside } = require("../server/id-policy");
+const { ENV, LOCAL_STATE_DIR } = require("../shared/brand");
 
 const DEFAULT_STATE_FILE = ".invoke-worktrees.json";
 
@@ -61,11 +62,11 @@ function isInside(parent, child) {
 function writeWorktreeEnv(meta) {
   const envPath = path.join(meta.worktreeDir, ".env.local");
   const lines = [
-    "CAT_CAFE_WORKTREE=1",
-    `CAT_CAFE_SESSION_ID=${meta.sessionId}`,
-    `CAT_CAFE_BASE_DIR=${meta.baseDir}`,
-    `CAT_CAFE_WORKTREE_DIR=${meta.worktreeDir}`,
-    `CAT_CAFE_BRANCH=${meta.branch}`,
+    `${ENV.WORKTREE}=1`,
+    `${ENV.SESSION_ID}=${meta.sessionId}`,
+    `${ENV.BASE_DIR}=${meta.baseDir}`,
+    `${ENV.WORKTREE_DIR}=${meta.worktreeDir}`,
+    `${ENV.BRANCH}=${meta.branch}`,
     "",
   ];
   fs.writeFileSync(envPath, lines.join("\n"), "utf8");
@@ -75,7 +76,7 @@ function excludeGeneratedFiles(worktreeDir) {
   const excludePath = runGit(["rev-parse", "--git-path", "info/exclude"], worktreeDir);
   fs.mkdirSync(path.dirname(excludePath), { recursive: true });
   const existing = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, "utf8") : "";
-  const entries = [".env.local", ".cat-cafe/"];
+  const entries = [".env.local", `${LOCAL_STATE_DIR}/`];
   const missing = entries.filter((entry) => !existing.split(/\r?\n/).includes(entry));
   if (missing.length > 0) {
     fs.appendFileSync(excludePath, `${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${missing.join("\n")}\n`, "utf8");
@@ -234,7 +235,7 @@ function createWorktreeManager(opts = {}) {
       ...process.env,
       PORT: String(port),
       NODE_PATH: path.join(rootDir, "node_modules"),
-      CAT_CAFE_PREVIEW: "1",
+      [ENV.PREVIEW]: "1",
     };
     const child = spawn("node", ["src/server/index.js"], {
       cwd: existing.worktreeDir,

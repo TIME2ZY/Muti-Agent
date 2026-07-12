@@ -15,7 +15,7 @@
 - 数据/客户端层已部分拆出：`api-client`、`session-api`、`session-controller`、`chat-client`、`session-runtime`、`workspace-diff` 等
 - **视图编排仍高度集中在 `public/app.js`（≈2000+ 行）**，工作区整树重建、thinking 已采集未展示、CSS/依赖可维护性偏弱
 
-产品定位是**本地多 Agent 协作台**，不是重型 SaaS。技术选型继续保持 **vanilla JS + 零构建可运行**，用模块边界和局部渲染换可维护性与体验，而不是换框架。
+产品定位是 **Shift（交班台）** 本地多 Agent 协作控制台，不是重型 SaaS。技术选型继续保持 **vanilla JS + 零构建可运行**，用模块边界和局部渲染换可维护性与体验，而不是换框架。
 
 ---
 

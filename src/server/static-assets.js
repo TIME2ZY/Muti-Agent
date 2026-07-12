@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { UI_TOKEN_PLACEHOLDER } = require("../shared/brand");
 
 const STATIC_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -23,7 +24,7 @@ function serveIndex(res, { indexPath, uiToken, sendJson }) {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
     });
-    const html = content.toString("utf8").replace("__CAT_CAFE_UI_TOKEN__", uiToken);
+    const html = content.toString("utf8").replace(UI_TOKEN_PLACEHOLDER, uiToken);
     res.end(html);
   });
 }
