@@ -9,7 +9,7 @@
 - 提供统一 Web UI，编排多个角色化 Agent（规划、编码、前端、评审等）
 - 用应用层 skills（`skills/*.md`）注入协作规则，与 CLI 原生 skill 隔离
 - 支持会话持久化、transcript、worktree 隔离改代码、Agent 间 @ 提及接力
-- 运行时尽量少依赖：纯 Node 内置模块 + 静态前端（无 npm production 依赖）
+- 运行时保持轻量：静态前端 + 本地 SQLite 持久化基础层（`better-sqlite3`）
 - 开发态使用 ESLint / Prettier / EditorConfig 与 GitHub Actions 保证质量
 
 ## 环境要求
@@ -17,7 +17,7 @@
 | 项目    | 要求                                                                        |
 | ------- | --------------------------------------------------------------------------- |
 | Node.js | **>= 20**（见 `package.json` `engines` 与 `.nvmrc`）                        |
-| 包管理  | 运行 UI 可不装依赖；跑 lint/CI 需 `npm ci` 安装 `devDependencies`           |
+| 包管理  | 使用 `npm ci` 安装 SQLite 运行时依赖与开发工具                              |
 | CLI     | 本机可执行 `codex`、`opencode`、`grok`（Grok Build CLI，按所用 Agent 安装） |
 | 系统    | Windows / macOS / Linux；Windows 建议 PowerShell 7（`pwsh`）                |
 
@@ -36,6 +36,7 @@ npm ci
 
 ```bash
 # 克隆后进入仓库根目录
+npm ci
 npm start
 # 等价于: node src/server/index.js
 ```
@@ -97,6 +98,7 @@ http://127.0.0.1:8787
 | `src/server/`   | HTTP 服务、路由、UI 安全、会话与调用存储、`skills.js` 技能系统              |
 | `src/agents/`   | CLI 调用、Agent 定义、身份包（`identities/`）、A2A 路由、回调协议、provider |
 | `src/session/`  | transcript、上下文健康、会话密封与 bootstrap                                |
+| `src/storage/`  | SQLite schema、migration、事务与分代记忆 Repository 基础层                  |
 | `src/worktree/` | 按会话创建/丢弃 git worktree                                                |
 | `public/`       | 前端（IIFE + `window.*` 模块，无 bundler）                                  |
 | `skills/`       | 应用层协作技能（Markdown + frontmatter）                                    |

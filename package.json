@@ -20,5 +20,8 @@
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
     "prettier": "^3.6.2"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1"
   }
 }

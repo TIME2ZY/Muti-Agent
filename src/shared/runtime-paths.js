@@ -8,6 +8,7 @@ const DEFAULT_SESSION_MAP_ROOT = path.join(RUNTIME_DATA_DIR, "session-maps");
 const DEFAULT_TRANSCRIPT_DIR = path.join(RUNTIME_DATA_DIR, "transcripts");
 const DEFAULT_WORKTREE_STATE_FILE = path.join(RUNTIME_DATA_DIR, "worktrees.json");
 const DEFAULT_RAW_EVENTS_DIR = path.join(RUNTIME_DATA_DIR, "raw-events");
+const DEFAULT_MEMORY_DB_FILE = path.join(RUNTIME_DATA_DIR, "memory.sqlite");
 
 module.exports = {
   ROOT,
@@ -18,4 +19,5 @@ module.exports = {
   DEFAULT_TRANSCRIPT_DIR,
   DEFAULT_WORKTREE_STATE_FILE,
   DEFAULT_RAW_EVENTS_DIR,
+  DEFAULT_MEMORY_DB_FILE,
 };

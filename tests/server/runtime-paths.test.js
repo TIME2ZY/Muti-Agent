@@ -15,4 +15,5 @@ test("runtime paths live under data/runtime", () => {
   assert.equal(runtimePaths.DEFAULT_SESSION_MAP_ROOT, path.join(runtimeDir, "session-maps"));
   assert.equal(runtimePaths.DEFAULT_TRANSCRIPT_DIR, path.join(runtimeDir, "transcripts"));
   assert.equal(runtimePaths.DEFAULT_WORKTREE_STATE_FILE, path.join(runtimeDir, "worktrees.json"));
+  assert.equal(runtimePaths.DEFAULT_MEMORY_DB_FILE, path.join(runtimeDir, "memory.sqlite"));
 });
