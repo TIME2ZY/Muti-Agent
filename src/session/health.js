@@ -1,4 +1,4 @@
-const { AGENTS } = require("../agents/invoke-cli");
+const { AGENTS, DEFAULT_CONTEXT_TOKENS, getAgentModelProfile } = require("../agents/catalog");
 
 // Rough rule of thumb: 1 token ≈ 4 characters for English/CJK-mixed text.
 // This is intentionally conservative — overestimating token count means we
@@ -7,7 +7,7 @@ const CHARS_PER_TOKEN = 4;
 
 // All known agents currently use 200k token context windows. Override per
 // agent via AGENTS[id].capacityTokens, or per call via makeTracker options.
-const DEFAULT_CAPACITY_TOKENS = 200_000;
+const DEFAULT_CAPACITY_TOKENS = DEFAULT_CONTEXT_TOKENS;
 
 function getAgentCapacity(agentId) {
   // Test override: lets integration tests force tiny capacities to exercise
@@ -17,7 +17,9 @@ function getAgentCapacity(agentId) {
 
   const agent = AGENTS[agentId];
   if (!agent) return DEFAULT_CAPACITY_TOKENS;
-  return agent.capacityTokens || DEFAULT_CAPACITY_TOKENS;
+  if (agent.capacityTokens) return agent.capacityTokens;
+  const modelProfile = getAgentModelProfile(agentId);
+  return modelProfile ? modelProfile.contextTokens : DEFAULT_CAPACITY_TOKENS;
 }
 
 function makeTracker(agentId, opts = {}) {

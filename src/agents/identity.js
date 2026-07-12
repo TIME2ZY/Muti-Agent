@@ -1,6 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseSkillFrontmatter } = require("../server/skills");
+const { parseSkillFrontmatter } = require("../shared/frontmatter");
 
 const DEFAULT_IDENTITIES_DIR = path.join(__dirname, "identities");
 

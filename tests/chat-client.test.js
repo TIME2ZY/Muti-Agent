@@ -157,6 +157,97 @@ test("background SSE does not mutate the visible session UI helpers", () => {
   assert.equal(deps.runtimeStore.get("bg").liveInvocations.get("architect"), "inv-9");
 });
 
+test("a2a-route buffers system notice even when session is in background", () => {
+  const calls = [];
+  const runtimeStore = createRuntimeStore();
+  const deps = makeDeps({
+    runtimeStore,
+    state: {
+      currentSessionId: "visible",
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+    },
+    addSystem(text) { calls.push(text); },
+    agentLabel: (id) => (id === "architect" ? "小筑" : id === "planner" ? "小谋" : id),
+  });
+  const client = chatClientModule.createChatClient(deps);
+
+  client.handleSseEvent("a2a-route", {
+    from: "architect",
+    to: "planner",
+    handoffDegraded: false,
+  }, { sessionId: "bg" });
+
+  assert.deepEqual(calls, []);
+  const notices = runtimeStore.get("bg").systemNotices;
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].content, /小筑.*小谋/);
+  assert.equal(notices[0].kind, "a2a-route");
+});
+
+test("a2a-route paints system notice when session is active", () => {
+  const calls = [];
+  const runtimeStore = createRuntimeStore();
+  const deps = makeDeps({
+    runtimeStore,
+    state: {
+      currentSessionId: "s1",
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+    },
+    addSystem(text) { calls.push(text); },
+    agentLabel: (id) => id,
+  });
+  const client = chatClientModule.createChatClient(deps);
+
+  client.handleSseEvent("a2a-route", {
+    from: "architect",
+    to: "coder",
+    handoffDegraded: true,
+  }, { sessionId: "s1" });
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /architect.*coder/);
+  assert.match(calls[0], /交接包不完整/);
+  assert.equal(runtimeStore.get("s1").systemNotices.length, 1);
+});
+
+test("agent-exit finalizes the agent so handoffs clear writing state", () => {
+  const finalized = [];
+  const runtimeStore = createRuntimeStore();
+  runtimeStore.beginRun("s1", { abort() {} });
+  runtimeStore.get("s1").liveMessages.set("architect", {
+    rawText: "done work",
+    setBadge() {},
+  });
+  const deps = makeDeps({
+    runtimeStore,
+    state: {
+      currentSessionId: "s1",
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+    },
+    finalizeLiveAgent(agent, sessionId, options) {
+      finalized.push([agent, sessionId, options]);
+    },
+  });
+  const client = chatClientModule.createChatClient(deps);
+
+  client.handleSseEvent("agent-exit", {
+    agent: "architect",
+    code: 0,
+    signal: null,
+  }, { sessionId: "s1" });
+
+  assert.deepEqual(finalized, [["architect", "s1", { error: false }]]);
+});
+
 test("sendPrompt rejects when no agent can be resolved", async () => {
   const calls = [];
   const deps = makeDeps({

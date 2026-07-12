@@ -1,4 +1,7 @@
 const { makeEvent } = require("../event-protocol");
+const fs = require("node:fs");
+const path = require("node:path");
+const { firstNonEmpty, resolveProxy } = require("../proxy");
 
 /**
  * Grok Build CLI provider.
@@ -19,6 +22,7 @@ const { makeEvent } = require("../event-protocol");
 const THINKING_FLUSH_CHARS = 80;
 /** Flush assistant text a bit more eagerly for responsive UI. */
 const TEXT_FLUSH_CHARS = 40;
+const SUPPORTED_GROK_EFFORTS = new Set(["low", "medium", "high"]);
 
 function createGrokRuntime(cli) {
   let emittedRunStarted = false;
@@ -58,12 +62,14 @@ function createGrokRuntime(cli) {
       const ensureStarted = (sessionId) => {
         if (emittedRunStarted) return;
         emittedRunStarted = true;
-        out.push(makeEvent("run.started", {
-          ...base,
-          sessionId: sessionId || "",
-          provider: "grok",
-          model: (cli && cli.model) || "grok-4.5",
-        }));
+        out.push(
+          makeEvent("run.started", {
+            ...base,
+            sessionId: sessionId || "",
+            provider: "grok",
+            model: (cli && cli.model) || "grok-4.5",
+          })
+        );
       };
 
       const flushThinking = (force = false) => {
@@ -143,11 +149,116 @@ function createGrokRuntime(cli) {
           return out;
       }
     },
+    finish(ctx) {
+      const base = {
+        agent: ctx.agent,
+        invocationId: ctx.invocationId,
+      };
+      const out = [];
+      if (thinkingBuf) {
+        out.push(makeEvent("thinking.delta", { ...base, text: thinkingBuf }));
+        thinkingBuf = "";
+      }
+      if (textBuf) {
+        out.push(makeEvent("text.delta", { ...base, text: textBuf }));
+        textBuf = "";
+      }
+      return out;
+    },
   };
 }
+
+function resolveGrokCommand() {
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  const candidates = [];
+  if (home) {
+    candidates.push(
+      path.join(home, ".grok", "bin", process.platform === "win32" ? "grok.exe" : "grok")
+    );
+  }
+  for (const entry of (process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    candidates.push(path.join(entry, process.platform === "win32" ? "grok.exe" : "grok"));
+  }
+  for (const command of candidates) {
+    try {
+      if (fs.existsSync(command)) return command;
+    } catch {
+      // Ignore inaccessible PATH entries.
+    }
+  }
+  return process.platform === "win32" ? "grok.exe" : "grok";
+}
+
+const grokProvider = {
+  id: "grok",
+  capabilities: {
+    resume: true,
+    thinking: true,
+    tools: false,
+    subagents: false,
+    reasoning: "levels",
+  },
+  allowedProviderOptions: ["alwaysApprove", "autoUpdate", "proxy"],
+  createRuntime: createGrokRuntime,
+  resolveProxy(options = {}, env = process.env) {
+    const providerOptions = options.providerOptions || {};
+    return firstNonEmpty(
+      options.proxy,
+      providerOptions.proxy,
+      env.GROK_PROXY,
+      env.INVOKE_GROK_PROXY,
+      env.GROK_HTTP_PROXY,
+      env.GROK_HTTPS_PROXY,
+      resolveProxy({}, env)
+    );
+  },
+  /**
+   * Keep Grok-only proxy vars visible to nested tools even when the shared
+   * HTTP(S)_PROXY injection comes from GROK_PROXY resolution.
+   */
+  buildEnvironment(_options = {}, env = process.env) {
+    const patch = {};
+    for (const key of ["GROK_PROXY", "INVOKE_GROK_PROXY", "GROK_HTTP_PROXY", "GROK_HTTPS_PROXY"]) {
+      if (typeof env[key] === "string" && env[key].trim()) {
+        patch[key] = env[key].trim();
+      }
+    }
+    return patch;
+  },
+  diagnostics(options = {}) {
+    if (options.proxy) return [];
+    return [
+      "[invoke-cli] no proxy for grok; if requests hang, set GROK_PROXY=http://127.0.0.1:7892 (Grok-only) or INVOKE_CLI_PROXY / HTTPS_PROXY",
+    ];
+  },
+  validate(config) {
+    const effort = config.reasoningEffort || "high";
+    if (!SUPPORTED_GROK_EFFORTS.has(effort)) {
+      throw new Error(
+        `Unsupported Grok reasoning effort "${effort}". Supported: ${[
+          ...SUPPORTED_GROK_EFFORTS,
+        ].join(", ")}.`
+      );
+    }
+  },
+  buildInvocation(config, prompt) {
+    const effort = config.reasoningEffort || "high";
+    const providerOptions = config.providerOptions || {};
+    const args = ["-p", prompt, "--output-format", "streaming-json"];
+    if (providerOptions.alwaysApprove !== false) args.push("--always-approve");
+    if (providerOptions.autoUpdate !== true) args.push("--no-auto-update");
+    if (config.model) args.push("-m", config.model);
+    if (effort) args.push("--reasoning-effort", effort);
+    if (config.resumeSessionId) args.push("-r", config.resumeSessionId);
+    return { command: resolveGrokCommand(), args };
+  },
+};
 
 module.exports = {
   createGrokRuntime,
   THINKING_FLUSH_CHARS,
   TEXT_FLUSH_CHARS,
+  SUPPORTED_GROK_EFFORTS,
+  resolveGrokCommand,
+  grokProvider,
 };

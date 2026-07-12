@@ -1,4 +1,7 @@
 const { makeEvent } = require("../event-protocol");
+const fs = require("node:fs");
+const path = require("node:path");
+const { resolveProxy } = require("../proxy");
 const {
   toolNameFromItem,
   toolArgsFromItem,
@@ -61,7 +64,8 @@ function createOpencodeRuntime(cli) {
       return {
         ...part,
         status: part.status || state.status || state.state || "",
-        arguments: part.arguments || part.args || part.input || state.input || state.arguments || state.args,
+        arguments:
+          part.arguments || part.args || part.input || state.input || state.arguments || state.args,
         args: part.args || state.args,
         input: part.input || state.input,
         output: part.output !== undefined ? part.output : state.output,
@@ -104,7 +108,8 @@ function createOpencodeRuntime(cli) {
     // Prefer compact labels for live UI / recall.
     if (typeof args.path === "string") return { path: args.path, ...args };
     if (typeof args.file === "string") return { path: args.file, ...args };
-    if (typeof args.pattern === "string" && !args.command) return { pattern: args.pattern, ...args };
+    if (typeof args.pattern === "string" && !args.command)
+      return { pattern: args.pattern, ...args };
     return args;
   }
 
@@ -124,17 +129,17 @@ function createOpencodeRuntime(cli) {
     if (!part || typeof part !== "object") return [];
     const type = String(part.type || "").toLowerCase();
     if (!(
-      type === "tool"
-      || type === "tool_call"
-      || type === "toolcall"
-      || type === "mcp"
-      || type === "task"
-      || type === "bash"
-      || type === "read"
-      || type === "glob"
-      || type === "grep"
-      || type === "write"
-      || type === "edit"
+      type === "tool" ||
+      type === "tool_call" ||
+      type === "toolcall" ||
+      type === "mcp" ||
+      type === "task" ||
+      type === "bash" ||
+      type === "read" ||
+      type === "glob" ||
+      type === "grep" ||
+      type === "write" ||
+      type === "edit"
     )) {
       if (!part.tool && !part.name && !part.toolName && !part.tool_name) return [];
     }
@@ -146,91 +151,129 @@ function createOpencodeRuntime(cli) {
     const prev = toolStates.get(toolId) || { started: false, finished: false };
     const events = [];
 
-    const looksRunning = !status
-      || ["pending", "running", "in_progress", "start", "started", "call", "partial"].includes(status);
-    const looksDone = ["completed", "complete", "done", "success", "ok", "error", "failed", "cancelled", "canceled"]
-      .includes(status)
-      || part.output != null
-      || part.result != null
-      || part.error != null;
+    const looksRunning =
+      !status ||
+      ["pending", "running", "in_progress", "start", "started", "call", "partial"].includes(status);
+    const looksDone =
+      [
+        "completed",
+        "complete",
+        "done",
+        "success",
+        "ok",
+        "error",
+        "failed",
+        "cancelled",
+        "canceled",
+      ].includes(status) ||
+      part.output != null ||
+      part.result != null ||
+      part.error != null;
 
     if (!prev.started && (looksRunning || looksDone)) {
-      events.push(makeEvent("tool.started", {
-        ...base,
-        toolName,
-        args,
-        toolId,
-      }));
+      events.push(
+        makeEvent("tool.started", {
+          ...base,
+          toolName,
+          args,
+          toolId,
+        })
+      );
       const command = commandFromArgs(toolName, args);
       if (isBashLike(toolName) && command) {
-        events.push(makeEvent("command.started", {
-          ...base,
-          command,
-        }));
+        events.push(
+          makeEvent("command.started", {
+            ...base,
+            command,
+          })
+        );
       }
       if (isSubagentTool(toolName, args) || type === "task") {
-        events.push(makeEvent("subagent.started", {
-          ...base,
-          subagentId: toolId,
-          name: subagentDisplayName(toolName, args),
-          task: taskLabel(part, args),
-          toolName,
-        }));
+        events.push(
+          makeEvent("subagent.started", {
+            ...base,
+            subagentId: toolId,
+            name: subagentDisplayName(toolName, args),
+            task: taskLabel(part, args),
+            toolName,
+          })
+        );
       }
       prev.started = true;
     }
 
-    if (!prev.finished && looksDone && status !== "running" && status !== "in_progress" && status !== "pending" && status !== "partial") {
+    if (
+      !prev.finished &&
+      looksDone &&
+      status !== "running" &&
+      status !== "in_progress" &&
+      status !== "pending" &&
+      status !== "partial"
+    ) {
       const result = toolResultFromItem(part);
       const failed = isFailedItem(part) || status === "error" || status === "failed";
-      events.push(makeEvent("tool.finished", {
-        ...base,
-        toolName,
-        args,
-        result,
-        status: failed ? "error" : "ok",
-        toolId,
-      }));
+      events.push(
+        makeEvent("tool.finished", {
+          ...base,
+          toolName,
+          args,
+          result,
+          status: failed ? "error" : "ok",
+          toolId,
+        })
+      );
       const command = commandFromArgs(toolName, args);
       if (isBashLike(toolName) && command) {
-        events.push(makeEvent("command.finished", {
-          ...base,
-          command,
-          output: typeof result === "string" ? result : summarizeResult(result),
-          exitCode: failed ? 1 : 0,
-        }));
+        events.push(
+          makeEvent("command.finished", {
+            ...base,
+            command,
+            output: typeof result === "string" ? result : summarizeResult(result),
+            exitCode: failed ? 1 : 0,
+          })
+        );
       }
       if (isSubagentTool(toolName, args) || type === "task") {
         if (failed) {
-          events.push(makeEvent("subagent.failed", {
-            ...base,
-            subagentId: toolId,
-            name: subagentDisplayName(toolName, args),
-            task: taskLabel(part, args),
-            error: summarizeResult(result) || "subagent failed",
-            toolName,
-          }));
+          events.push(
+            makeEvent("subagent.failed", {
+              ...base,
+              subagentId: toolId,
+              name: subagentDisplayName(toolName, args),
+              task: taskLabel(part, args),
+              error: summarizeResult(result) || "subagent failed",
+              toolName,
+            })
+          );
         } else {
-          events.push(makeEvent("subagent.completed", {
-            ...base,
-            subagentId: toolId,
-            name: subagentDisplayName(toolName, args),
-            task: taskLabel(part, args),
-            summary: summarizeResult(result),
-            toolName,
-          }));
+          events.push(
+            makeEvent("subagent.completed", {
+              ...base,
+              subagentId: toolId,
+              name: subagentDisplayName(toolName, args),
+              task: taskLabel(part, args),
+              summary: summarizeResult(result),
+              toolName,
+            })
+          );
         }
       }
       prev.finished = true;
-    } else if (prev.started && !prev.finished && (part.output || part.result || part.title || part.text)) {
+    } else if (
+      prev.started &&
+      !prev.finished &&
+      (part.output || part.result || part.title || part.text)
+    ) {
       if (isSubagentTool(toolName, args) || type === "task") {
-        events.push(makeEvent("subagent.progress", {
-          ...base,
-          subagentId: toolId,
-          name: subagentDisplayName(toolName, args),
-          text: summarizeResult(part.output || part.result || part.title || part.text),
-          toolName,
-        }));
+        events.push(
+          makeEvent("subagent.progress", {
+            ...base,
+            subagentId: toolId,
+            name: subagentDisplayName(toolName, args),
+            text: summarizeResult(part.output || part.result || part.title || part.text),
+            toolName,
+          })
+        );
       }
     }
 
@@ -241,12 +284,14 @@ function createOpencodeRuntime(cli) {
   function maybeRunStarted(base, sessionId) {
     if (emittedRunStarted) return [];
     emittedRunStarted = true;
-    return [makeEvent("run.started", {
-      ...base,
-      sessionId: sessionId || "",
-      provider: cli.name,
-      model: cli.model || "",
-    })];
+    return [
+      makeEvent("run.started", {
+        ...base,
+        sessionId: sessionId || "",
+        provider: cli.providerId || cli.name,
+        model: cli.model || "",
+      }),
+    ];
   }
 
   function progressForStep(base, stepNumber) {
@@ -254,15 +299,22 @@ function createOpencodeRuntime(cli) {
     if (step === lastStep) return [];
     lastStep = step;
     const label = `第 ${step} 步`;
-    return [makeEvent("progress.update", {
-      ...base,
-      items: [{ text: label, done: false, step }],
-    })];
+    return [
+      makeEvent("progress.update", {
+        ...base,
+        items: [{ text: label, done: false, step }],
+      }),
+    ];
   }
 
   return {
     extractSessionId(event) {
-      if (event && event.type === "session.updated" && event.session && typeof event.session.id === "string") {
+      if (
+        event &&
+        event.type === "session.updated" &&
+        event.session &&
+        typeof event.session.id === "string"
+      ) {
         return event.session.id;
       }
       if (event && typeof event.sessionID === "string") {
@@ -283,17 +335,18 @@ function createOpencodeRuntime(cli) {
 
       // Thinking / reasoning (requires `opencode run --thinking` on the CLI).
       if (
-        event.type === "reasoning"
-        || event.type === "thinking"
-        || (part && isReasoningPartType(part.type))
+        event.type === "reasoning" ||
+        event.type === "thinking" ||
+        (part && isReasoningPartType(part.type))
       ) {
-        const thinkingPart = part && isReasoningPartType(part.type)
-          ? part
-          : {
-            type: event.type || "reasoning",
-            id: (part && part.id) || event.id || "_reasoning",
-            text: reasoningTextFromPart(part) || reasoningTextFromPart(event),
-          };
+        const thinkingPart =
+          part && isReasoningPartType(part.type)
+            ? part
+            : {
+                type: event.type || "reasoning",
+                id: (part && part.id) || event.id || "_reasoning",
+                text: reasoningTextFromPart(part) || reasoningTextFromPart(event),
+              };
         const thinking = thinkingEventsFromPart(thinkingPart, base);
         if (thinking.length) return thinking;
       }
@@ -323,19 +376,22 @@ function createOpencodeRuntime(cli) {
       // OpenCode current schema: top-level type is "tool_use" with part.type="tool".
       // Older builds may emit tool / tool_call / tool.updated instead.
       if (
-        event.type === "tool_use"
-        || event.type === "tool-use"
-        || event.type === "tool"
-        || event.type === "tool_call"
-        || event.type === "tool.updated"
+        event.type === "tool_use" ||
+        event.type === "tool-use" ||
+        event.type === "tool" ||
+        event.type === "tool_call" ||
+        event.type === "tool.updated"
       ) {
         const toolPart = part || event;
-        const toolEvents = toolEventsFromPart({
-          ...toolPart,
-          type: toolPart.type || "tool",
-          tool: toolPart.tool || toolPart.name,
-          callID: toolPart.callID || toolPart.callId || toolPart.call_id,
-        }, base);
+        const toolEvents = toolEventsFromPart(
+          {
+            ...toolPart,
+            type: toolPart.type || "tool",
+            tool: toolPart.tool || toolPart.name,
+            callID: toolPart.callID || toolPart.callId || toolPart.call_id,
+          },
+          base
+        );
         if (toolEvents.length) return toolEvents;
       }
 
@@ -345,9 +401,12 @@ function createOpencodeRuntime(cli) {
       }
 
       if (event.type === "step_start" || event.type === "step.start" || event.type === "loop") {
-        const sessionId = typeof event.sessionID === "string"
-          ? event.sessionID
-          : (typeof event.session_id === "string" ? event.session_id : "");
+        const sessionId =
+          typeof event.sessionID === "string"
+            ? event.sessionID
+            : typeof event.session_id === "string"
+              ? event.session_id
+              : "";
         const stepNumber = extractStepNumber(event, part);
         const out = [];
         out.push(...maybeRunStarted(base, sessionId));
@@ -355,15 +414,26 @@ function createOpencodeRuntime(cli) {
         return out;
       }
 
-      if (event.type === "step_finish" || event.type === "step.finish" || event.type === "step-finish") {
+      if (
+        event.type === "step_finish" ||
+        event.type === "step.finish" ||
+        event.type === "step-finish"
+      ) {
         const reason = (part && part.reason) || event.reason || "";
-        const label = reason === "tool-calls"
-          ? "步骤完成（已调用工具）"
-          : (reason === "stop" ? "步骤完成" : (reason ? `步骤完成: ${reason}` : "步骤完成"));
-        return [makeEvent("progress.update", {
-          ...base,
-          items: [{ text: label, done: true, reason }],
-        })];
+        const label =
+          reason === "tool-calls"
+            ? "步骤完成（已调用工具）"
+            : reason === "stop"
+              ? "步骤完成"
+              : reason
+                ? `步骤完成: ${reason}`
+                : "步骤完成";
+        return [
+          makeEvent("progress.update", {
+            ...base,
+            items: [{ text: label, done: true, reason }],
+          }),
+        ];
       }
 
       // part.type === "step-start" nested under other envelopes
@@ -377,9 +447,8 @@ function createOpencodeRuntime(cli) {
       }
 
       if (event.type === "assistant") {
-        const content = event.message && Array.isArray(event.message.content)
-          ? event.message.content
-          : [];
+        const content =
+          event.message && Array.isArray(event.message.content) ? event.message.content : [];
         const text = content
           .filter((item) => item.type === "text" && typeof item.text === "string")
           .map((item) => item.text)
@@ -388,10 +457,12 @@ function createOpencodeRuntime(cli) {
       }
 
       if (event.type === "text" && part && part.type === "text" && typeof part.text === "string") {
-        return [makeEvent("text.delta", {
-          ...base,
-          text: part.text,
-        })];
+        return [
+          makeEvent("text.delta", {
+            ...base,
+            text: part.text,
+          }),
+        ];
       }
 
       return [];
@@ -399,6 +470,50 @@ function createOpencodeRuntime(cli) {
   };
 }
 
+const OPENCODE_GO_MODEL_PREFIX = "opencode-go/";
+
+function resolveOpencodeCommand() {
+  if (process.platform !== "win32") return "opencode";
+  const pathEntries = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  for (const entry of pathEntries) {
+    const command = path.join(entry, "node_modules", "opencode-ai", "bin", "opencode.exe");
+    if (fs.existsSync(command)) return command;
+  }
+  return "opencode.exe";
+}
+
+const opencodeProvider = {
+  id: "opencode",
+  capabilities: {
+    resume: true,
+    thinking: true,
+    tools: true,
+    subagents: true,
+    reasoning: "toggle",
+  },
+  allowedProviderOptions: ["thinking", "modelPrefix"],
+  createRuntime: createOpencodeRuntime,
+  resolveProxy,
+  buildInvocation(config, prompt) {
+    const providerOptions = config.providerOptions || {};
+    const args = ["run", "--format", "json"];
+    if (providerOptions.thinking !== false) args.push("--thinking");
+    if (config.model) {
+      const modelPrefix = providerOptions.modelPrefix ?? OPENCODE_GO_MODEL_PREFIX;
+      const fullModel = config.model.startsWith(OPENCODE_GO_MODEL_PREFIX)
+        ? config.model
+        : `${modelPrefix}${config.model}`;
+      args.push("--model", fullModel);
+    }
+    if (config.resumeSessionId) args.push("--session", config.resumeSessionId);
+    args.push(prompt);
+    return { command: resolveOpencodeCommand(), args };
+  },
+};
+
 module.exports = {
   createOpencodeRuntime,
+  opencodeProvider,
+  OPENCODE_GO_MODEL_PREFIX,
+  resolveOpencodeCommand,
 };

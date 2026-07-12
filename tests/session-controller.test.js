@@ -147,6 +147,44 @@ test("switchSession does not abort a running previous session", async () => {
   assert.deepEqual(remounted, ["s2"]);
 });
 
+test("switchSession replays buffered a2a system notices not already in history", async () => {
+  const state = makeState();
+  state.currentSessionId = "s1";
+  state.runtimeStore.beginRun("s2", { abort() {} });
+  state.runtimeStore.get("s2").systemNotices = [
+    { role: "system", agent: "system", content: "🔄 小筑 → 小谋", kind: "a2a-route" },
+    { role: "system", agent: "system", content: "already in history", kind: "a2a-route" },
+  ];
+  state.runtimeStore.get("s2").liveMessages.set("planner", {
+    rawText: "",
+    detached: true,
+  });
+
+  const created = [];
+  const remounted = [];
+  const deps = baseDeps(state, {
+    sessionApi: {
+      listSessions: async () => [{ id: "s1" }, { id: "s2" }],
+      readMessages: async () => [
+        { role: "user", agent: "architect", content: "go" },
+        { role: "system", agent: "system", content: "already in history" },
+      ],
+    },
+    createMessage(msg) { created.push(msg); },
+    remountLiveMessages(id) { remounted.push(id); },
+  });
+
+  const controller = sessionControllerModule.createSessionController(deps);
+  await controller.switchSession("s2");
+
+  assert.deepEqual(remounted, ["s2"]);
+  const systemCreated = created.filter((m) => m.role === "system");
+  // history system + one replayed notice (duplicate skipped)
+  assert.equal(systemCreated.length, 2);
+  assert.equal(systemCreated[0].content, "already in history");
+  assert.equal(systemCreated[1].content, "🔄 小筑 → 小谋");
+});
+
 test("switchSession ignores stale async loads from an earlier session switch", async () => {
   const state = makeState();
   const seenMessages = [];

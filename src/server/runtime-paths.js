@@ -1,19 +1,2 @@
-const path = require("node:path");
-
-const ROOT = path.resolve(__dirname, "../..");
-const RUNTIME_DATA_DIR = path.join(ROOT, "data", "runtime");
-const DEFAULT_SESSIONS_FILE = path.join(RUNTIME_DATA_DIR, "sessions.json");
-const DEFAULT_INVOCATIONS_FILE = path.join(RUNTIME_DATA_DIR, "invocations.json");
-const DEFAULT_SESSION_MAP_ROOT = path.join(RUNTIME_DATA_DIR, "session-maps");
-const DEFAULT_TRANSCRIPT_DIR = path.join(RUNTIME_DATA_DIR, "transcripts");
-const DEFAULT_WORKTREE_STATE_FILE = path.join(RUNTIME_DATA_DIR, "worktrees.json");
-
-module.exports = {
-  ROOT,
-  RUNTIME_DATA_DIR,
-  DEFAULT_SESSIONS_FILE,
-  DEFAULT_INVOCATIONS_FILE,
-  DEFAULT_SESSION_MAP_ROOT,
-  DEFAULT_TRANSCRIPT_DIR,
-  DEFAULT_WORKTREE_STATE_FILE,
-};
+/** @deprecated Prefer require("../shared/runtime-paths"); kept for compatibility. */
+module.exports = require("../shared/runtime-paths");

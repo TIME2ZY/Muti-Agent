@@ -163,6 +163,18 @@ function postMessage(threadId, invocationId, content, { appendToSession } = {}) 
     if (!thread.worklist.includes(target)) {
       thread.worklist.push(target);
       thread.a2aCount += 1;
+      const routeText = `🔄 ${agent} → ${target}`;
+      if (appendToSession && thread.sessionsFile) {
+        appendToSession(thread.sessionsFile, thread.sessionId || threadId, {
+          role: "system",
+          agent: "system",
+          content: routeText,
+          kind: "a2a-route",
+          from: agent,
+          to: target,
+          source: "callback",
+        }, { allowCreate: false });
+      }
       sendSse(thread.res, "a2a-route", { from: agent, to: target });
       if (currentInvocationId) {
         transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "a2a-route", {

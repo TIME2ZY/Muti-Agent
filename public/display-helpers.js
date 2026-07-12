@@ -41,18 +41,41 @@
     return agent.label || agent.id;
   }
 
+  function resolveCapabilityTags(agent) {
+    if (globalScope.MessageProcessHelpers && globalScope.MessageProcessHelpers.capabilityTagList) {
+      return globalScope.MessageProcessHelpers.capabilityTagList(agent);
+    }
+    if (typeof module !== "undefined" && module.exports && typeof require === "function") {
+      try {
+        return require("./message-process-helpers.js").capabilityTagList(agent);
+      } catch {
+        /* ignore */
+      }
+    }
+    return [];
+  }
+
   function agentMeta(agent) {
     if (!agent) return "";
-    const cliLabel = agent.cli === "opencode" ? "opencode go" : agent.cli;
-    if (agent.cli === "opencode") return `${cliLabel} · ${agent.model}`;
-    if (agent.cli === "grok") {
-      return agent.reasoningEffort
+    const cliLabel = agent.cli === "opencode" ? "opencode go" : agent.cli || agent.providerId || "";
+    let base;
+    if (agent.cli === "opencode" || agent.providerId === "opencode") {
+      base = `${cliLabel || "opencode go"} · ${agent.model}`;
+    } else if (agent.cli === "grok" || agent.providerId === "grok") {
+      base = agent.reasoningEffort
         ? `xAI · ${agent.model} · ${agent.reasoningEffort}`
         : `xAI · ${agent.model}`;
+    } else {
+      base = agent.reasoningEffort
+        ? `${cliLabel} · ${agent.model} · ${agent.reasoningEffort}`
+        : `${cliLabel} · ${agent.model}`;
     }
-    return agent.reasoningEffort
-      ? `${cliLabel} · ${agent.model} · ${agent.reasoningEffort}`
-      : `${cliLabel} · ${agent.model}`;
+    // Capability tags only when the API provided an explicit capabilities object.
+    if (agent.capabilities && typeof agent.capabilities === "object") {
+      const tags = resolveCapabilityTags(agent);
+      if (tags.length) base = `${base} · ${tags.join("+")}`;
+    }
+    return base;
   }
 
   function roleBadgeLabel(role) {

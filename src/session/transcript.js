@@ -1,6 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { DEFAULT_TRANSCRIPT_DIR } = require("../server/runtime-paths");
+const { DEFAULT_TRANSCRIPT_DIR } = require("../shared/runtime-paths");
 const { isValidOpaqueId, resolveInside } = require("../server/id-policy");
 const MAX_LINE_BYTES = 256 * 1024;
 
