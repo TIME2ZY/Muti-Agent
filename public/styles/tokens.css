@@ -1,69 +1,86 @@
 /* ═══════════════════════════════════════════════════════════
    DESIGN TOKENS
+   Regional materials: rail (left) · canvas (center) · instrument (right)
    ═══════════════════════════════════════════════════════════ */
 
 :root {
   color-scheme: light dark;
 
-  /* Surfaces */
-  --surface:        light-dark(#f7f7f4, #181a19);
-  --surface-raised: light-dark(#eceee9, #222624);
-  --surface-inset:  light-dark(#f1f3f0, #141615);
+  /* ── Base surfaces (legacy aliases kept) ── */
+  --surface:        light-dark(#f5f6f4, #16181a);
+  --surface-raised: light-dark(#eceef0, #1e2226);
+  --surface-inset:  light-dark(#eef0ee, #121416);
+
+  /* ── Regional surfaces (panel differentiation) ── */
+  --surface-rail:        light-dark(#e8ebe8, #111314);
+  --surface-canvas:      light-dark(#f8f9f7, #1a1d1f);
+  --surface-instrument:  light-dark(#f0f2f1, #1c1f22);
+  --surface-instrument-raised: light-dark(#e6e9e7, #24282c);
 
   /* Text */
-  --text-primary:   light-dark(#242622, #edf1ed);
-  --text-secondary: light-dark(#636a61, #a7b0a8);
-  --text-tertiary:  light-dark(#8b9388, #68736c);
+  --text-primary:   light-dark(#1c1f1d, #eef1ef);
+  --text-secondary: light-dark(#5c6360, #9aa3a0);
+  --text-tertiary:  light-dark(#868e89, #6a7370);
 
   /* Borders */
-  --border:         light-dark(#d1d6ce, #39413d);
-  --border-subtle:  light-dark(#e1e5df, #2a302d);
+  --border:         light-dark(#cdd2ce, #3a4140);
+  --border-subtle:  light-dark(#dde2de, #2a3030);
+  --border-hard:    light-dark(#b8beb9, #4a5250);
 
-  /* Accent */
-  --accent:         light-dark(#2f7d68, #5bb89f);
-  --accent-hover:   light-dark(#245f50, #72cfb5);
-  --accent-text:    light-dark(#f7f7f4, #101312);
+  /* Primary CTA / focus (electric blue — sole solid fill accent) */
+  --accent:         light-dark(#2563eb, #60a5fa);
+  --accent-hover:   light-dark(#1d4ed8, #93c5fd);
+  --accent-text:    light-dark(#f8fafc, #0b1220);
+
+  /* Nav selection (left rail — cooler, does not compete with CTA) */
+  --accent-nav:     light-dark(#475569, #94a3b8);
+  --accent-nav-bg:  light-dark(color-mix(in srgb, #64748b 12%, var(--surface-rail)),
+                               color-mix(in srgb, #94a3b8 10%, var(--surface-rail)));
 
   /* Semantic */
-  --danger:         light-dark(#9b2c2c, #e05555);
-  --danger-hover:   light-dark(#7a2222, #f07070);
-  --danger-text:    light-dark(#f7f7f4, #101312);
-  --stderr:         light-dark(#8a6d3b, #d4a843);
-  --success:        light-dark(#4a7c59, #6ba87a);
+  --danger:         light-dark(#b91c1c, #f07178);
+  --danger-hover:   light-dark(#991b1b, #f5a0a5);
+  --danger-text:    light-dark(#f8fafc, #1a0a0a);
+  --stderr:         light-dark(#a16207, #d4a843);
+  --success:        light-dark(#15803d, #6ba87a);
 
   /* Message roles */
-  --user-bg:        light-dark(#e5eee9, #1f2b28);
-  --assistant-line: light-dark(#9ab7ad, #3f5f56);
+  --user-bg:        light-dark(#e8eef9, #1a2438);
+  --assistant-line: light-dark(#94a3b8, #4a5568);
 
-  /* Per-agent palette (scannable multi-agent UI) */
-  --agent-1: light-dark(#2f7d68, #5bb89f);
-  --agent-2: light-dark(#3b6ea5, #6b9bd1);
-  --agent-3: light-dark(#9a7b2f, #c4a35a);
-  --agent-4: light-dark(#7a4f9a, #b07cc6);
-  --agent-5: light-dark(#a85a45, #d17a6b);
-  --agent-6: light-dark(#2f7a8a, #5bb8c9);
+  /* Per-agent palette (identity only — not chrome chrome) */
+  --agent-1: light-dark(#0d9488, #2dd4bf);
+  --agent-2: light-dark(#2563eb, #60a5fa);
+  --agent-3: light-dark(#b45309, #fbbf24);
+  --agent-4: light-dark(#7c3aed, #a78bfa);
+  --agent-5: light-dark(#c2410c, #fb923c);
+  --agent-6: light-dark(#0891b2, #22d3ee);
   --agent-color: var(--agent-1);
 
   /* Semantic badge surfaces (theme-aware) */
   --badge-thinking-bg: light-dark(#f0e6d3, color-mix(in srgb, var(--stderr) 18%, var(--surface)));
   --badge-thinking-fg: light-dark(#8a6d3b, var(--stderr));
-  --badge-writing-bg:  color-mix(in srgb, var(--accent) 14%, var(--surface));
+  --badge-writing-bg:  color-mix(in srgb, var(--accent) 12%, var(--surface));
   --badge-writing-fg:  var(--accent);
-  --badge-error-bg:    color-mix(in srgb, var(--danger) 14%, var(--surface));
+  --badge-error-bg:    color-mix(in srgb, var(--danger) 12%, var(--surface));
   --badge-error-fg:    var(--danger);
 
-  /* Elevation (full shadows; switched by data-theme — light-dark() is colors-only) */
-  --shadow-sm: 0 1px 2px color-mix(in srgb, #0f1412 6%, transparent);
-  --shadow-md: 0 8px 24px color-mix(in srgb, #0f1412 8%, transparent);
-  --shadow-lg: 0 16px 40px color-mix(in srgb, #0f1412 12%, transparent);
+  /* Elevation */
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #0f1412 5%, transparent);
+  --shadow-md: 0 6px 20px color-mix(in srgb, #0f1412 8%, transparent);
+  --shadow-lg: 0 14px 36px color-mix(in srgb, #0f1412 12%, transparent);
   --overlay-scrim: color-mix(in srgb, #000 45%, transparent);
 
   /* Focus ring */
-  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--accent) 55%, transparent);
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
   --focus-ring-danger: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--danger) 50%, transparent);
 
-  /* Typography */
-  --font-body: "Segoe UI Variable", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Typography roles
+     --font-ui: chrome, buttons, nav titles
+     --font-body: reading (message prose)
+     --font-mono: paths, diffs, model ids, timestamps only */
+  --font-ui: "Segoe UI Variable", "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-body: var(--font-ui);
   --font-mono: "Cascadia Code", "IBM Plex Mono", "JetBrains Mono", "SF Mono", ui-monospace, monospace;
 
   /* Spacing scale (8px base) */
@@ -77,32 +94,35 @@
   --space-10: 40px;
 
   /* Sizing */
-  --sidebar-w: 260px;
-  --sidebar-w-narrow: 200px;
+  --sidebar-w: 240px;
+  --sidebar-w-narrow: 196px;
+  --instrument-w: 288px;
+  --instrument-w-narrow: 228px;
 
-  /* Radius scale */
+  /* Radius — regional defaults applied in sheets; tokens are the scale */
+  --radius-xs: 3px;
   --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
   --radius-pill: 999px;
-  --radius: var(--radius-lg); /* alias for existing usage */
+  --radius: var(--radius-md);
 
   /* Density (1 = comfortable; compact via data-density) */
   --density: 1;
-  --row-pad-y: calc(8px * var(--density));
-  --msg-gap: calc(20px * var(--density));
-  --header-pad-y: calc(12px * var(--density));
-  --composer-pad-y: calc(12px * var(--density));
+  --row-pad-y: calc(7px * var(--density));
+  --msg-gap: calc(18px * var(--density));
+  --header-pad-y: calc(10px * var(--density));
+  --composer-pad-y: calc(10px * var(--density));
 
   /* Control sizing */
   --btn-height: 36px;
   --btn-height-sm: 28px;
 
   /* Motion */
-  --duration-fast: 150ms;
+  --duration-fast: 140ms;
   --duration: 200ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-standard: ease;
+  --ease-standard: cubic-bezier(0.2, 0.0, 0.0, 1);
 }
 
 /* Explicit theme: always set via JS (light | dark) */
@@ -113,8 +133,8 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
   --shadow-sm: 0 1px 2px color-mix(in srgb, #000 40%, transparent);
-  --shadow-md: 0 8px 28px color-mix(in srgb, #000 45%, transparent);
-  --shadow-lg: 0 16px 48px color-mix(in srgb, #000 55%, transparent);
+  --shadow-md: 0 6px 22px color-mix(in srgb, #000 45%, transparent);
+  --shadow-lg: 0 14px 40px color-mix(in srgb, #000 55%, transparent);
   --overlay-scrim: color-mix(in srgb, #000 55%, transparent);
 }
 
@@ -122,8 +142,10 @@
   --density: 0.82;
   --btn-height: 32px;
   --btn-height-sm: 26px;
-  --sidebar-w: 232px;
-  --sidebar-w-narrow: 188px;
+  --sidebar-w: 220px;
+  --sidebar-w-narrow: 180px;
+  --instrument-w: 260px;
+  --instrument-w-narrow: 210px;
 }
 
 /* Agent color slots via data-agent-color="1".."6" */

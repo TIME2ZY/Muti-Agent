@@ -1,15 +1,15 @@
 /* ═══════════════════════════════════════════════════════════
-   COMPOSER
+   COMPOSER — dock on canvas; sole solid primary CTA
    ═══════════════════════════════════════════════════════════ */
 
 .composer {
   border-top: 1px solid var(--border-subtle);
-  padding: var(--composer-pad-y) var(--space-6) calc(var(--space-5) * var(--density));
+  padding: var(--composer-pad-y) var(--space-5) calc(var(--space-4) * var(--density));
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: 0;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  background: color-mix(in srgb, var(--surface-canvas) 88%, var(--surface-raised));
 }
 
 .composer-shell {
@@ -18,8 +18,8 @@
   gap: var(--space-2);
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  border-radius: var(--radius-md);
+  background: var(--surface-canvas);
   box-shadow: var(--shadow-sm);
   transition:
     border-color var(--duration-fast) var(--ease-standard),
@@ -27,8 +27,8 @@
 }
 
 .composer-shell:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  box-shadow: var(--shadow-md), 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: var(--shadow-md), 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .composer-input {
@@ -46,9 +46,9 @@
   width: min(360px, 100%);
   max-height: 240px;
   overflow-y: auto;
-  background: var(--surface);
+  background: var(--surface-canvas);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   padding: var(--space-1);
   z-index: 40;
@@ -62,9 +62,9 @@
   gap: 1px;
   width: 100%;
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   text-align: left;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   color: var(--text-secondary);
 }
 
@@ -79,12 +79,13 @@
 }
 
 .mention-option-name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .mention-option-meta {
-  font-size: 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
   color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -102,6 +103,7 @@
   color: var(--text-primary);
   padding: var(--space-2) var(--space-1) var(--space-1);
   font-size: 15px;
+  font-family: var(--font-body);
   line-height: 1.65;
   outline: none;
   box-shadow: none;
@@ -150,13 +152,14 @@
   display: inline-flex;
   align-items: center;
   min-height: var(--btn-height-sm);
-  padding: 0 12px;
+  padding: 0 10px;
   font-size: 12px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-weight: 500;
   color: var(--text-tertiary);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+  background: transparent;
   transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 
@@ -170,9 +173,9 @@
 }
 
 .worktree-mode input:checked + .worktree-mode-chip {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--stderr);
+  border-color: color-mix(in srgb, var(--stderr) 40%, var(--border));
+  background: color-mix(in srgb, var(--stderr) 10%, transparent);
   font-weight: 600;
 }
 

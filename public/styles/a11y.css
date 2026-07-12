@@ -72,7 +72,9 @@
 }
 
 /* Prefer token focus ring over ad-hoc outlines on interactive chips */
-.panel-tab.is-active:focus-visible,
+.panel-tab.is-active:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
 .agent-tab.is-selected:focus-visible {
-  box-shadow: var(--focus-ring);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
 }

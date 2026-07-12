@@ -1,17 +1,17 @@
 /* ═══════════════════════════════════════════════════════════
-   AGENT PANEL
+   INSTRUMENT PANEL (right rail)
+   Material: hard edges, dense, no shared card language with canvas/rail
+   Tabs switch working modes — each mode has distinct layout language
    ═══════════════════════════════════════════════════════════ */
 
 .side-panel {
-  border-left: 1px solid var(--border-subtle);
+  border-left: 1px solid var(--border-hard);
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, transparent) 0%, color-mix(in srgb, var(--surface-raised) 72%, transparent) 100%);
-  /* Prefer thin scrollbars if a child ever scrolls */
+  background: var(--surface-instrument);
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--border) 80%, transparent) transparent;
 }
@@ -35,62 +35,77 @@
   background-clip: padding-box;
 }
 
+/* Segmented control — not solid accent pills */
 .panel-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2);
-  padding: var(--space-4) var(--space-4) var(--space-3);
+  gap: 0;
+  padding: 0;
   border-bottom: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--surface-raised) 78%, transparent);
+  background: var(--surface-instrument-raised);
 }
 
 .panel-tab {
-  min-height: 34px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  color: var(--text-secondary);
-  background: var(--surface);
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-tertiary);
+  background: transparent;
   font-size: 12px;
-  font-family: var(--font-mono);
-  transition: border-color 0.15s, color 0.15s, background 0.15s, box-shadow 0.15s;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
 .panel-tab:hover {
   color: var(--text-primary);
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: color-mix(in srgb, var(--surface-instrument) 60%, transparent);
 }
 
 .panel-tab:focus-visible {
   color: var(--text-primary);
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
-  box-shadow: var(--focus-ring);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .panel-tab.is-active {
-  color: var(--accent-text);
-  background: var(--accent);
-  border-color: var(--accent);
+  color: var(--text-primary);
+  background: var(--surface-instrument);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
 }
 
 .agent-panel,
 .workspace-panel,
 .recall-panel-inline {
   flex: 1 1 auto;
-  padding: var(--space-4) var(--space-4);
+  padding: var(--space-2) 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 0;
   min-width: 0;
   min-height: 0;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Recall keeps a single scroll owner (.recall-body). Nested overflow on
-   the panel itself fights expanded cards and makes long traces feel stuck. */
+/* Agents: slightly roomier; workspace/recall denser via children */
+.agent-panel {
+  padding: var(--space-2) 0;
+  gap: 0;
+}
+
+.workspace-panel {
+  padding: var(--space-3);
+  gap: var(--space-3);
+}
+
 .recall-panel-inline {
+  padding: var(--space-2) var(--space-3) var(--space-2);
+  gap: var(--space-2);
   overflow: hidden;
 }
 
@@ -105,59 +120,78 @@
   display: none;
 }
 
+/* ── Agents: crew board (seat rows, not cards) ── */
+
 .agent-tabs {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 0;
   min-height: 0;
 }
 
 .agent-tab {
+  position: relative;
   min-width: 0;
-  display: grid;
-  gap: 4px;
-  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-3) var(--space-3) 28px;
   color: var(--text-tertiary);
-  border: 1px solid var(--border-subtle);
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
   text-align: left;
-  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface) 100%);
-  border-radius: var(--radius-md);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--agent-color, var(--border)) 70%, transparent);
-  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
+  background: transparent;
+  box-shadow: none;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
   cursor: pointer;
 }
-.agent-tab:hover {
-  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 36%, var(--border));
-  color: var(--text-primary);
-  transform: translateY(-1px);
+
+/* Color seat lamp — identity only */
+.agent-tab::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 16px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--agent-color, var(--border)) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-color, var(--border)) 25%, transparent);
 }
-.agent-tab:focus-visible {
-  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 36%, var(--border));
+
+.agent-tab:hover {
+  background: color-mix(in srgb, var(--surface-instrument-raised) 80%, transparent);
   color: var(--text-primary);
-  transform: translateY(-1px);
-  box-shadow: inset 3px 0 0 var(--agent-color, var(--accent)), var(--focus-ring);
+  transform: none;
+}
+
+.agent-tab:focus-visible {
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+  transform: none;
 }
 
 .agent-tab.is-selected {
-  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 48%, var(--border));
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--agent-color, var(--accent)) 14%, var(--surface-raised)) 0%,
-    color-mix(in srgb, var(--agent-color, var(--accent)) 6%, var(--surface)) 100%
-  );
-  box-shadow:
-    inset 3px 0 0 var(--agent-color, var(--accent)),
-    0 0 0 1px color-mix(in srgb, var(--agent-color, var(--accent)) 18%, transparent);
+  background: color-mix(in srgb, var(--agent-color, var(--accent)) 8%, var(--surface-instrument));
+  border-bottom-color: var(--border-subtle);
+  box-shadow: none;
+}
+
+.agent-tab.is-selected::before {
+  background: var(--agent-color, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent);
 }
 
 .agent-tab.is-selected .agent-tab-name {
-  color: var(--agent-color, var(--accent));
+  color: var(--text-primary);
 }
 
 .agent-tab-name {
   display: block;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
+  font-family: var(--font-ui);
   letter-spacing: 0;
   line-height: 1.3;
   color: var(--text-primary);
@@ -172,23 +206,23 @@
   overflow-wrap: anywhere;
 }
 
-/* Capability / role tag — last in card */
+/* Role as quiet subtitle — not uppercase pill */
 .agent-tab-role {
-  display: inline-flex;
-  align-items: center;
+  display: block;
   width: fit-content;
   max-width: 100%;
-  min-height: 20px;
-  margin-top: 2px;
-  padding: 0 8px;
-  border-radius: var(--radius-pill);
-  font-size: 10px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--agent-color, var(--accent));
-  background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 24%, var(--border-subtle));
+  min-height: 0;
+  margin-top: 1px;
+  padding: 0;
+  border-radius: 0;
+  font-size: 11px;
+  font-family: var(--font-ui);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -198,16 +232,14 @@
   display: none;
 }
 
-.workspace-panel {
-  gap: var(--space-3);
-}
+/* ── Workspace: station / table + terminal diff ── */
 
 .recall-panel-inline .recall-search {
   position: sticky;
   top: 0;
   z-index: 1;
   flex-shrink: 0;
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  background: var(--surface-instrument);
   padding: 0 0 var(--space-2);
 }
 
@@ -215,10 +247,11 @@
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xs);
   background: var(--surface-inset);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
+  font-family: var(--font-ui);
 }
 
 .recall-panel-inline .recall-search input:focus {
@@ -232,24 +265,26 @@
 .workspace-panel-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-height: 0;
   flex: 1 1 auto;
   height: 100%;
 }
 
+/* Toolbar strip, not gradient card */
 .workspace-summary {
   display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3);
+  gap: 4px;
+  padding: var(--space-2) var(--space-2);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface) 100%);
+  border-radius: var(--radius-xs);
+  background: var(--surface-instrument-raised);
 }
 
 .workspace-summary-branch {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
@@ -270,13 +305,15 @@
 .workspace-action-link {
   width: fit-content;
   font-size: 12px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-weight: 500;
   color: var(--accent);
   text-decoration: none;
 }
 
 .workspace-action-link:hover {
   color: var(--accent-hover);
+  text-decoration: underline;
 }
 
 /* Fill the right rail: file list + diff share available height */
@@ -284,7 +321,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(96px, 34%) minmax(0, 1fr);
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-height: 0;
   flex: 1 1 auto;
 }
@@ -292,12 +329,15 @@
 .workspace-file-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 0;
   min-height: 0;
   max-height: none;
   height: 100%;
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--surface-inset);
 }
 
 .workspace-files-host,
@@ -308,7 +348,6 @@
   flex-direction: column;
 }
 
-/* Wider viewports: side-by-side when the main canvas is roomy */
 @media (min-width: 1200px) {
   .workspace-content {
     grid-template-columns: minmax(0, 150px) minmax(0, 1fr);
@@ -316,34 +355,38 @@
   }
 }
 
+/* Table rows — no rounded cards */
 .workspace-file {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px 8px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 5px 8px;
   text-align: left;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+
+.workspace-file:last-child {
+  border-bottom: none;
 }
 
 .workspace-file:hover {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-  background: var(--surface-raised);
+  background: var(--surface-instrument-raised);
 }
 
 .workspace-file:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-  background: var(--surface-raised);
-  box-shadow: var(--focus-ring);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--surface-instrument-raised);
 }
 
 .workspace-file.selected {
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-instrument));
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .workspace-file-path {
@@ -357,46 +400,43 @@
 
 .workspace-file-status {
   flex-shrink: 0;
-  min-width: 20px;
-  min-height: 20px;
-  padding: 0 5px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--text-secondary);
-  background: var(--surface-raised);
+  background: transparent;
   border: 1px solid var(--border-subtle);
 }
 
 .workspace-file-status.status-modified {
   color: var(--stderr);
-  background: color-mix(in srgb, var(--stderr) 14%, transparent);
-  border-color: color-mix(in srgb, var(--stderr) 28%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--stderr) 35%, var(--border-subtle));
 }
 
 .workspace-file-status.status-untracked {
   color: var(--success);
-  background: color-mix(in srgb, var(--success) 14%, transparent);
-  border-color: color-mix(in srgb, var(--success) 28%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border-subtle));
 }
 
 .workspace-file-status.status-deleted {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
-  border-color: color-mix(in srgb, var(--danger) 28%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
 }
 
 .workspace-file-status.status-renamed {
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-subtle));
 }
 
+/* Terminal-like diff pane */
 .workspace-diff {
   display: flex;
   flex-direction: column;
@@ -404,7 +444,7 @@
   flex: 1 1 auto;
   height: 100%;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xs);
   background: var(--surface-inset);
   overflow: hidden;
 }
@@ -413,12 +453,12 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: var(--space-2) var(--space-3);
+  padding: 5px var(--space-2);
   border-bottom: 1px solid var(--border-subtle);
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-tertiary);
-  background: color-mix(in srgb, var(--surface-inset) 94%, var(--surface));
+  background: var(--surface-instrument-raised);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -427,10 +467,10 @@
 .workspace-diff-body {
   flex: 1;
   overflow: auto;
-  padding: var(--space-3);
+  padding: var(--space-2);
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .workspace-diff-line {
@@ -466,9 +506,9 @@
 .workspace-empty {
   padding: var(--space-4);
   border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xs);
   color: var(--text-tertiary);
   text-align: center;
   font-size: 12px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
 }

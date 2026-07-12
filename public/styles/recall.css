@@ -1,11 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
-   RECALL (memory/回忆) PANEL
-
-   Scroll model (critical for UX in the narrow right rail):
-   - Exactly ONE scroll owner: .recall-body (list)
-   - Expanded invocation content flows inside the list (no nested bar)
-   - Event bodies expand in place (no per-event bar)
-   - Inline message recall (.msg-recall-panel) is a separate single scroller
+   RECALL — archive timeline (instrument mode)
+   Scroll model:
+   - Exactly ONE scroll owner: .recall-body
+   - Expanded content flows inside the list
    ═══════════════════════════════════════════════════════════ */
 
 .recall-search {
@@ -15,10 +12,11 @@
 .recall-search input {
   width: 100%;
   padding: var(--space-2) var(--space-3);
-  font-size: 13px;
-  background: var(--surface-raised);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  background: var(--surface-inset);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xs);
   color: var(--text-primary);
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -32,12 +30,13 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 0 2px var(--space-2) 0;
+  padding: 0 0 var(--space-2) 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 0;
   min-height: 0;
-  /* Thin rail scrollbar (Firefox + WebKit) */
+  /* Timeline rail gutter */
+  position: relative;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--border) 80%, transparent) transparent;
 }
@@ -63,7 +62,7 @@
 .recall-empty {
   padding: var(--space-4);
   font-size: 12px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   color: var(--text-tertiary);
   text-align: center;
 }
@@ -72,49 +71,78 @@
   color: var(--danger);
 }
 
-/* ── Invocation list rows ─────────────────────────────── */
+/* ── Invocation list: timeline nodes, not cards ── */
 
 .recall-item {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
+  position: relative;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
   overflow: hidden;
   flex-shrink: 0;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  padding-left: 14px;
+  transition: background 0.12s;
+}
+.recall-item::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-subtle);
+}
+.recall-item::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  border: 2px solid var(--surface-instrument);
+  z-index: 1;
 }
 .recall-item.expanded {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
-  box-shadow: var(--shadow-sm);
+  background: color-mix(in srgb, var(--surface-instrument-raised) 70%, transparent);
+  box-shadow: none;
+}
+.recall-item.expanded::after {
+  background: var(--accent);
+  border-color: var(--surface-instrument);
 }
 .recall-item-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-2);
   cursor: pointer;
   user-select: none;
 }
-.recall-item-head:hover { background: var(--surface); }
+.recall-item-head:hover { background: color-mix(in srgb, var(--surface-instrument-raised) 50%, transparent); }
 .recall-item-agent {
   font-size: 12px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-weight: 600;
   color: var(--text-primary);
 }
 .recall-item-state {
   font-size: 10px;
   font-family: var(--font-mono);
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  background: var(--surface-inset);
+  padding: 0;
+  border-radius: 0;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  background: transparent;
   color: var(--text-tertiary);
+  border: none;
 }
-.recall-item-state.state-completed { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
-.recall-item-state.state-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.recall-item-state.state-completed { color: var(--success); }
+.recall-item-state.state-active { color: var(--accent); }
 .recall-item-state.state-failed,
-.recall-item-state.state-aborted { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.recall-item-state.state-aborted { color: var(--danger); }
 .recall-item-meta {
   flex: 1;
   font-size: 10px;
@@ -132,25 +160,26 @@
 }
 .recall-item.expanded .recall-item-caret { transform: rotate(90deg); }
 
-/* No nested scrollbar: expanded content participates in .recall-body scroll */
 .recall-item-body {
   border-top: 1px solid var(--border-subtle);
-  padding: var(--space-2) var(--space-2) var(--space-3);
+  padding: var(--space-2);
   background: var(--surface-inset);
   max-height: none;
   overflow: visible;
+  margin-left: 0;
 }
 
-/* ── Search hit rows ──────────────────────────────────── */
+/* ── Search hit rows ── */
 
 .recall-hit {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   cursor: pointer;
 }
-.recall-hit:hover { background: var(--surface); }
+.recall-hit:hover { background: var(--surface-instrument-raised); }
 .recall-hit-head {
   display: flex;
   align-items: center;
@@ -178,17 +207,16 @@
   overflow: hidden;
 }
 
-/* ── Event stream timeline ───────────────────────────── */
+/* ── Event stream timeline ── */
 
 .recall-events {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   padding: 2px 0 2px 14px;
 }
 
-/* Continuous vertical rail */
 .recall-events::before {
   content: "";
   position: absolute;
@@ -197,37 +225,30 @@
   bottom: 6px;
   width: 2px;
   border-radius: 1px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent) 35%, var(--border-subtle)),
-    var(--border-subtle) 40%,
-    var(--border-subtle)
-  );
+  background: var(--border-subtle);
   pointer-events: none;
 }
 
 .recall-event {
   position: relative;
-  border: 1px solid var(--border-subtle);
+  border: none;
   border-left: none;
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
-  background: var(--surface);
-  border-radius: var(--radius-md);
+  padding: 4px 0 4px var(--space-2);
+  background: transparent;
+  border-radius: 0;
   box-shadow: none;
 }
 
-/* Node on the rail */
 .recall-event::before {
   content: "";
   position: absolute;
   left: -12px;
-  top: 11px;
-  width: 10px;
-  height: 10px;
+  top: 8px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--border);
   border: 2px solid var(--surface-inset);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 50%, transparent);
   z-index: 1;
 }
 
@@ -236,18 +257,11 @@
 .recall-event.kind-invocation-start::before { background: var(--accent); }
 .recall-event.kind-invocation-end::before { background: var(--success); }
 
-/* Soft left tint by kind */
-.recall-event.kind-stdout {
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--assistant-line) 70%, transparent);
-}
-.recall-event.kind-stderr {
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--stderr) 70%, transparent);
-}
-.recall-event.kind-invocation-start {
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 70%, transparent);
-}
+.recall-event.kind-stdout,
+.recall-event.kind-stderr,
+.recall-event.kind-invocation-start,
 .recall-event.kind-invocation-end {
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--success) 70%, transparent);
+  box-shadow: none;
 }
 
 .recall-event-head {
@@ -269,7 +283,6 @@
   color: var(--text-tertiary);
 }
 
-/* No nested scrollbar: long payloads scroll with the parent list/panel */
 .recall-event-body {
   margin-top: 2px;
   font-size: 11px;
@@ -284,15 +297,15 @@
 }
 .recall-event.kind-stderr .recall-event-body { color: var(--stderr); }
 
-/* ── Per-message inline recall expand ─────────────────── */
+/* ── Per-message inline recall expand ── */
 
 .msg-recall {
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   color: var(--text-tertiary);
   padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  letter-spacing: 0.3px;
+  border-radius: var(--radius-xs);
+  letter-spacing: 0.02em;
   opacity: 0;
   transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
@@ -301,12 +314,11 @@
 .msg-recall:hover { opacity: 1; color: var(--accent); background: var(--surface-raised); }
 .msg-recall.open { color: var(--accent); opacity: 1; }
 
-/* Single scroller for in-message expand (not nested with event bodies) */
 .msg-recall-panel {
   margin-top: var(--space-2);
   padding: var(--space-2);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--surface-inset);
   max-height: min(40vh, 320px);
   overflow-x: hidden;
