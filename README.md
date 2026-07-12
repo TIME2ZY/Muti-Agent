@@ -183,7 +183,7 @@ http://127.0.0.1:8787
 - 消息流：过程卡纯函数在 `public/message-process-helpers.js`，`message-view.js` 负责 DOM 组合
 - 服务端入口：`src/server/index.js` 仅负责实例状态与依赖装配；HTTP 编解码、静态资源、CLI 参数、子进程流和 invocation registry 分别由同目录的独立模块负责
 - 服务端状态：`activeInvocations` 与 invocation registry 必须是 server 实例级状态；不要在模块顶层新增请求相关的可变 Map/Set
-- 存储过渡：默认 `dual` 模式仍从 JSON/JSONL 读取，同时把新 thread、message、window、invocation/event 镜像到 SQLite；镜像失败不得中断聊天
+- 存储过渡：默认 `dual` 模式把新 thread、message、window、invocation/event 镜像到 SQLite；recall API 合并 SQLite FTS5 与 JSONL 结果并优先采用更完整的数据源，镜像失败不得中断聊天
 - Skill 系统：`src/server/skills.js`（frontmatter / 匹配 / prompt 增强 / 只读规则）
 - Agent 身份：`src/agents/identities/*.md` + `src/agents/identity.js`；**每一轮** invoke（含 A2A）注入对应身份块
 - A2A 交接：`src/agents/handoff.js` 解析 ` ```handoff ` 块；软约束（缺字段 degraded 仍路由），结构化注入下一位 Agent

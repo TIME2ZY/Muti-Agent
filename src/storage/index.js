@@ -2,6 +2,7 @@ const { openMemoryDatabase, withTransaction } = require("./database");
 const { createInvocationRepository } = require("./invocation-repository");
 const { createMemoryRepository } = require("./memory-repository");
 const { createMessageRepository } = require("./message-repository");
+const { createRecallRepository } = require("./recall-repository");
 const { createThreadRepository } = require("./thread-repository");
 const { createWindowRepository } = require("./window-repository");
 
@@ -14,6 +15,7 @@ function createStorage(options = {}) {
     messages: createMessageRepository(db),
     invocations: createInvocationRepository(db),
     memories: createMemoryRepository(db),
+    recall: createRecallRepository(db),
     transaction(work) {
       return withTransaction(db, work);
     },

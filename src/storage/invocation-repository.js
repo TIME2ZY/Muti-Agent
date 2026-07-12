@@ -22,6 +22,23 @@ function createInvocationRepository(db) {
     WHERE invocation_id = ?
     ORDER BY sequence_no ASC
   `);
+  const countEvents = db.prepare(
+    "SELECT COUNT(*) AS count FROM invocation_events WHERE invocation_id = ?"
+  );
+  const readEventsPage = db.prepare(`
+    SELECT * FROM invocation_events
+    WHERE invocation_id = ?
+    ORDER BY sequence_no ASC
+    LIMIT ? OFFSET ?
+  `);
+  const listWithMeta = db.prepare(`
+    SELECT i.*, COUNT(e.id) AS event_count
+    FROM invocations i
+    LEFT JOIN invocation_events e ON e.invocation_id = i.id
+    WHERE i.thread_id = ?
+    GROUP BY i.id
+    ORDER BY i.started_at ASC
+  `);
   const finalize = db.prepare(`
     UPDATE invocations
     SET state = @state, exit_code = @exitCode, signal = @signal, ended_at = @endedAt
@@ -48,6 +65,13 @@ function createInvocationRepository(db) {
       return listByThread.all(threadId).map(mapInvocation);
     },
 
+    listForThreadWithMeta(threadId) {
+      return listWithMeta.all(threadId).map((row) => ({
+        ...mapInvocation(row),
+        eventCount: row.event_count,
+      }));
+    },
+
     appendEvent(input) {
       insertEvent.run({
         invocationId: requiredString(input.invocationId, "invocation id"),
@@ -60,6 +84,17 @@ function createInvocationRepository(db) {
 
     listEvents(invocationId) {
       return listEvents.all(invocationId).map(mapEvent);
+    },
+
+    readEventsPage(invocationId, { from = 0, limit = 200 } = {}) {
+      const start = Math.max(0, Number(from) || 0);
+      const size = Math.max(1, Math.min(Number(limit) || 200, 2000));
+      return {
+        events: readEventsPage.all(invocationId, size, start).map(mapEvent),
+        total: countEvents.get(invocationId).count,
+        from: start,
+        limit: size,
+      };
     },
 
     finish(id, outcome) {

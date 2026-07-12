@@ -2,10 +2,7 @@ const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 const { AGENTS, getAgentModelProfile } = require("../agents/catalog");
-const {
-  getProviderAdapter,
-  collectProviderStartupDiagnostics,
-} = require("../agents/providers");
+const { getProviderAdapter, collectProviderStartupDiagnostics } = require("../agents/providers");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
 const agentIdentity = require("../agents/identity");
 const agentHandoff = require("../agents/handoff");
@@ -31,6 +28,7 @@ const { createInvokeArgsBuilder } = require("./invoke-args");
 const { createInvocationRegistry } = require("./invocation-registry");
 const { runChildStream, filterBenignStderr } = require("./child-stream");
 const { createServerStorage } = require("../storage/server-storage");
+const { createRecallService } = require("../storage/recall-service");
 const {
   ROOT,
   DEFAULT_SESSIONS_FILE,
@@ -135,6 +133,7 @@ function createServer(options = {}) {
   const logger = options.logger || console;
   const storageContext = createServerStorage(options, sessionsFile, logger);
   const durableRecorder = storageContext.recorder;
+  const recallService = createRecallService({ storage: storageContext.storage, transcript });
   const activeInvocations = new Map();
   const invocationRegistry = createInvocationRegistry({
     file: invocationsFile,
@@ -226,6 +225,7 @@ function createServer(options = {}) {
     sendJson,
     readJsonBody,
     durableRecorder,
+    recallService,
   });
   const handleChatRoutes = createChatRoutes({
     rootDir: ROOT,

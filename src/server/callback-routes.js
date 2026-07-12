@@ -27,7 +27,9 @@ function createCallbackRoutes({
   sendJson,
   readJsonBody,
   durableRecorder,
+  recallService,
 }) {
+  const recall = recallService || transcript;
   return async function handleCallbackRoutes(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/callbacks/post-message") {
       let body;
@@ -70,7 +72,9 @@ function createCallbackRoutes({
       const callbackToken = req.headers["x-callback-token"] || "";
 
       if (!sessionId || !invocationId || !callbackToken) {
-        sendJson(res, 400, { error: "sessionId, invocationId, and X-Callback-Token are required." });
+        sendJson(res, 400, {
+          error: "sessionId, invocationId, and X-Callback-Token are required.",
+        });
         return true;
       }
       if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
@@ -97,11 +101,20 @@ function createCallbackRoutes({
         sendJson(res, 400, { error: "sessionId is required." });
         return true;
       }
-      if (!validateOptionalCallbackAuth({ sessionId, invocationId, callbackToken, callbacks, sendJson, res })) {
+      if (
+        !validateOptionalCallbackAuth({
+          sessionId,
+          invocationId,
+          callbackToken,
+          callbacks,
+          sendJson,
+          res,
+        })
+      ) {
         return true;
       }
 
-      const invocations = await transcript.listInvocationsWithMeta(sessionId);
+      const invocations = await recall.listInvocationsWithMeta(sessionId);
       sendJson(res, 200, { invocations });
       return true;
     }
@@ -122,11 +135,20 @@ function createCallbackRoutes({
         sendJson(res, 400, { error: "query is required." });
         return true;
       }
-      if (!validateOptionalCallbackAuth({ sessionId, invocationId, callbackToken, callbacks, sendJson, res })) {
+      if (
+        !validateOptionalCallbackAuth({
+          sessionId,
+          invocationId,
+          callbackToken,
+          callbacks,
+          sendJson,
+          res,
+        })
+      ) {
         return true;
       }
 
-      const hits = await transcript.searchTranscript(sessionId, query, { limit });
+      const hits = await recall.searchTranscript(sessionId, query, { limit });
       sendJson(res, 200, { hits, query, limit });
       return true;
     }
@@ -149,11 +171,23 @@ function createCallbackRoutes({
         sendJson(res, 400, { error: "targetInvocationId is required." });
         return true;
       }
-      if (!validateOptionalCallbackAuth({ sessionId, invocationId, callbackToken, callbacks, sendJson, res })) {
+      if (
+        !validateOptionalCallbackAuth({
+          sessionId,
+          invocationId,
+          callbackToken,
+          callbacks,
+          sendJson,
+          res,
+        })
+      ) {
         return true;
       }
 
-      const result = await transcript.readInvocationPage(sessionId, targetInvocationId, { from, limit });
+      const result = await recall.readInvocationPage(sessionId, targetInvocationId, {
+        from,
+        limit,
+      });
       if (result.total === 0) {
         sendJson(res, 404, { error: "Invocation not found." });
         return true;

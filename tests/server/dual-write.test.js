@@ -49,6 +49,8 @@ function worktreeManager() {
 
 test("chat keeps file reads while mirroring durable records into SQLite", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dual-write-server-"));
+  const previousTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
+  process.env.CAT_CAFE_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   const storage = createStorage({ file: ":memory:" });
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
@@ -93,6 +95,22 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
       ["invocation-start", "text.delta", "invocation-end"]
     );
 
+    fs.rmSync(process.env.CAT_CAFE_TRANSCRIPT_DIR, { recursive: true, force: true });
+    const search = await apiFetch(
+      `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=hello`
+    ).then((response) => response.json());
+    assert.equal(search.hits.length, 1);
+    assert.equal(search.hits[0].kind, "text.delta");
+
+    const invocationId = storage.invocations.listForThread(session.id)[0].id;
+    const replay = await apiFetch(
+      `${baseUrl}/api/callbacks/read-invocation?sessionId=${session.id}&targetInvocationId=${invocationId}`
+    ).then((response) => response.json());
+    assert.deepEqual(
+      replay.events.map((event) => event.kind),
+      ["invocation-start", "text.delta", "invocation-end"]
+    );
+
     const deleteResponse = await apiFetch(`${baseUrl}/api/sessions/${session.id}`, {
       method: "DELETE",
     });
@@ -105,6 +123,8 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
   } finally {
     await new Promise((resolve) => server.close(resolve));
     storage.close();
+    if (previousTranscriptDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
+    else process.env.CAT_CAFE_TRANSCRIPT_DIR = previousTranscriptDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

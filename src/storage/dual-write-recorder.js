@@ -55,7 +55,7 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
       return null;
     }
     mirrorThread(session);
-    return attempt("mirror message", () => {
+    const stored = attempt("mirror message", () => {
       const message = session.messages[session.messages.length - 1];
       const invocation = context.invocationId
         ? storage.invocations.get(context.invocationId)
@@ -73,6 +73,8 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
         createdAt: message.createdAt,
       });
     });
+    if (stored) indexMessage(stored);
+    return stored;
   }
 
   function startInvocation(input) {
@@ -112,24 +114,51 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
     else {
       eventSequences.set(input.invocationId, 1);
       invocationThreads.set(input.invocationId, input.threadId);
+      indexInvocationEvent({
+        invocationId: input.invocationId,
+        sequenceNo: 0,
+        kind: "invocation-start",
+        payload: { agent: input.agentId, resumeSessionId: input.resumeSessionId || null },
+        threadId: input.threadId,
+        windowId: window.id,
+        agentId: input.agentId,
+        createdAt: input.startedAt,
+      });
     }
     return invocation ? { invocation, window } : null;
   }
 
   function appendInvocationEvent(invocationId, kind, payload) {
     if (!storage || unavailableInvocations.has(invocationId)) return false;
+    let indexedEvent = null;
     const result = attempt("append invocation event", () => {
       const sequenceNo = eventSequences.get(invocationId) ?? nextEventSequence(invocationId);
-      storage.invocations.appendEvent({ invocationId, sequenceNo, kind, payload });
+      const createdAt = new Date().toISOString();
+      storage.invocations.appendEvent({ invocationId, sequenceNo, kind, payload, createdAt });
       eventSequences.set(invocationId, sequenceNo + 1);
+      const invocation = storage.invocations.get(invocationId);
+      indexedEvent = invocation
+        ? {
+            invocationId,
+            sequenceNo,
+            kind,
+            payload,
+            threadId: invocation.threadId,
+            windowId: invocation.windowId,
+            agentId: invocation.agentId,
+            createdAt,
+          }
+        : null;
       return true;
     });
+    if (indexedEvent) indexInvocationEvent(indexedEvent);
     return result === true;
   }
 
   function finishInvocation(invocationId, code, signal) {
     if (!storage || unavailableInvocations.has(invocationId)) return null;
     const state = code === 0 ? "completed" : signal ? "aborted" : "failed";
+    let indexedEvent = null;
     const result = attempt("finish invocation", () =>
       storage.transaction(() => {
         const record = storage.invocations.finish(invocationId, {
@@ -146,9 +175,20 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
           payload: { code, signal },
           createdAt: record.endedAt,
         });
+        indexedEvent = {
+          invocationId,
+          sequenceNo,
+          kind: "invocation-end",
+          payload: { code, signal },
+          threadId: record.threadId,
+          windowId: record.windowId,
+          agentId: record.agentId,
+          createdAt: record.endedAt,
+        };
         return record;
       })
     );
+    if (indexedEvent) indexInvocationEvent(indexedEvent);
     eventSequences.delete(invocationId);
     unavailableInvocations.delete(invocationId);
     invocationThreads.delete(invocationId);
@@ -191,6 +231,48 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
       )
       .get(invocationId);
     return row.sequence_no;
+  }
+
+  function indexMessage(message) {
+    if (!storage.recall) return;
+    attempt("index message recall", () =>
+      storage.recall.upsert({
+        threadId: message.threadId,
+        windowId: message.windowId,
+        sourceKind: "message",
+        sourceId: message.id,
+        title: `${message.role}${message.agentId ? `:${message.agentId}` : ""}`,
+        content: message.content,
+        agentId: message.agentId,
+        createdAt: message.createdAt,
+        metadata: {
+          invocationId: message.invocationId,
+          sequenceNo: message.sequenceNo,
+          role: message.role,
+        },
+      })
+    );
+  }
+
+  function indexInvocationEvent(event) {
+    if (!storage.recall) return;
+    attempt("index invocation recall", () =>
+      storage.recall.upsert({
+        threadId: event.threadId,
+        windowId: event.windowId,
+        sourceKind: "invocation-event",
+        sourceId: `${event.invocationId}:${event.sequenceNo}`,
+        title: event.kind,
+        content: JSON.stringify(event.payload || {}),
+        agentId: event.agentId,
+        createdAt: event.createdAt,
+        metadata: {
+          invocationId: event.invocationId,
+          eventNo: event.sequenceNo,
+          kind: event.kind,
+        },
+      })
+    );
   }
 
   return {

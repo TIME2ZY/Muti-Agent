@@ -18,7 +18,7 @@ test("memory database applies schema and safety pragmas", () => {
     assert.equal(db.pragma("busy_timeout", { simple: true }), 5000);
     assert.equal(
       db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version,
-      1
+      2
     );
     for (const name of [
       "threads",
@@ -33,8 +33,8 @@ test("memory database applies schema and safety pragmas", () => {
       assert.ok(tables.has(name), `expected ${name} table`);
     }
 
-    assert.equal(applyMigrations(db), 1);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 1);
+    assert.equal(applyMigrations(db), 2);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 2);
   } finally {
     db.close();
   }
@@ -55,9 +55,9 @@ test("storage refuses a database created by newer code", () => {
   const db = openMemoryDatabase({ file: ":memory:" });
   try {
     db.prepare(
-      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (2, 'future', 'now')"
+      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (3, 'future', 'now')"
     ).run();
-    assert.throws(() => applyMigrations(db), /newer than supported version 1/);
+    assert.throws(() => applyMigrations(db), /newer than supported version 2/);
   } finally {
     db.close();
   }

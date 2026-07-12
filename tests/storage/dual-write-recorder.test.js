@@ -74,6 +74,11 @@ test("dual-write recorder mirrors thread, window, message, and invocation data",
       storage.invocations.listEvents("invocation-1").map((event) => event.kind),
       ["invocation-start", "text.delta", "invocation-end"]
     );
+    assert.equal(storage.recall.search("thread-1", "Remember this")[0].sourceKind, "message");
+    assert.equal(
+      storage.recall.search("thread-1", "Stored", { sourceKinds: ["invocation-event"] }).length,
+      1
+    );
   } finally {
     recorder.close();
     storage.close();
