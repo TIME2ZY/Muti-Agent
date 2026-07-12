@@ -15,33 +15,38 @@
 
   function eventBodyText(evt) {
     const p = evt.payload || {};
-    if (evt.kind === "stdout" || evt.kind === "stderr" || evt.kind === "text.delta" || evt.kind === "text.final") return p.text || "";
+    if (
+      evt.kind === "stdout" ||
+      evt.kind === "stderr" ||
+      evt.kind === "text.delta" ||
+      evt.kind === "text.final"
+    )
+      return p.text || "";
     if (evt.kind === "thinking.delta" || evt.kind === "thinking.final") return p.text || "";
-    if (evt.kind === "tool.started") return `${p.toolName || "tool"} ${JSON.stringify(p.args || {})}`;
-    if (evt.kind === "tool.finished") return `${p.toolName || "tool"} -> ${JSON.stringify(p.result || {})}`;
-    if (evt.kind === "subagent.started") return `${p.name || p.toolName || "subagent"} · ${p.task || "started"}`;
+    if (evt.kind === "tool.started")
+      return `${p.toolName || "tool"} ${JSON.stringify(p.args || {})}`;
+    if (evt.kind === "tool.finished")
+      return `${p.toolName || "tool"} -> ${JSON.stringify(p.result || {})}`;
+    if (evt.kind === "subagent.started")
+      return `${p.name || p.toolName || "subagent"} · ${p.task || "started"}`;
     if (evt.kind === "subagent.progress") return `${p.name || "subagent"} · ${p.text || "running"}`;
-    if (evt.kind === "subagent.completed") return `${p.name || "subagent"} · ${p.summary || "done"}`;
+    if (evt.kind === "subagent.completed")
+      return `${p.name || "subagent"} · ${p.summary || "done"}`;
     if (evt.kind === "subagent.failed") return `${p.name || "subagent"} · ${p.error || "failed"}`;
     if (evt.kind === "command.started") return p.command || "";
-    if (evt.kind === "command.finished") return `${p.command || ""}${p.exitCode !== undefined ? ` -> exit ${p.exitCode}` : ""}${p.output ? `\n${p.output}` : ""}`;
+    if (evt.kind === "command.finished")
+      return `${p.command || ""}${p.exitCode !== undefined ? ` -> exit ${p.exitCode}` : ""}${p.output ? `\n${p.output}` : ""}`;
     if (evt.kind === "file.changed") return `${p.changeType || "modified"} ${p.path || ""}`.trim();
     if (evt.kind === "progress.update") return JSON.stringify(p.items || [], null, 2);
-    if (evt.kind === "invocation-start") return `agent: ${p.agent || "?"}${p.shouldResume ? " · resume" : ""}`;
-    if (evt.kind === "invocation-end") return `code: ${p.code ?? "?"}${p.signal ? ` · signal: ${p.signal}` : ""}`;
+    if (evt.kind === "invocation-start")
+      return `agent: ${p.agent || "?"}${p.shouldResume ? " · resume" : ""}`;
+    if (evt.kind === "invocation-end")
+      return `code: ${p.code ?? "?"}${p.signal ? ` · signal: ${p.signal}` : ""}`;
     return JSON.stringify(p, null, 2);
   }
 
   function createRecallPanel(deps) {
-    const {
-      bodyEl,
-      searchInputEl,
-      state,
-      recallApi,
-      agentLabel,
-      fmtTime,
-      escHtml,
-    } = deps;
+    const { bodyEl, searchInputEl, state, recallApi, agentLabel, fmtTime, escHtml } = deps;
 
     function setRecallEmptyAll(msg, isError = false) {
       if (bodyEl) setRecallEmpty(bodyEl, msg, isError, escHtml);
@@ -134,7 +139,10 @@
       if (searchInputEl) searchInputEl.value = "";
       setRecallEmptyAll("加载中…");
       const sid = state.currentSessionId;
-      if (!sid) { setRecallEmptyAll("暂无会话"); return; }
+      if (!sid) {
+        setRecallEmptyAll("暂无会话");
+        return;
+      }
       try {
         renderRecallList(await recallApi.listInvocations(sid));
       } catch (e) {
@@ -148,29 +156,31 @@
         setRecallEmptyAll("本会话暂无调用记录");
         return;
       }
-      bodyEl.replaceChildren(...invocations.map((inv) => {
-        const row = document.createElement("div");
-        row.className = "recall-item";
-        row.dataset.invocationId = inv.invocationId;
-        const head = document.createElement("div");
-        head.className = "recall-item-head";
-        const agent = document.createElement("span");
-        agent.className = "recall-item-agent";
-        agent.textContent = agentLabel(inv.agent);
-        const st = document.createElement("span");
-        st.className = `recall-item-state state-${inv.state}`;
-        st.textContent = inv.state;
-        const meta = document.createElement("span");
-        meta.className = "recall-item-meta";
-        meta.textContent = `${inv.eventCount} 事件 · ${fmtTime(inv.startedAt)}`;
-        const caret = document.createElement("span");
-        caret.className = "recall-item-caret";
-        caret.textContent = "▸";
-        head.append(agent, st, meta, caret);
-        row.append(head);
-        row.addEventListener("click", () => toggleRecallItem(row, inv.invocationId));
-        return row;
-      }));
+      bodyEl.replaceChildren(
+        ...invocations.map((inv) => {
+          const row = document.createElement("div");
+          row.className = "recall-item";
+          row.dataset.invocationId = inv.invocationId;
+          const head = document.createElement("div");
+          head.className = "recall-item-head";
+          const agent = document.createElement("span");
+          agent.className = "recall-item-agent";
+          agent.textContent = agentLabel(inv.agent);
+          const st = document.createElement("span");
+          st.className = `recall-item-state state-${inv.state}`;
+          st.textContent = inv.state;
+          const meta = document.createElement("span");
+          meta.className = "recall-item-meta";
+          meta.textContent = `${inv.eventCount} 事件 · ${fmtTime(inv.startedAt)}`;
+          const caret = document.createElement("span");
+          caret.className = "recall-item-caret";
+          caret.textContent = "▸";
+          head.append(agent, st, meta, caret);
+          row.append(head);
+          row.addEventListener("click", () => toggleRecallItem(row, inv.invocationId));
+          return row;
+        })
+      );
     }
 
     async function toggleRecallItem(row, invocationId) {
@@ -200,7 +210,10 @@
     async function runRecallSearch(query) {
       setRecallEmptyAll("搜索中…");
       const sid = state.currentSessionId;
-      if (!sid) { setRecallEmptyAll("暂无会话"); return; }
+      if (!sid) {
+        setRecallEmptyAll("暂无会话");
+        return;
+      }
       try {
         renderRecallHits(await recallApi.searchSession(sid, query, { limit: 30 }));
       } catch (e) {
@@ -214,26 +227,33 @@
         setRecallEmptyAll("无匹配结果");
         return;
       }
-      bodyEl.replaceChildren(...hits.map((hit) => {
-        const row = document.createElement("div");
-        row.className = "recall-hit";
-        row.dataset.invocationId = hit.invocationId;
-        const head = document.createElement("div");
-        head.className = "recall-hit-head";
-        const kind = document.createElement("span");
-        kind.className = "recall-hit-kind";
-        kind.textContent = `${hit.kind} · #${hit.eventNo}`;
-        const time = document.createElement("span");
-        time.className = "recall-hit-time";
-        time.textContent = fmtTime(hit.ts);
-        head.append(kind, time);
-        const snip = document.createElement("div");
-        snip.className = "recall-hit-snippet";
-        snip.textContent = hit.snippet;
-        row.append(head, snip);
-        row.addEventListener("click", () => toggleRecallHit(row, hit.invocationId));
-        return row;
-      }));
+      bodyEl.replaceChildren(
+        ...hits.map((hit) => {
+          const row = document.createElement("div");
+          row.className = "recall-hit";
+          if (hit.invocationId) row.dataset.invocationId = hit.invocationId;
+          const head = document.createElement("div");
+          head.className = "recall-hit-head";
+          const kind = document.createElement("span");
+          kind.className = "recall-hit-kind";
+          kind.textContent =
+            hit.sourceKind === "invocation-event" ? `${hit.kind} · #${hit.eventNo}` : hit.kind;
+          const time = document.createElement("span");
+          time.className = "recall-hit-time";
+          time.textContent = fmtTime(hit.ts);
+          head.append(kind, time);
+          const snip = document.createElement("div");
+          snip.className = "recall-hit-snippet";
+          snip.textContent = hit.snippet;
+          row.append(head, snip);
+          if (hit.invocationId) {
+            row.addEventListener("click", () => toggleRecallHit(row, hit.invocationId));
+          } else {
+            row.classList.add("recall-hit-static");
+          }
+          return row;
+        })
+      );
     }
 
     async function toggleRecallHit(row, invocationId) {
@@ -263,7 +283,10 @@
       searchInputEl.addEventListener("input", () => {
         clearTimeout(state.recallSearchDebounce);
         const q = searchInputEl.value.trim();
-        if (!q) { loadRecallList(); return; }
+        if (!q) {
+          loadRecallList();
+          return;
+        }
         state.recallSearchDebounce = setTimeout(() => runRecallSearch(q), 250);
       });
     }

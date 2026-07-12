@@ -119,7 +119,7 @@ function validateToken(threadId, invocationId, callbackToken) {
  *  - broadcast as an SSE message event
  *  - scanned for @mentions; any new target agents are appended to the worklist
  */
-function postMessage(threadId, invocationId, content, { appendToSession } = {}) {
+function postMessage(threadId, invocationId, content, { appendToSession, durableRecorder } = {}) {
   const thread = activeThreads.get(threadId);
   if (!thread) return false;
 
@@ -132,13 +132,18 @@ function postMessage(threadId, invocationId, content, { appendToSession } = {}) 
   const agent = record ? record.agentId : "unknown";
 
   if (appendToSession && thread.sessionsFile) {
-    appendToSession(thread.sessionsFile, thread.sessionId || threadId, {
-      role: "assistant",
-      agent,
-      content,
-      source: "callback",
-      invocationId,
-    }, { allowCreate: false });
+    appendToSession(
+      thread.sessionsFile,
+      thread.sessionId || threadId,
+      {
+        role: "assistant",
+        agent,
+        content,
+        source: "callback",
+        invocationId,
+      },
+      { allowCreate: false }
+    );
   }
 
   // Record the mid-execution callback in the transcript under the originating
@@ -148,6 +153,10 @@ function postMessage(threadId, invocationId, content, { appendToSession } = {}) 
   const currentInvocationId = thread.currentInvocationId;
   if (currentInvocationId) {
     transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "callback-post", {
+      agent,
+      content,
+    });
+    durableRecorder?.appendInvocationEvent(currentInvocationId, "callback-post", {
       agent,
       content,
     });
@@ -165,19 +174,28 @@ function postMessage(threadId, invocationId, content, { appendToSession } = {}) 
       thread.a2aCount += 1;
       const routeText = `🔄 ${agent} → ${target}`;
       if (appendToSession && thread.sessionsFile) {
-        appendToSession(thread.sessionsFile, thread.sessionId || threadId, {
-          role: "system",
-          agent: "system",
-          content: routeText,
-          kind: "a2a-route",
-          from: agent,
-          to: target,
-          source: "callback",
-        }, { allowCreate: false });
+        appendToSession(
+          thread.sessionsFile,
+          thread.sessionId || threadId,
+          {
+            role: "system",
+            agent: "system",
+            content: routeText,
+            kind: "a2a-route",
+            from: agent,
+            to: target,
+            source: "callback",
+          },
+          { allowCreate: false }
+        );
       }
       sendSse(thread.res, "a2a-route", { from: agent, to: target });
       if (currentInvocationId) {
         transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "a2a-route", {
+          from: agent,
+          to: target,
+        });
+        durableRecorder?.appendInvocationEvent(currentInvocationId, "a2a-route", {
           from: agent,
           to: target,
         });
@@ -252,7 +270,7 @@ curl -G ${apiUrl}/api/callbacks/session-search \\
   --data-urlencode "limit=10"
 \`\`\`
 
-返回：\`{ hits: [{ invocationId, eventNo, kind, ts, snippet }] }\`
+返回：\`{ hits: [{ invocationId, eventNo, kind, ts, snippet, sourceKind, sourceId }] }\`。消息或记忆命中可能没有 invocationId，此时 snippet 即为可回忆内容。
 
 ## 读取某次 invocation 的完整事件流
 

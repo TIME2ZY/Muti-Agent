@@ -1,5 +1,16 @@
 const { assertValidOpaqueId } = require("./id-policy");
-const { resolveResumeSessionId } = require("./session-map-store");
+const { resolveResumeSessionId, abandonProviderSession } = require("./session-map-store");
+
+const NOOP_DURABLE_RECORDER = Object.freeze({
+  ensureWindow: () => null,
+  sealWindow: () => null,
+  sealAndRotateWindow: () => null,
+  startInvocation: () => null,
+  appendInvocationEvent: () => false,
+  finishInvocation: () => null,
+  bindProviderSession: () => false,
+  addWindowUsage: () => false,
+});
 
 function createChatRoutes({
   rootDir,
@@ -13,6 +24,7 @@ function createChatRoutes({
   contextHealth,
   sessionSealer,
   sessionBootstrap,
+  recallService,
   agentIdentity,
   agentHandoff,
   worktreeManager,
@@ -40,7 +52,9 @@ function createChatRoutes({
   recordInvocationEvent,
   finalizeInvocationEvent,
   persistInvocations,
+  durableRecorder,
 }) {
+  const durable = durableRecorder || NOOP_DURABLE_RECORDER;
   return async function handleChatRoutes(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/invoke") {
       let args;
@@ -184,6 +198,20 @@ function createChatRoutes({
       branch: "",
     };
     const workspaceKey = `${activeWorktree ? "worktree" : "base"}:${runWorkspace.worktreeDir}`;
+    const requestedAgentConfig = AGENTS[requestedAgent];
+    const requestedProviderId = requestedAgentConfig.providerId || requestedAgentConfig.name || "";
+    const requestedProviderKey =
+      requestedProviderId && requestedAgentConfig.model
+        ? `${requestedProviderId}:${requestedAgentConfig.model}`
+        : requestedProviderId;
+    const initialWindow = durable.ensureWindow({
+      session,
+      threadId: sessionId,
+      agentId: requestedAgent,
+      providerKey: requestedProviderKey,
+      workspaceKey,
+      capacityTokens: contextHealth.getAgentCapacity(requestedAgent),
+    });
 
     const existing = activeInvocations.get(sessionId);
     if (existing) existing.abort();
@@ -207,7 +235,7 @@ function createChatRoutes({
         augmentedPrompt,
         activeSkills: skillNames,
       },
-      { allowCreate: false }
+      { allowCreate: false, windowId: initialWindow?.id }
     );
     transcript.appendEvent(sessionId, "_user_prompt", "user-prompt", {
       agent: requestedAgent,
@@ -221,6 +249,8 @@ function createChatRoutes({
       threadId: sessionId,
       sessionId,
       agent: AGENTS[requestedAgent],
+      generation: initialWindow?.generation || 1,
+      invocationSource: recallService || transcript,
     });
 
     res.writeHead(200, {
@@ -236,8 +266,6 @@ function createChatRoutes({
 
     const a2aHistory = [];
     let aborted = false;
-    const healthTracker = contextHealth.makeTracker(requestedAgent);
-    const sealer = sessionSealer.makeSealer();
     const threadCtx = {
       sessionId,
       res,
@@ -247,7 +275,7 @@ function createChatRoutes({
       sessionsFile: options.sessionsFile,
       tokens: new Map(),
       currentInvocationId: null,
-      sealer,
+      sealer: null,
     };
     callbacks.registerThread(sessionId, threadCtx);
 
@@ -257,15 +285,6 @@ function createChatRoutes({
           aborted = true;
           break;
         }
-        if (sealer.isSealed()) {
-          sendSse(res, "sealed", {
-            reason: "context overflow",
-            ratio: healthTracker.getFillRatio(),
-          });
-          aborted = true;
-          break;
-        }
-
         const agent = worklist[i];
         const agentConfig = AGENTS[agent] || { id: agent, label: agent, description: "" };
         const sessionMap = readSessionMap(sessionId, sessionMapRoot);
@@ -281,23 +300,43 @@ function createChatRoutes({
         let assistantContent = "";
         let contextWarned = false;
         let contextSealedSseSent = false;
+        let contextRotated = false;
 
         const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
+        const startedAt = new Date().toISOString();
         invocationEvents.set(invocationId, {
           invocationId,
           sessionId,
           agent,
-          startedAt: new Date().toISOString(),
+          startedAt,
           endedAt: null,
           state: "active",
           events: [
             {
-              ts: new Date().toISOString(),
+              ts: startedAt,
               kind: "invocation-start",
               payload: { agent, resumeSessionId: resumeSessionId || null },
             },
           ],
         });
+        const durableRun = durable.startInvocation({
+          session,
+          invocationId,
+          threadId: sessionId,
+          agentId: agent,
+          providerKey,
+          workspaceKey,
+          capacityTokens: contextHealth.getAgentCapacity(agent),
+          resumeSessionId,
+          startedAt,
+        });
+        const healthTracker = contextHealth.makeTracker(agent, {
+          capacityTokens: durableRun?.window?.capacityTokens,
+          inputChars: durableRun?.window?.inputChars,
+          outputChars: durableRun?.window?.outputChars,
+        });
+        const sealer = sessionSealer.makeSealer();
+        threadCtx.sealer = sealer;
         sendSse(res, "agent-start", { agent, invocationId });
 
         let agentPrompt;
@@ -341,6 +380,7 @@ function createChatRoutes({
               threadId: sessionId,
               sessionId,
               agent: agentConfig,
+              generation: durableRun?.window?.generation || 1,
             }),
             agentPrompt
           );
@@ -382,6 +422,7 @@ function createChatRoutes({
           onEvent(event) {
             transcript.appendEvent(sessionId, invocationId, event.type, event);
             recordInvocationEvent(invocationEvents, invocationId, event.type, event);
+            durable.appendInvocationEvent(invocationId, event.type, event);
             sendSse(res, "agent-event", event);
 
             if (event.type === "text.delta") {
@@ -393,6 +434,7 @@ function createChatRoutes({
           onStderr(text) {
             transcript.appendEvent(sessionId, invocationId, "stderr", { agent, text });
             recordInvocationEvent(invocationEvents, invocationId, "stderr", { text });
+            durable.appendInvocationEvent(invocationId, "stderr", { agent, text });
             const visible = filterBenignStderr(text);
             if (visible) sendSse(res, "stderr", { agent, text: visible });
           },
@@ -406,13 +448,55 @@ function createChatRoutes({
             } else if (state === sessionSealer.STATE.SEALED && !contextSealedSseSent) {
               sendSse(res, "sealed", { agent, ratio, reason: "context overflow" });
               contextSealedSseSent = true;
+              if (durableRun?.window?.id) {
+                contextRotated = Boolean(
+                  durable.sealAndRotateWindow({
+                    session,
+                    threadId: sessionId,
+                    agentId: agent,
+                    providerKey,
+                    workspaceKey,
+                    capacityTokens: durableRun.window.capacityTokens,
+                    windowId: durableRun.window.id,
+                    reason: "context overflow",
+                  })
+                );
+                if (!contextRotated) {
+                  durable.sealWindow(durableRun.window.id, "context overflow");
+                }
+              }
+              abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
             }
           },
           shouldStop: () => sealer.isSealed(),
         });
 
+        if (durableRun) {
+          durable.addWindowUsage(durableRun.window.id, {
+            inputChars: promptForAgent.length,
+            outputChars: assistantContent.length,
+          });
+        }
+        if (sealer.isSealed()) {
+          // Session-map rotation is required even when SQLite mirroring is disabled or failed.
+          if (durableRun?.window?.id && !contextRotated) {
+            durable.sealWindow(durableRun.window.id, "context overflow");
+          }
+          abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+        } else if (durableRun) {
+          const updatedSessionMap = readSessionMap(sessionId, sessionMapRoot);
+          const persistedProviderSessionId = resolveResumeSessionId(
+            updatedSessionMap,
+            agent,
+            workspaceKey,
+            providerKey
+          );
+          durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
+        }
+
         finalizeInvocationEvent(invocationEvents, invocationId, code, signal);
         persistInvocations();
+        durable.finishInvocation(invocationId, code, signal);
 
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
           aborted = true;
@@ -430,7 +514,7 @@ function createChatRoutes({
             signal,
             invocationId,
           },
-          { allowCreate: false }
+          { allowCreate: false, windowId: durableRun?.window.id }
         );
         transcript.appendEvent(sessionId, invocationId, "invocation-end", {
           agent,

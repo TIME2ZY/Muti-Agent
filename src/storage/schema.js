@@ -164,6 +164,13 @@ const MIGRATIONS = Object.freeze([
       END;
     `,
   },
+  {
+    version: 2,
+    name: "recall_metadata",
+    sql: `
+      ALTER TABLE recall_items ADD COLUMN metadata_json TEXT;
+    `,
+  },
 ]);
 
 module.exports = { PRAGMAS, MIGRATIONS };

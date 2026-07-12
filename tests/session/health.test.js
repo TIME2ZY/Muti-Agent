@@ -28,6 +28,18 @@ test("addInput / addOutput accumulate chars", () => {
   assert.equal(tracker.getUsedChars(), 1500);
 });
 
+test("makeTracker resumes persisted window usage", () => {
+  const tracker = contextHealth.makeTracker("architect", {
+    capacityTokens: 1000,
+    inputChars: 1200,
+    outputChars: 800,
+  });
+  assert.equal(tracker.getUsedChars(), 2000);
+  assert.equal(tracker.getFillRatio(), 0.5);
+  tracker.addOutput(400);
+  assert.equal(tracker.getFillRatio(), 0.6);
+});
+
 test("addInput / addOutput ignore non-positive values", () => {
   const tracker = contextHealth.makeTracker("architect");
   tracker.addInput(0);

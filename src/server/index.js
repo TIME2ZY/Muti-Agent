@@ -2,10 +2,7 @@ const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 const { AGENTS, getAgentModelProfile } = require("../agents/catalog");
-const {
-  getProviderAdapter,
-  collectProviderStartupDiagnostics,
-} = require("../agents/providers");
+const { getProviderAdapter, collectProviderStartupDiagnostics } = require("../agents/providers");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
 const agentIdentity = require("../agents/identity");
 const agentHandoff = require("../agents/handoff");
@@ -30,6 +27,8 @@ const { serveIndex, serveStatic } = require("./static-assets");
 const { createInvokeArgsBuilder } = require("./invoke-args");
 const { createInvocationRegistry } = require("./invocation-registry");
 const { runChildStream, filterBenignStderr } = require("./child-stream");
+const { createServerStorage } = require("../storage/server-storage");
+const { createRecallService } = require("../storage/recall-service");
 const {
   ROOT,
   DEFAULT_SESSIONS_FILE,
@@ -131,6 +130,10 @@ function createServer(options = {}) {
     });
   const invocationsFile = options.invocationsFile || DEFAULT_INVOCATIONS_FILE;
   const sessionMapRoot = path.resolve(options.sessionMapRoot || DEFAULT_SESSION_MAP_ROOT);
+  const logger = options.logger || console;
+  const storageContext = createServerStorage(options, sessionsFile, logger);
+  const durableRecorder = storageContext.recorder;
+  const recallService = createRecallService({ storage: storageContext.storage, transcript });
   const activeInvocations = new Map();
   const invocationRegistry = createInvocationRegistry({
     file: invocationsFile,
@@ -141,6 +144,39 @@ function createServer(options = {}) {
     agents: AGENTS,
   });
   _previewManagers.add(worktreeManager);
+
+  function createSessionDual(file) {
+    const session = createSession(file);
+    durableRecorder.mirrorThread(session);
+    return session;
+  }
+
+  function updateProjectDirDual(file, sessionId, projectDir) {
+    const session = setSessionProjectDir(file, sessionId, projectDir);
+    durableRecorder.mirrorThread(session);
+    return session;
+  }
+
+  function updateWorktreeDual(file, sessionId, worktree) {
+    const session = setSessionWorktree(file, sessionId, worktree);
+    durableRecorder.mirrorThread(session);
+    return session;
+  }
+
+  function appendToSessionDual(file, sessionId, message, appendOptions = {}) {
+    const session = appendToSession(file, sessionId, message, appendOptions);
+    durableRecorder.mirrorLastMessage(session, {
+      windowId: appendOptions.windowId,
+      invocationId: message.invocationId,
+    });
+    return session;
+  }
+
+  function deleteSessionDual(file, sessionId) {
+    const deleted = deleteSession(file, sessionId);
+    if (deleted) durableRecorder.deleteThread(sessionId);
+    return deleted;
+  }
 
   function cleanupSessionRuntime(sessionId) {
     const controller = activeInvocations.get(sessionId);
@@ -173,21 +209,23 @@ function createServer(options = {}) {
     sendJson,
     readJsonBody,
     listSessions,
-    createSession,
+    createSession: createSessionDual,
     getSession,
-    deleteSession,
-    setSessionWorktree,
+    deleteSession: deleteSessionDual,
+    setSessionWorktree: updateWorktreeDual,
     validateProjectDir,
-    setSessionProjectDir,
+    setSessionProjectDir: updateProjectDirDual,
   });
   const handleCallbackRoutes = createCallbackRoutes({
     callbacks,
     transcript,
-    appendToSession,
+    appendToSession: appendToSessionDual,
     getSession,
     sessionsFile,
     sendJson,
     readJsonBody,
+    durableRecorder,
+    recallService,
   });
   const handleChatRoutes = createChatRoutes({
     rootDir: ROOT,
@@ -201,6 +239,7 @@ function createServer(options = {}) {
     contextHealth,
     sessionSealer,
     sessionBootstrap,
+    recallService,
     agentIdentity,
     agentHandoff,
     worktreeManager,
@@ -218,19 +257,20 @@ function createServer(options = {}) {
     runChildStream,
     spawnRunner,
     getSession,
-    createSession,
-    setSessionProjectDir,
+    createSession: createSessionDual,
+    setSessionProjectDir: updateProjectDirDual,
     validateProjectDir,
-    setSessionWorktree,
-    appendToSession,
+    setSessionWorktree: updateWorktreeDual,
+    appendToSession: appendToSessionDual,
     getSessionMapPath,
     readSessionMap,
     recordInvocationEvent,
     finalizeInvocationEvent,
     persistInvocations: invocationRegistry.persist,
+    durableRecorder,
   });
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
 
     if (req.method === "GET" && url.pathname === "/") {
@@ -281,6 +321,11 @@ function createServer(options = {}) {
 
     sendJson(res, 404, { error: "Not found." });
   });
+  server.once("close", () => {
+    _previewManagers.delete(worktreeManager);
+    storageContext.close();
+  });
+  return server;
 }
 
 if (require.main === module) {

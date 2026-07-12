@@ -5,6 +5,18 @@ function createThreadRepository(db) {
     VALUES
       (@id, @title, @projectDir, @lastAgentId, @createdAt, @updatedAt)
   `);
+  const upsert = db.prepare(`
+    INSERT INTO threads
+      (id, title, project_dir, last_agent_id, created_at, updated_at)
+    VALUES
+      (@id, @title, @projectDir, @lastAgentId, @createdAt, @updatedAt)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      project_dir = excluded.project_dir,
+      last_agent_id = excluded.last_agent_id,
+      updated_at = excluded.updated_at,
+      deleted_at = NULL
+  `);
   const findById = db.prepare("SELECT * FROM threads WHERE id = ? AND deleted_at IS NULL");
   const listActive = db.prepare(
     "SELECT * FROM threads WHERE deleted_at IS NULL ORDER BY updated_at DESC, created_at DESC"
@@ -13,15 +25,12 @@ function createThreadRepository(db) {
 
   return {
     create(input) {
-      const now = input.createdAt || new Date().toISOString();
-      insert.run({
-        id: requiredString(input.id, "thread id"),
-        title: stringOrEmpty(input.title),
-        projectDir: stringOrEmpty(input.projectDir),
-        lastAgentId: nullableString(input.lastAgentId),
-        createdAt: now,
-        updatedAt: input.updatedAt || now,
-      });
+      insert.run(normalizeThread(input));
+      return this.get(input.id);
+    },
+
+    upsert(input) {
+      upsert.run(normalizeThread(input));
       return this.get(input.id);
     },
 
@@ -36,6 +45,18 @@ function createThreadRepository(db) {
     delete(id) {
       return remove.run(id).changes > 0;
     },
+  };
+}
+
+function normalizeThread(input) {
+  const now = input.createdAt || new Date().toISOString();
+  return {
+    id: requiredString(input.id, "thread id"),
+    title: stringOrEmpty(input.title),
+    projectDir: stringOrEmpty(input.projectDir),
+    lastAgentId: nullableString(input.lastAgentId),
+    createdAt: now,
+    updatedAt: input.updatedAt || now,
   };
 }
 
