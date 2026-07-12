@@ -8,14 +8,15 @@ const { createWindowRepository } = require("./window-repository");
 
 function createStorage(options = {}) {
   const db = options.db || openMemoryDatabase(options);
+  const recall = createRecallRepository(db);
   return {
     db,
     threads: createThreadRepository(db),
     windows: createWindowRepository(db),
     messages: createMessageRepository(db),
     invocations: createInvocationRepository(db),
-    memories: createMemoryRepository(db),
-    recall: createRecallRepository(db),
+    memories: createMemoryRepository(db, recall),
+    recall,
     transaction(work) {
       return withTransaction(db, work);
     },

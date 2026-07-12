@@ -239,6 +239,7 @@ function createServer(options = {}) {
     contextHealth,
     sessionSealer,
     sessionBootstrap,
+    recallService,
     agentIdentity,
     agentHandoff,
     worktreeManager,

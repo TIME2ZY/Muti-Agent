@@ -91,10 +91,7 @@ test("after seal the next invocation does not carry the old provider_session_id"
     assert.equal(second.window.generation, 2);
     assert.equal(second.window.providerSessionId, null);
     assert.notEqual(second.window.id, first.window.id);
-    assert.equal(
-      storage.invocations.listEvents("inv-2")[0].payload.resumeSessionId,
-      null
-    );
+    assert.equal(storage.invocations.listEvents("inv-2")[0].payload.resumeSessionId, null);
   } finally {
     recorder.close();
     storage.close();
@@ -134,6 +131,29 @@ test("generation increments and capacity is persisted across seal-and-rotate", (
     assert.equal(rotatedAgain.next.generation, 3);
   } finally {
     recorder.close();
+    storage.close();
+  }
+});
+
+test("sealed windows accept final usage accounting from their active invocation", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    storage.threads.create({ id: "thread-usage" });
+    storage.windows.create({
+      id: "window-usage",
+      threadId: "thread-usage",
+      ...baseCoordinate(),
+      generation: 1,
+    });
+    storage.windows.seal("window-usage", { reason: "overflow" });
+    assert.equal(
+      storage.windows.addUsage("window-usage", { inputChars: 120, outputChars: 80 }),
+      true
+    );
+    const sealed = storage.windows.get("window-usage");
+    assert.equal(sealed.inputChars, 120);
+    assert.equal(sealed.outputChars, 80);
+  } finally {
     storage.close();
   }
 });
@@ -273,8 +293,7 @@ test("across 10 sealed windows original messages remain searchable and invocatio
     assert.ok(
       page.events.some(
         (event) =>
-          event.kind === "text.delta" &&
-          String(event.payload?.text || "").includes(uniqueToken)
+          event.kind === "text.delta" && String(event.payload?.text || "").includes(uniqueToken)
       )
     );
   } finally {
@@ -313,10 +332,7 @@ test("deleting a thread removes related records transactionally", () => {
     assert.equal(storage.messages.listForThread(session.id).length, 0);
     assert.equal(storage.invocations.get("inv-del"), null);
     assert.equal(storage.recall.search(session.id, "deleted").length, 0);
-    assert.equal(
-      storage.db.prepare("SELECT COUNT(*) AS c FROM invocation_events").get().c,
-      0
-    );
+    assert.equal(storage.db.prepare("SELECT COUNT(*) AS c FROM invocation_events").get().c, 0);
   } finally {
     recorder.close();
     storage.close();
@@ -339,10 +355,7 @@ test("concurrent-style callback after delete cannot resurrect data", () => {
     assert.equal(recorder.deleteThread(session.id), true);
 
     // Late dual-write from an in-flight callback / stream.
-    assert.equal(
-      recorder.appendInvocationEvent("inv-race", "text.delta", { text: "late" }),
-      false
-    );
+    assert.equal(recorder.appendInvocationEvent("inv-race", "text.delta", { text: "late" }), false);
     assert.equal(recorder.finishInvocation("inv-race", 0, null), null);
     assert.equal(
       recorder.mirrorLastMessage(
@@ -516,11 +529,49 @@ test("replaying message dual-write does not create duplicate rows", () => {
     recorder.mirrorLastMessage(session, { windowId: window.id });
     assert.equal(storage.messages.listForThread(session.id).length, 1);
     assert.equal(
-      storage.db.prepare("SELECT COUNT(*) AS c FROM messages WHERE id = ?").get("msg-idempotent")
-        .c,
+      storage.db.prepare("SELECT COUNT(*) AS c FROM messages WHERE id = ?").get("msg-idempotent").c,
       1
     );
     assert.equal(storage.recall.search(session.id, "same message").length, 1);
+  } finally {
+    recorder.close();
+    storage.close();
+  }
+});
+
+test("fact writes roll back when the recall projection cannot be updated", () => {
+  const storage = createStorage({ file: ":memory:" });
+  const recorder = createDualWriteRecorder({ storage, logger: { error() {} } });
+  const session = sessionFixture();
+  try {
+    const run = recorder.startInvocation({
+      session,
+      invocationId: "inv-atomic",
+      threadId: session.id,
+      ...baseCoordinate(),
+    });
+    assert.ok(run);
+
+    const originalUpsert = storage.recall.upsert;
+    storage.recall.upsert = () => {
+      throw new Error("projection unavailable");
+    };
+
+    assert.equal(
+      recorder.appendInvocationEvent("inv-atomic", "text.delta", { text: "must rollback" }),
+      false
+    );
+    assert.equal(storage.invocations.listEvents("inv-atomic").length, 1);
+
+    session.messages.push({
+      id: "msg-atomic",
+      role: "assistant",
+      content: "must rollback",
+      createdAt: "2026-07-12T00:00:01.000Z",
+    });
+    assert.equal(recorder.mirrorLastMessage(session, { windowId: run.window.id }), null);
+    assert.equal(storage.messages.get("msg-atomic"), null);
+    storage.recall.upsert = originalUpsert;
   } finally {
     recorder.close();
     storage.close();
@@ -629,10 +680,7 @@ test("clearAgentProviderSession only drops the sealed workspace slot", () => {
     "codex:gpt-5.5"
   );
   clearAgentProviderSession(sessions, "architect", "base:C:/repo");
-  assert.equal(
-    resolveResumeSessionId(sessions, "architect", "base:C:/repo", "codex:gpt-5.5"),
-    ""
-  );
+  assert.equal(resolveResumeSessionId(sessions, "architect", "base:C:/repo", "codex:gpt-5.5"), "");
   assert.equal(
     resolveResumeSessionId(sessions, "architect", "worktree:C:/repo/wt", "codex:gpt-5.5"),
     "ps-wt"

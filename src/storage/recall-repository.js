@@ -290,7 +290,13 @@ function memoryToRecall(row) {
     title: `${row.kind}:${row.status}`,
     content: row.content,
     createdAt: row.created_at,
-    metadata: { kind: row.kind, status: row.status, createdBy: row.created_by },
+    metadata: {
+      kind: row.kind,
+      status: row.status,
+      createdBy: row.created_by,
+      sourceInvocationId: row.source_invocation_id,
+      sourceMessageId: row.source_message_id,
+    },
   };
 }
 

@@ -26,8 +26,8 @@ function buildIdentity({ threadId, sessionId, agent, generation = 1 }) {
   ].join("\n");
 }
 
-async function buildDigest({ sessionId }) {
-  const invocations = await transcript.listInvocationsWithMeta(sessionId);
+async function buildDigest({ sessionId, invocationSource = transcript }) {
+  const invocations = await invocationSource.listInvocationsWithMeta(sessionId);
   if (invocations.length === 0) {
     return [
       `<!-- Digest -->`,
@@ -42,22 +42,25 @@ async function buildDigest({ sessionId }) {
     ``,
   ];
   for (const inv of invocations) {
-    const dur = (inv.startedAt && inv.endedAt)
-      ? `duration=${new Date(inv.endedAt) - new Date(inv.startedAt)}ms`
-      : "in-flight";
-    lines.push(`- ${inv.invocationId} | ${inv.agent} | started=${inv.startedAt || "?"} | state=${inv.state || "in-flight"} | events=${inv.eventCount} | ${dur}`);
+    const dur =
+      inv.startedAt && inv.endedAt
+        ? `duration=${new Date(inv.endedAt) - new Date(inv.startedAt)}ms`
+        : "in-flight";
+    lines.push(
+      `- ${inv.invocationId} | ${inv.agent} | started=${inv.startedAt || "?"} | state=${inv.state || "in-flight"} | events=${inv.eventCount} | ${dur}`
+    );
   }
   lines.push("");
   return lines.join("\n");
 }
 
 async function buildBootstrapPacket(opts) {
-  const { threadId, sessionId, agent, generation = 1 } = opts;
+  const { threadId, sessionId, agent, generation = 1, invocationSource = transcript } = opts;
   if (!threadId) throw new Error("threadId is required");
   if (!sessionId) throw new Error("sessionId is required");
   if (!agent) throw new Error("agent is required");
   const identity = buildIdentity({ threadId, sessionId, agent, generation });
-  const digest = await buildDigest({ threadId, sessionId });
+  const digest = await buildDigest({ threadId, sessionId, invocationSource });
   return [identity, digest, RECALL_RULE, ""].join("\n");
 }
 

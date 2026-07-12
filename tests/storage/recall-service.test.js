@@ -30,6 +30,24 @@ function createFixture(fileOverrides = {}) {
     payload: { text: "sqlite memory" },
     createdAt: "2026-07-12T00:00:01.000Z",
   });
+  storage.messages.append({
+    id: "message-1",
+    threadId: "thread-1",
+    windowId: "window-1",
+    sequenceNo: 0,
+    role: "user",
+    content: "sqlite-only user requirement",
+    createdAt: "2026-07-12T00:00:00.500Z",
+  });
+  storage.memories.create({
+    id: "memory-1",
+    threadId: "thread-1",
+    kind: "decision",
+    content: "sqlite-only durable decision",
+    createdBy: "architect",
+    sourceInvocationId: "invocation-1",
+    createdAt: "2026-07-12T00:00:02.000Z",
+  });
   storage.recall.rebuildThread("thread-1");
 
   const transcript = {
@@ -58,6 +76,23 @@ test("recall service serves SQLite invocation metadata and event search", async 
   }
 });
 
+test("recall service returns SQLite-only user messages and memory entries", async () => {
+  const { storage, service } = createFixture();
+  try {
+    const messageHits = await service.searchTranscript("thread-1", "user requirement");
+    assert.equal(messageHits.length, 1);
+    assert.equal(messageHits[0].sourceKind, "message");
+    assert.equal(messageHits[0].kind, "message.user");
+
+    const memoryHits = await service.searchTranscript("thread-1", "durable decision");
+    assert.equal(memoryHits.length, 1);
+    assert.equal(memoryHits[0].sourceKind, "memory-entry");
+    assert.equal(memoryHits[0].invocationId, "invocation-1");
+  } finally {
+    storage.close();
+  }
+});
+
 test("recall service merges and deduplicates SQLite and file hits", async () => {
   const duplicate = {
     invocationId: "invocation-1",
@@ -81,6 +116,25 @@ test("recall service merges and deduplicates SQLite and file hits", async () => 
     assert.equal(hits.length, 2);
     assert.equal(hits[0].invocationId, "invocation-1");
     assert.equal(hits[1].invocationId, "legacy-invocation");
+  } finally {
+    storage.close();
+  }
+});
+
+test("file user-prompt hits suppress duplicate SQLite user messages", async () => {
+  const filePrompt = {
+    invocationId: "_user_prompt",
+    eventNo: 0,
+    kind: "user-prompt",
+    ts: "2026-07-12T00:00:00.500Z",
+    snippet: "sqlite-only user requirement",
+  };
+  const { storage, service } = createFixture({
+    searchTranscript: async () => [filePrompt],
+  });
+  try {
+    const hits = await service.searchTranscript("thread-1", "user requirement");
+    assert.deepEqual(hits, [filePrompt]);
   } finally {
     storage.close();
   }
@@ -132,6 +186,55 @@ test("read invocation prefers the more complete source", async () => {
     const sqlitePreferred = await sqliteOnly.readInvocationPage("thread-1", "invocation-1");
     assert.equal(sqlitePreferred.total, 1);
     assert.equal(sqlitePreferred.events[0].kind, "text.delta");
+  } finally {
+    storage.close();
+  }
+});
+
+test("recall service uses SQLite when transcript reads fail", async () => {
+  const errors = [];
+  const storage = createStorage({ file: ":memory:" });
+  storage.threads.create({ id: "thread-1" });
+  storage.windows.create({
+    id: "window-1",
+    threadId: "thread-1",
+    agentId: "architect",
+    providerKey: "codex:gpt-5.5",
+    workspaceKey: "base:C:/repo",
+    generation: 1,
+    capacityTokens: 200000,
+  });
+  storage.invocations.start({
+    id: "invocation-1",
+    threadId: "thread-1",
+    windowId: "window-1",
+    agentId: "architect",
+  });
+  storage.invocations.appendEvent({
+    invocationId: "invocation-1",
+    sequenceNo: 0,
+    kind: "text.delta",
+    payload: { text: "sqlite survives file failure" },
+  });
+  storage.recall.rebuildThread("thread-1");
+  const fail = async () => {
+    throw new Error("transcript unavailable");
+  };
+  const service = createRecallService({
+    storage,
+    transcript: {
+      listInvocationsWithMeta: fail,
+      searchTranscript: fail,
+      readInvocationPage: fail,
+    },
+    logger: { error: (message) => errors.push(message) },
+  });
+  try {
+    assert.equal((await service.listInvocationsWithMeta("thread-1")).length, 1);
+    assert.equal((await service.searchTranscript("thread-1", "file failure")).length, 1);
+    assert.equal((await service.readInvocationPage("thread-1", "invocation-1")).total, 1);
+    assert.equal(errors.length, 3);
+    assert.ok(errors.every((message) => message.includes("file-recall")));
   } finally {
     storage.close();
   }

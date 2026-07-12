@@ -41,7 +41,7 @@ function createWindowRepository(db) {
   const addUsage = db.prepare(`
     UPDATE context_windows
     SET input_chars = input_chars + ?, output_chars = output_chars + ?
-    WHERE id = ? AND state IN ('active', 'sealing')
+    WHERE id = ?
   `);
   const markSealing = db.prepare(`
     UPDATE context_windows

@@ -24,8 +24,8 @@ function getAgentCapacity(agentId) {
 
 function makeTracker(agentId, opts = {}) {
   const capacityTokens = opts.capacityTokens || getAgentCapacity(agentId);
-  let inputChars = 0;
-  let outputChars = 0;
+  let inputChars = nonNegativeNumber(opts.inputChars);
+  let outputChars = nonNegativeNumber(opts.outputChars);
   const startedAt = Date.now();
 
   function addInput(n) {
@@ -66,6 +66,10 @@ function makeTracker(agentId, opts = {}) {
     getFillRatio,
     snapshot,
   };
+}
+
+function nonNegativeNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 module.exports = {

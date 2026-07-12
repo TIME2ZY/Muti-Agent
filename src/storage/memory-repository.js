@@ -1,4 +1,4 @@
-function createMemoryRepository(db) {
+function createMemoryRepository(db, recall = null) {
   const insert = db.prepare(`
     INSERT INTO memory_entries
       (id, thread_id, kind, status, content, source_message_id,
@@ -19,19 +19,23 @@ function createMemoryRepository(db) {
 
   return {
     create(input) {
-      insert.run({
-        id: requiredString(input.id, "memory id"),
-        threadId: requiredString(input.threadId, "thread id"),
-        kind: requiredString(input.kind, "memory kind"),
-        status: input.status || "captured",
-        content: requiredString(input.content, "memory content"),
-        sourceMessageId: nullableString(input.sourceMessageId),
-        sourceInvocationId: nullableString(input.sourceInvocationId),
-        createdBy: requiredString(input.createdBy, "memory creator"),
-        createdAt: input.createdAt || new Date().toISOString(),
-        supersededBy: nullableString(input.supersededBy),
-      });
-      return this.get(input.id);
+      return db.transaction(() => {
+        insert.run({
+          id: requiredString(input.id, "memory id"),
+          threadId: requiredString(input.threadId, "thread id"),
+          kind: requiredString(input.kind, "memory kind"),
+          status: input.status || "captured",
+          content: requiredString(input.content, "memory content"),
+          sourceMessageId: nullableString(input.sourceMessageId),
+          sourceInvocationId: nullableString(input.sourceInvocationId),
+          createdBy: requiredString(input.createdBy, "memory creator"),
+          createdAt: input.createdAt || new Date().toISOString(),
+          supersededBy: nullableString(input.supersededBy),
+        });
+        const memory = this.get(input.id);
+        indexMemory(recall, memory);
+        return memory;
+      })();
     },
 
     get(id) {
@@ -43,9 +47,32 @@ function createMemoryRepository(db) {
     },
 
     transition(id, status, supersededBy = null) {
-      return transition.run(status, nullableString(supersededBy), id).changes > 0;
+      return db.transaction(() => {
+        const changed = transition.run(status, nullableString(supersededBy), id).changes > 0;
+        if (changed) indexMemory(recall, this.get(id));
+        return changed;
+      })();
     },
   };
+}
+
+function indexMemory(recall, memory) {
+  if (!recall || !memory) return;
+  recall.upsert({
+    threadId: memory.threadId,
+    sourceKind: "memory-entry",
+    sourceId: memory.id,
+    title: `${memory.kind}:${memory.status}`,
+    content: memory.content,
+    createdAt: memory.createdAt,
+    metadata: {
+      kind: memory.kind,
+      status: memory.status,
+      createdBy: memory.createdBy,
+      sourceInvocationId: memory.sourceInvocationId,
+      sourceMessageId: memory.sourceMessageId,
+    },
+  });
 }
 
 function mapMemory(row) {

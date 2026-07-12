@@ -24,6 +24,7 @@ function createChatRoutes({
   contextHealth,
   sessionSealer,
   sessionBootstrap,
+  recallService,
   agentIdentity,
   agentHandoff,
   worktreeManager,
@@ -248,6 +249,8 @@ function createChatRoutes({
       threadId: sessionId,
       sessionId,
       agent: AGENTS[requestedAgent],
+      generation: initialWindow?.generation || 1,
+      invocationSource: recallService || transcript,
     });
 
     res.writeHead(200, {
@@ -263,8 +266,6 @@ function createChatRoutes({
 
     const a2aHistory = [];
     let aborted = false;
-    const healthTracker = contextHealth.makeTracker(requestedAgent);
-    const sealer = sessionSealer.makeSealer();
     const threadCtx = {
       sessionId,
       res,
@@ -274,7 +275,7 @@ function createChatRoutes({
       sessionsFile: options.sessionsFile,
       tokens: new Map(),
       currentInvocationId: null,
-      sealer,
+      sealer: null,
     };
     callbacks.registerThread(sessionId, threadCtx);
 
@@ -284,15 +285,6 @@ function createChatRoutes({
           aborted = true;
           break;
         }
-        if (sealer.isSealed()) {
-          sendSse(res, "sealed", {
-            reason: "context overflow",
-            ratio: healthTracker.getFillRatio(),
-          });
-          aborted = true;
-          break;
-        }
-
         const agent = worklist[i];
         const agentConfig = AGENTS[agent] || { id: agent, label: agent, description: "" };
         const sessionMap = readSessionMap(sessionId, sessionMapRoot);
@@ -308,6 +300,7 @@ function createChatRoutes({
         let assistantContent = "";
         let contextWarned = false;
         let contextSealedSseSent = false;
+        let contextRotated = false;
 
         const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
         const startedAt = new Date().toISOString();
@@ -337,6 +330,13 @@ function createChatRoutes({
           resumeSessionId,
           startedAt,
         });
+        const healthTracker = contextHealth.makeTracker(agent, {
+          capacityTokens: durableRun?.window?.capacityTokens,
+          inputChars: durableRun?.window?.inputChars,
+          outputChars: durableRun?.window?.outputChars,
+        });
+        const sealer = sessionSealer.makeSealer();
+        threadCtx.sealer = sealer;
         sendSse(res, "agent-start", { agent, invocationId });
 
         let agentPrompt;
@@ -380,6 +380,7 @@ function createChatRoutes({
               threadId: sessionId,
               sessionId,
               agent: agentConfig,
+              generation: durableRun?.window?.generation || 1,
             }),
             agentPrompt
           );
@@ -448,9 +449,23 @@ function createChatRoutes({
               sendSse(res, "sealed", { agent, ratio, reason: "context overflow" });
               contextSealedSseSent = true;
               if (durableRun?.window?.id) {
-                durable.sealWindow(durableRun.window.id, "context overflow");
-                abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+                contextRotated = Boolean(
+                  durable.sealAndRotateWindow({
+                    session,
+                    threadId: sessionId,
+                    agentId: agent,
+                    providerKey,
+                    workspaceKey,
+                    capacityTokens: durableRun.window.capacityTokens,
+                    windowId: durableRun.window.id,
+                    reason: "context overflow",
+                  })
+                );
+                if (!contextRotated) {
+                  durable.sealWindow(durableRun.window.id, "context overflow");
+                }
               }
+              abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
             }
           },
           shouldStop: () => sealer.isSealed(),
@@ -461,20 +476,22 @@ function createChatRoutes({
             inputChars: promptForAgent.length,
             outputChars: assistantContent.length,
           });
-          if (sealer.isSealed()) {
-            // Persist seal + abandon provider session so the next call cold-starts.
+        }
+        if (sealer.isSealed()) {
+          // Session-map rotation is required even when SQLite mirroring is disabled or failed.
+          if (durableRun?.window?.id && !contextRotated) {
             durable.sealWindow(durableRun.window.id, "context overflow");
-            abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
-          } else {
-            const updatedSessionMap = readSessionMap(sessionId, sessionMapRoot);
-            const persistedProviderSessionId = resolveResumeSessionId(
-              updatedSessionMap,
-              agent,
-              workspaceKey,
-              providerKey
-            );
-            durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
           }
+          abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+        } else if (durableRun) {
+          const updatedSessionMap = readSessionMap(sessionId, sessionMapRoot);
+          const persistedProviderSessionId = resolveResumeSessionId(
+            updatedSessionMap,
+            agent,
+            workspaceKey,
+            providerKey
+          );
+          durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
         }
 
         finalizeInvocationEvent(invocationEvents, invocationId, code, signal);

@@ -19,8 +19,21 @@ function createRecallService({ storage, transcript, logger = console } = {}) {
     }
   }
 
+  async function tryFile(operation, work, fallback) {
+    try {
+      return await work();
+    } catch (error) {
+      logger.error?.(`[file-recall] ${operation} failed: ${error.message}`);
+      return fallback;
+    }
+  }
+
   async function listInvocationsWithMeta(threadId) {
-    const fileRecords = await transcript.listInvocationsWithMeta(threadId);
+    const fileRecords = await tryFile(
+      "list invocations",
+      () => transcript.listInvocationsWithMeta(threadId),
+      []
+    );
     const sqliteRecords = trySqlite("list invocations", () =>
       storage.invocations.listForThreadWithMeta(threadId)
     );
@@ -50,20 +63,36 @@ function createRecallService({ storage, transcript, logger = console } = {}) {
 
   async function searchTranscript(threadId, query, options = {}) {
     const limit = Math.max(1, Math.min(Number(options.limit) || 20, 200));
-    const fileHits = await transcript.searchTranscript(threadId, query, { limit });
+    const fileHits = await tryFile(
+      "search transcript",
+      () => transcript.searchTranscript(threadId, query, { limit }),
+      []
+    );
     const sqliteHits = trySqlite("search transcript", () => {
       if (!storage.recall) return [];
-      return storage.recall
-        .search(threadId, query, { limit, sourceKinds: ["invocation-event"] })
-        .map(recallItemToTranscriptHit)
-        .filter(Boolean);
+      return (
+        storage.recall
+          .search(threadId, query, { limit: Math.min(200, limit * 3) })
+          // Assistant messages tied to an invocation duplicate text.delta events.
+          // Keep standalone user/system messages and curated memories searchable.
+          .filter((item) => item.sourceKind !== "message" || !item.metadata?.invocationId)
+          .map(recallItemToTranscriptHit)
+          .filter(Boolean)
+      );
     });
     if (sqliteHits === undefined) return fileHits;
 
     const merged = [];
     const seen = new Set();
+    const fileHasUserPrompt = fileHits.some((hit) => hit.invocationId === "_user_prompt");
     for (const hit of [...sqliteHits, ...fileHits]) {
-      const key = `${hit.invocationId}:${hit.eventNo}:${hit.kind}`;
+      if (fileHasUserPrompt && hit.sourceKind === "message" && hit.kind === "message.user") {
+        continue;
+      }
+      const key =
+        hit.sourceKind && hit.sourceKind !== "invocation-event"
+          ? `${hit.sourceKind}:${hit.sourceId}`
+          : `${hit.invocationId}:${hit.eventNo}:${hit.kind}`;
       if (seen.has(key)) continue;
       seen.add(key);
       merged.push(hit);
@@ -73,7 +102,16 @@ function createRecallService({ storage, transcript, logger = console } = {}) {
   }
 
   async function readInvocationPage(threadId, invocationId, options = {}) {
-    const filePage = await transcript.readInvocationPage(threadId, invocationId, options);
+    const filePage = await tryFile(
+      "read invocation page",
+      () => transcript.readInvocationPage(threadId, invocationId, options),
+      {
+        events: [],
+        total: 0,
+        from: Math.max(0, Number(options.from) || 0),
+        limit: options.limit || 200,
+      }
+    );
     const sqlitePage = trySqlite("read invocation page", () => {
       const invocation = storage.invocations.get(invocationId);
       if (!invocation || invocation.threadId !== threadId) return null;
@@ -97,13 +135,30 @@ function createRecallService({ storage, transcript, logger = console } = {}) {
 
 function recallItemToTranscriptHit(item) {
   const metadata = item.metadata || {};
-  if (!metadata.invocationId || !Number.isInteger(metadata.eventNo) || !metadata.kind) return null;
+  if (item.sourceKind === "invocation-event") {
+    if (!metadata.invocationId || !Number.isInteger(metadata.eventNo) || !metadata.kind)
+      return null;
+    return {
+      invocationId: metadata.invocationId,
+      eventNo: metadata.eventNo,
+      kind: metadata.kind,
+      ts: item.createdAt,
+      snippet: item.snippet,
+      sourceKind: item.sourceKind,
+      sourceId: item.sourceId,
+    };
+  }
   return {
-    invocationId: metadata.invocationId,
-    eventNo: metadata.eventNo,
-    kind: metadata.kind,
+    invocationId: metadata.invocationId || metadata.sourceInvocationId || "",
+    eventNo: Number.isInteger(metadata.sequenceNo) ? metadata.sequenceNo : 0,
+    kind:
+      item.sourceKind === "message"
+        ? `message.${metadata.role || "unknown"}`
+        : `memory.${metadata.kind || "entry"}`,
     ts: item.createdAt,
     snippet: item.snippet,
+    sourceKind: item.sourceKind,
+    sourceId: item.sourceId,
   };
 }
 
