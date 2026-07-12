@@ -239,3 +239,73 @@ test("recall service uses SQLite when transcript reads fail", async () => {
     storage.close();
   }
 });
+
+test("sqlite mode treats SQLite invocation data as primary and files as legacy fallback", async () => {
+  const filePrimaryConflict = {
+    invocationId: "invocation-1",
+    agent: "file-agent",
+    startedAt: "2026-07-12T00:00:00.000Z",
+    endedAt: "2026-07-12T00:01:00.000Z",
+    state: "completed",
+    eventCount: 99,
+  };
+  const legacy = {
+    invocationId: "legacy-invocation",
+    agent: "planner",
+    startedAt: "2026-07-11T00:00:00.000Z",
+    endedAt: null,
+    state: null,
+    eventCount: 2,
+  };
+  const { storage } = createFixture();
+  const service = createRecallService({
+    mode: "sqlite",
+    storage,
+    transcript: {
+      listInvocationsWithMeta: async () => [filePrimaryConflict, legacy],
+      searchTranscript: async () => [],
+      readInvocationPage: async () => ({
+        events: Array.from({ length: 5 }, () => ({ kind: "file" })),
+        total: 5,
+        from: 0,
+        limit: 200,
+      }),
+    },
+  });
+  try {
+    const listed = await service.listInvocationsWithMeta("thread-1");
+    assert.equal(listed.length, 2);
+    assert.equal(listed.find((item) => item.invocationId === "invocation-1").agent, "architect");
+    assert.ok(listed.some((item) => item.invocationId === "legacy-invocation"));
+
+    const page = await service.readInvocationPage("thread-1", "invocation-1");
+    assert.equal(page.total, 1);
+    assert.equal(page.events[0].kind, "text.delta");
+  } finally {
+    storage.close();
+  }
+});
+
+test("sqlite mode skips transcript search after filling the requested limit", async () => {
+  const { storage } = createFixture();
+  let fileSearches = 0;
+  const service = createRecallService({
+    mode: "sqlite",
+    storage,
+    transcript: {
+      listInvocationsWithMeta: async () => [],
+      searchTranscript: async () => {
+        fileSearches += 1;
+        return [];
+      },
+      readInvocationPage: async () => ({ events: [], total: 0, from: 0, limit: 200 }),
+    },
+  });
+  try {
+    const hits = await service.searchTranscript("thread-1", "sqlite memory", { limit: 1 });
+    assert.equal(hits.length, 1);
+    assert.equal(fileSearches, 0);
+  } finally {
+    storage.close();
+  }
+});

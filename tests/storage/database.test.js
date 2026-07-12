@@ -1,7 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { openMemoryDatabase, withTransaction } = require("../../src/storage/database");
+const {
+  openMemoryDatabase,
+  withTransaction,
+  checkpointMemoryDatabase,
+} = require("../../src/storage/database");
 const { applyMigrations, validateMigrations } = require("../../src/storage/migrations");
 
 test("memory database applies schema and safety pragmas", () => {
@@ -35,6 +39,17 @@ test("memory database applies schema and safety pragmas", () => {
 
     assert.equal(applyMigrations(db), 2);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test("database quick check and WAL checkpoint report healthy state", () => {
+  const db = openMemoryDatabase({ file: ":memory:" });
+  try {
+    assert.equal(db.pragma("quick_check", { simple: true }), "ok");
+    assert.ok(Array.isArray(checkpointMemoryDatabase(db, "PASSIVE")));
+    assert.throws(() => checkpointMemoryDatabase(db, "invalid"), /Unsupported WAL checkpoint/);
   } finally {
     db.close();
   }

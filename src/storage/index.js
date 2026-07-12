@@ -1,4 +1,4 @@
-const { openMemoryDatabase, withTransaction } = require("./database");
+const { openMemoryDatabase, withTransaction, checkpointMemoryDatabase } = require("./database");
 const { createInvocationRepository } = require("./invocation-repository");
 const { createMemoryRepository } = require("./memory-repository");
 const { createMessageRepository } = require("./message-repository");
@@ -20,10 +20,18 @@ function createStorage(options = {}) {
     transaction(work) {
       return withTransaction(db, work);
     },
+    checkpoint(mode) {
+      return checkpointMemoryDatabase(db, mode);
+    },
     close() {
       if (db.open) db.close();
     },
   };
 }
 
-module.exports = { createStorage, openMemoryDatabase, withTransaction };
+module.exports = {
+  createStorage,
+  openMemoryDatabase,
+  withTransaction,
+  checkpointMemoryDatabase,
+};

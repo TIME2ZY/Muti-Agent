@@ -1,4 +1,4 @@
-function createRecallService({ storage, transcript, logger = console } = {}) {
+function createRecallService({ storage, transcript, mode = "dual", logger = console } = {}) {
   if (!transcript) throw new Error("Transcript fallback is required.");
 
   function logSqliteFailure(operation, error) {
@@ -29,31 +29,30 @@ function createRecallService({ storage, transcript, logger = console } = {}) {
   }
 
   async function listInvocationsWithMeta(threadId) {
+    const sqliteRecords = trySqlite("list invocations", () =>
+      storage.invocations.listForThreadWithMeta(threadId)
+    );
     const fileRecords = await tryFile(
       "list invocations",
       () => transcript.listInvocationsWithMeta(threadId),
       []
     );
-    const sqliteRecords = trySqlite("list invocations", () =>
-      storage.invocations.listForThreadWithMeta(threadId)
-    );
     if (sqliteRecords === undefined) return fileRecords;
 
-    const merged = new Map(fileRecords.map((record) => [record.invocationId, record]));
-    for (const record of sqliteRecords) {
-      const sqliteRecord = {
-        invocationId: record.id,
-        agent: record.agentId,
-        startedAt: record.startedAt,
-        endedAt: record.endedAt,
-        // Keep the callback API contract: an in-flight invocation has no
-        // terminal state yet, even though SQLite tracks it as "active".
-        state: record.state === "active" ? null : record.state,
-        eventCount: record.eventCount,
-      };
-      const fileRecord = merged.get(record.id);
-      if (!fileRecord || sqliteRecord.eventCount >= fileRecord.eventCount) {
-        merged.set(record.id, sqliteRecord);
+    const mappedSqlite = sqliteRecords.map(invocationFromSqlite);
+    const merged = new Map();
+    if (mode === "sqlite") {
+      for (const record of mappedSqlite) merged.set(record.invocationId, record);
+      for (const record of fileRecords) {
+        if (!merged.has(record.invocationId)) merged.set(record.invocationId, record);
+      }
+    } else {
+      for (const record of fileRecords) merged.set(record.invocationId, record);
+      for (const record of mappedSqlite) {
+        const fileRecord = merged.get(record.invocationId);
+        if (!fileRecord || record.eventCount >= fileRecord.eventCount) {
+          merged.set(record.invocationId, record);
+        }
       }
     }
     return [...merged.values()].sort((a, b) =>
@@ -63,11 +62,6 @@ function createRecallService({ storage, transcript, logger = console } = {}) {
 
   async function searchTranscript(threadId, query, options = {}) {
     const limit = Math.max(1, Math.min(Number(options.limit) || 20, 200));
-    const fileHits = await tryFile(
-      "search transcript",
-      () => transcript.searchTranscript(threadId, query, { limit }),
-      []
-    );
     const sqliteHits = trySqlite("search transcript", () => {
       if (!storage.recall) return [];
       return (
@@ -80,6 +74,14 @@ function createRecallService({ storage, transcript, logger = console } = {}) {
           .filter(Boolean)
       );
     });
+    if (mode === "sqlite" && sqliteHits !== undefined && sqliteHits.length >= limit) {
+      return sqliteHits.slice(0, limit);
+    }
+    const fileHits = await tryFile(
+      "search transcript",
+      () => transcript.searchTranscript(threadId, query, { limit }),
+      []
+    );
     if (sqliteHits === undefined) return fileHits;
 
     const merged = [];
@@ -102,16 +104,6 @@ function createRecallService({ storage, transcript, logger = console } = {}) {
   }
 
   async function readInvocationPage(threadId, invocationId, options = {}) {
-    const filePage = await tryFile(
-      "read invocation page",
-      () => transcript.readInvocationPage(threadId, invocationId, options),
-      {
-        events: [],
-        total: 0,
-        from: Math.max(0, Number(options.from) || 0),
-        limit: options.limit || 200,
-      }
-    );
     const sqlitePage = trySqlite("read invocation page", () => {
       const invocation = storage.invocations.get(invocationId);
       if (!invocation || invocation.threadId !== threadId) return null;
@@ -125,12 +117,36 @@ function createRecallService({ storage, transcript, logger = console } = {}) {
         })),
       };
     });
+    if (mode === "sqlite" && sqlitePage !== undefined && sqlitePage !== null) return sqlitePage;
+    const filePage = await tryFile(
+      "read invocation page",
+      () => transcript.readInvocationPage(threadId, invocationId, options),
+      {
+        events: [],
+        total: 0,
+        from: Math.max(0, Number(options.from) || 0),
+        limit: options.limit || 200,
+      }
+    );
     if (sqlitePage === undefined || sqlitePage === null) return filePage;
     if (sqlitePage.total < filePage.total) return filePage;
     return sqlitePage;
   }
 
   return { listInvocationsWithMeta, searchTranscript, readInvocationPage };
+}
+
+function invocationFromSqlite(record) {
+  return {
+    invocationId: record.id,
+    agent: record.agentId,
+    startedAt: record.startedAt,
+    endedAt: record.endedAt,
+    // Keep the callback API contract: an in-flight invocation has no
+    // terminal state yet, even though SQLite tracks it as "active".
+    state: record.state === "active" ? null : record.state,
+    eventCount: record.eventCount,
+  };
 }
 
 function recallItemToTranscriptHit(item) {

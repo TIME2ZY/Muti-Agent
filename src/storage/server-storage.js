@@ -5,8 +5,8 @@ const { createStorage } = require("./index");
 
 function createServerStorage(options = {}, sessionsFile, logger = console) {
   const mode = options.storageMode || process.env.CAT_CAFE_STORAGE_MODE || "dual";
-  if (!new Set(["files", "dual"]).has(mode)) {
-    throw new Error(`Unsupported storage mode "${mode}". Use files or dual.`);
+  if (!new Set(["files", "dual", "sqlite"]).has(mode)) {
+    throw new Error(`Unsupported storage mode "${mode}". Use files, dual, or sqlite.`);
   }
   if (mode === "files") {
     return {
@@ -29,7 +29,7 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     try {
       storage = createStorage({ file });
     } catch (error) {
-      logger.error(`[sqlite-dual-write] initialization failed: ${error.message}`);
+      logger.error(`[sqlite-storage] initialization failed: ${error.message}`);
     }
   }
 
@@ -40,7 +40,14 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     recorder,
     close() {
       recorder.close();
-      if (ownsStorage && storage) storage.close();
+      if (ownsStorage && storage) {
+        try {
+          storage.checkpoint("TRUNCATE");
+        } catch (error) {
+          logger.error(`[sqlite-storage] WAL checkpoint failed: ${error.message}`);
+        }
+        storage.close();
+      }
     },
   };
 }

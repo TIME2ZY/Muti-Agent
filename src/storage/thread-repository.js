@@ -21,6 +21,14 @@ function createThreadRepository(db) {
   const listActive = db.prepare(
     "SELECT * FROM threads WHERE deleted_at IS NULL ORDER BY updated_at DESC, created_at DESC"
   );
+  const listWithMessageCounts = db.prepare(`
+    SELECT t.*, COUNT(m.id) AS message_count
+    FROM threads t
+    LEFT JOIN messages m ON m.thread_id = t.id
+    WHERE t.deleted_at IS NULL
+    GROUP BY t.id
+    ORDER BY t.updated_at DESC, t.created_at DESC
+  `);
   const remove = db.prepare("DELETE FROM threads WHERE id = ?");
 
   return {
@@ -40,6 +48,13 @@ function createThreadRepository(db) {
 
     list() {
       return listActive.all().map(mapThread);
+    },
+
+    listWithMessageCounts() {
+      return listWithMessageCounts.all().map((row) => ({
+        ...mapThread(row),
+        messageCount: Number(row.message_count || 0),
+      }));
     },
 
     delete(id) {

@@ -27,6 +27,22 @@ test("dual storage uses an isolated database beside a custom sessions file", () 
   }
 });
 
+test("sqlite storage mode opens the durable database", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-sqlite-"));
+  const context = createServerStorage(
+    { storageMode: "sqlite" },
+    path.join(tmpDir, "sessions.json")
+  );
+  try {
+    assert.equal(context.mode, "sqlite");
+    assert.equal(context.recorder.enabled, true);
+    assert.ok(context.storage);
+  } finally {
+    context.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("dual storage fails open when SQLite initialization fails", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-failure-"));
   const errors = [];

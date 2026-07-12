@@ -108,6 +108,27 @@ function createSession(sessionsFile) {
   });
 }
 
+function restoreSession(sessionsFile, input) {
+  if (!input || !isValidOpaqueId(input.id)) return null;
+  return withFileLock(sessionsFile, () => {
+    const data = readSessions(sessionsFile);
+    if (data.sessions[input.id]) return data.sessions[input.id];
+    const session = {
+      ...makeSession(input.id),
+      ...input,
+      id: input.id,
+      messages: Array.isArray(input.messages) ? input.messages : [],
+      worktree: input.worktree || null,
+      projectDir: typeof input.projectDir === "string" ? input.projectDir : "",
+      lastAgent: typeof input.lastAgent === "string" ? input.lastAgent : "",
+    };
+    data.sessions[input.id] = session;
+    data.lastSessionId = input.id;
+    writeSessionsUnlocked(sessionsFile, data);
+    return session;
+  });
+}
+
 function listSessions(sessionsFile) {
   const data = readSessions(sessionsFile);
   return Object.values(data.sessions)
@@ -234,6 +255,7 @@ function appendToSession(sessionsFile, sessionId, message, options = {}) {
 
 module.exports = {
   createSession,
+  restoreSession,
   readSessions,
   writeSessions,
   listSessions,

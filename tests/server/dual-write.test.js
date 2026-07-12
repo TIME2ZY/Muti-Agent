@@ -249,3 +249,97 @@ test("files mode abandons an exhausted provider session", async () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("sqlite mode restores sessions after file loss and continues the message sequence", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sqlite-primary-server-"));
+  const sessionsFile = path.join(tmpDir, "sessions.json");
+  const memoryDbFile = path.join(tmpDir, "memory.sqlite");
+  const transcriptDir = path.join(tmpDir, "transcripts");
+  const previousTranscriptDir = process.env.CAT_CAFE_TRANSCRIPT_DIR;
+  process.env.CAT_CAFE_TRANSCRIPT_DIR = transcriptDir;
+
+  function startServer() {
+    const server = createServer({
+      sessionsFile,
+      invocationsFile: path.join(tmpDir, "invocations.json"),
+      sessionMapRoot: path.join(tmpDir, "session-maps"),
+      storageMode: "sqlite",
+      memoryDbFile,
+      spawnRunner: successfulSpawn,
+      worktreeManager: worktreeManager(),
+      uiToken: UI_TOKEN,
+    });
+    return new Promise((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve(server));
+    });
+  }
+
+  let firstServer;
+  let secondServer;
+  try {
+    firstServer = await startServer();
+    const firstUrl = `http://127.0.0.1:${firstServer.address().port}`;
+    const { session } = await apiFetch(`${firstUrl}/api/sessions`, {
+      method: "POST",
+      body: "{}",
+    }).then((response) => response.json());
+    await apiFetch(`${firstUrl}/api/chat`, {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: session.id,
+        agent: "architect",
+        prompt: "durable first prompt",
+      }),
+    }).then((response) => response.text());
+    await new Promise((resolve) => firstServer.close(resolve));
+    firstServer = null;
+
+    fs.rmSync(sessionsFile, { force: true });
+    fs.rmSync(transcriptDir, { recursive: true, force: true });
+
+    secondServer = await startServer();
+    const secondUrl = `http://127.0.0.1:${secondServer.address().port}`;
+    const sessions = await apiFetch(`${secondUrl}/api/sessions`).then((response) =>
+      response.json()
+    );
+    assert.equal(sessions.sessions.length, 1);
+    assert.equal(sessions.sessions[0].id, session.id);
+    assert.equal(sessions.sessions[0].messageCount, 2);
+
+    const recovered = await apiFetch(`${secondUrl}/api/messages?sessionId=${session.id}`).then(
+      (response) => response.json()
+    );
+    assert.deepEqual(
+      recovered.messages.map((message) => message.content),
+      ["durable first prompt", "hello"]
+    );
+
+    await apiFetch(`${secondUrl}/api/chat`, {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: session.id,
+        agent: "architect",
+        prompt: "continued after restart",
+      }),
+    }).then((response) => response.text());
+    const continued = await apiFetch(`${secondUrl}/api/messages?sessionId=${session.id}`).then(
+      (response) => response.json()
+    );
+    assert.deepEqual(
+      continued.messages.map((message) => message.content),
+      ["durable first prompt", "hello", "continued after restart", "hello"]
+    );
+    assert.equal(fs.existsSync(sessionsFile), true);
+
+    const recall = await apiFetch(
+      `${secondUrl}/api/callbacks/session-search?sessionId=${session.id}&query=durable%20first`
+    ).then((response) => response.json());
+    assert.ok(recall.hits.some((hit) => hit.kind === "message.user"));
+  } finally {
+    if (firstServer) await new Promise((resolve) => firstServer.close(resolve));
+    if (secondServer) await new Promise((resolve) => secondServer.close(resolve));
+    if (previousTranscriptDir === undefined) delete process.env.CAT_CAFE_TRANSCRIPT_DIR;
+    else process.env.CAT_CAFE_TRANSCRIPT_DIR = previousTranscriptDir;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
