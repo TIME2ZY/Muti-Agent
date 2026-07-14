@@ -10,7 +10,7 @@ function createFixture() {
     id: "thread-1",
     title: "SQLite title",
     projectDir: "C:/repo",
-    lastAgentId: "architect",
+    lastAgentId: "codex",
     createdAt: "2026-07-12T00:00:00.000Z",
   });
   storage.messages.append({
@@ -18,7 +18,7 @@ function createFixture() {
     threadId: "thread-1",
     sequenceNo: 0,
     role: "user",
-    agentId: "architect",
+    agentId: "codex",
     content: "SQLite message",
     metadata: { activeSkills: ["memory"] },
     createdAt: "2026-07-12T00:00:01.000Z",
@@ -30,14 +30,14 @@ function createFixture() {
     messages: [],
     worktree: { branch: "worktree-branch" },
     projectDir: "C:/old",
-    lastAgent: "planner",
+    lastagent: "opencode",
   };
   const fileOnly = {
     id: "legacy-thread",
     title: "Legacy",
     createdAt: "2026-07-11T00:00:00.000Z",
     messageCount: 2,
-    lastAgent: "planner",
+    lastagent: "opencode",
   };
   const fileStore = {
     getSession: (_file, id) => (id === "thread-1" ? fileSession : null),
@@ -53,7 +53,7 @@ test("sqlite session reads prefer durable messages and preserve file-only runtim
     const session = service.getSession("sessions.json", "thread-1");
     assert.equal(session.title, "SQLite title");
     assert.equal(session.projectDir, "C:/repo");
-    assert.equal(session.lastAgent, "architect");
+    assert.equal(session.lastAgent, "codex");
     assert.deepEqual(session.worktree, { branch: "worktree-branch" });
     assert.equal(session.messages.length, 1);
     assert.equal(session.messages[0].content, "SQLite message");

@@ -58,7 +58,7 @@ test("buildDigest can read invocation metadata from SQLite-backed recall", async
       listInvocationsWithMeta: async () => [
         {
           invocationId: "sqlite-invocation",
-          agent: "architect",
+          agent: "codex",
           startedAt: "2026-07-12T00:00:00.000Z",
           endedAt: null,
           state: null,
@@ -86,7 +86,7 @@ test(
 test(
   "buildDigest lists existing invocations with metadata",
   withTempDir(async () => {
-    transcript.appendEvent("s1", "i1", "invocation-start", { agent: "architect" });
+    transcript.appendEvent("s1", "i1", "invocation-start", { agent: "codex" });
     await new Promise((r) => setTimeout(r, 5));
     transcript.appendEvent("s1", "i1", "stdout", { text: "thinking" });
     await new Promise((r) => setTimeout(r, 5));
@@ -96,7 +96,7 @@ test(
     const digest = await buildDigest({ threadId: "s1", sessionId: "s1" });
     assert.match(digest, /1 invocations in this session/);
     assert.match(digest, /i1/);
-    assert.match(digest, /architect/);
+    assert.match(digest, /codex/);
     assert.match(digest, /state=completed/);
     assert.match(digest, /events=3/);
     assert.match(digest, /duration=\d+ms/);

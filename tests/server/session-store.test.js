@@ -37,12 +37,12 @@ test(
     const session = store.createSession(file);
     store.appendToSession(file, session.id, {
       role: "user",
-      agent: "planner",
+      agent: "opencode",
       content: "plan this",
     });
     const listed = store.listSessions(file);
-    assert.equal(store.getSession(file, session.id).lastAgent, "planner");
-    assert.equal(listed[0].lastAgent, "planner");
+    assert.equal(store.getSession(file, session.id).lastAgent, "opencode");
+    assert.equal(listed[0].lastAgent, "opencode");
   })
 );
 
@@ -50,9 +50,9 @@ test(
   "setSessionLastAgent updates the session default agent",
   withTempFile((file) => {
     const session = store.createSession(file);
-    const updated = store.setSessionLastAgent(file, session.id, "coder");
-    assert.equal(updated.lastAgent, "coder");
-    assert.equal(store.getSession(file, session.id).lastAgent, "coder");
+    const updated = store.setSessionLastAgent(file, session.id, "grok");
+    assert.equal(updated.lastAgent, "grok");
+    assert.equal(store.getSession(file, session.id).lastAgent, "grok");
   })
 );
 
@@ -109,7 +109,7 @@ test(
       createdAt: "2026-07-12T00:00:00.000Z",
       messages: [{ id: "m1", role: "user", content: "old memory" }],
       projectDir: "C:/repo",
-      lastAgent: "architect",
+      lastAgent: "codex",
     });
     assert.equal(restored.id, "sqlite-thread");
     assert.equal(store.getSession(file, "sqlite-thread").messages.length, 1);

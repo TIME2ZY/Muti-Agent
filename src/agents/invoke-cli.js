@@ -18,7 +18,7 @@ const { ENV } = require("../shared/brand");
 
 function parseArgs(argv) {
   const args = [...argv];
-  let agentName = "architect";
+  let agentName = "codex";
   const options = {
     // Provider adapters resolve environment-specific proxy fallbacks.
     proxy: "",
@@ -209,7 +209,7 @@ function main() {
 
   if (!parsed.prompt) {
     console.error(
-      'Usage: node src/agents/invoke-cli.js [--agent architect|forge|sage|reviewer] [--timeout-ms ms] "你好，请用一句话介绍自己"'
+      'Usage: node src/agents/invoke-cli.js [--agent codex|gemini|grok|opencode] [--timeout-ms ms] "你好，请用一句话介绍自己"'
     );
     process.exit(1);
   }

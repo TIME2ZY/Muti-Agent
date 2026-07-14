@@ -31,7 +31,7 @@ triggers:
 
 ````markdown
 ```handoff
-to: critic
+to: opencode
 goal: review CAS 乐观锁
 what: 给用户模块加了 CAS 乐观锁
 why: 高并发下出现数据覆写，需要防竞态
@@ -67,8 +67,8 @@ BEFORE 发送交接消息:
 ## 反例 / 正例
 
 ```
-❌ "@小评 我改了三个文件，帮我看看"
+❌ "@OpenCode 我改了三个文件，帮我看看"
    → 无 handoff 块、无 Why
 
-✅ 行首 @小评 + handoff 含 what/why/next_action
+✅ 行首 @OpenCode + handoff 含 what/why/next_action
 ```

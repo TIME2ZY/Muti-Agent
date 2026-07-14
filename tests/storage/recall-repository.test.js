@@ -8,8 +8,8 @@ function seedThread(storage) {
   storage.windows.create({
     id: "window-1",
     threadId: "thread-1",
-    agentId: "architect",
-    providerKey: "codex:gpt-5.5",
+    agentId: "codex",
+    providerKey: "codex:gpt-5.6-sol",
     workspaceKey: "base:C:/repo",
     generation: 1,
     capacityTokens: 200000,
@@ -93,7 +93,7 @@ test("recall projection can be rebuilt from durable source tables", () => {
       id: "invocation-1",
       threadId: "thread-1",
       windowId: "window-1",
-      agentId: "architect",
+      agentId: "codex",
     });
     storage.invocations.appendEvent({
       invocationId: "invocation-1",
@@ -106,7 +106,7 @@ test("recall projection can be rebuilt from durable source tables", () => {
       threadId: "thread-1",
       kind: "decision",
       content: "rebuild memory",
-      createdBy: "architect",
+      createdBy: "codex",
     });
 
     const result = storage.recall.rebuildThread("thread-1");

@@ -4,13 +4,13 @@ const { createInvokeArgsBuilder } = require("../../src/server/invoke-args");
 
 test("invoke argument builder owns request validation but leaves provider options to adapters", () => {
   const builder = createInvokeArgsBuilder({
-    agents: { architect: { name: "codex" } },
+    agents: { codex: { name: "codex" } },
   });
 
-  assert.deepEqual(builder.buildChatArgs("architect", "hello", "augmented"), [
+  assert.deepEqual(builder.buildChatArgs("codex", "hello", "augmented"), [
     "src/agents/invoke-cli.js",
     "--agent",
-    "architect",
+    "codex",
     "augmented",
   ]);
   assert.throws(
@@ -18,7 +18,7 @@ test("invoke argument builder owns request validation but leaves provider option
     /Unsupported agent/
   );
   assert.throws(
-    () => builder.buildInvokeArgs({ agent: "architect", prompt: " " }),
+    () => builder.buildInvokeArgs({ agent: "codex", prompt: " " }),
     /Prompt is required/
   );
 });

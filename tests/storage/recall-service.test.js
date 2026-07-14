@@ -10,8 +10,8 @@ function createFixture(fileOverrides = {}) {
   storage.windows.create({
     id: "window-1",
     threadId: "thread-1",
-    agentId: "architect",
-    providerKey: "codex:gpt-5.5",
+    agentId: "codex",
+    providerKey: "codex:gpt-5.6-sol",
     workspaceKey: "base:C:/repo",
     generation: 1,
     capacityTokens: 200000,
@@ -20,7 +20,7 @@ function createFixture(fileOverrides = {}) {
     id: "invocation-1",
     threadId: "thread-1",
     windowId: "window-1",
-    agentId: "architect",
+    agentId: "codex",
     startedAt: "2026-07-12T00:00:00.000Z",
   });
   storage.invocations.appendEvent({
@@ -44,7 +44,7 @@ function createFixture(fileOverrides = {}) {
     threadId: "thread-1",
     kind: "decision",
     content: "sqlite-only durable decision",
-    createdBy: "architect",
+    createdBy: "codex",
     sourceInvocationId: "invocation-1",
     createdAt: "2026-07-12T00:00:02.000Z",
   });
@@ -143,7 +143,7 @@ test("file user-prompt hits suppress duplicate SQLite user messages", async () =
 test("invocation listing keeps the more complete file record", async () => {
   const fileRecord = {
     invocationId: "invocation-1",
-    agent: "architect",
+    agent: "codex",
     startedAt: "2026-07-12T00:00:00.000Z",
     endedAt: "2026-07-12T00:01:00.000Z",
     state: "completed",
@@ -198,8 +198,8 @@ test("recall service uses SQLite when transcript reads fail", async () => {
   storage.windows.create({
     id: "window-1",
     threadId: "thread-1",
-    agentId: "architect",
-    providerKey: "codex:gpt-5.5",
+    agentId: "codex",
+    providerKey: "codex:gpt-5.6-sol",
     workspaceKey: "base:C:/repo",
     generation: 1,
     capacityTokens: 200000,
@@ -208,7 +208,7 @@ test("recall service uses SQLite when transcript reads fail", async () => {
     id: "invocation-1",
     threadId: "thread-1",
     windowId: "window-1",
-    agentId: "architect",
+    agentId: "codex",
   });
   storage.invocations.appendEvent({
     invocationId: "invocation-1",
@@ -251,7 +251,7 @@ test("sqlite mode treats SQLite invocation data as primary and files as legacy f
   };
   const legacy = {
     invocationId: "legacy-invocation",
-    agent: "planner",
+    agent: "opencode",
     startedAt: "2026-07-11T00:00:00.000Z",
     endedAt: null,
     state: null,
@@ -275,7 +275,7 @@ test("sqlite mode treats SQLite invocation data as primary and files as legacy f
   try {
     const listed = await service.listInvocationsWithMeta("thread-1");
     assert.equal(listed.length, 2);
-    assert.equal(listed.find((item) => item.invocationId === "invocation-1").agent, "architect");
+    assert.equal(listed.find((item) => item.invocationId === "invocation-1").agent, "codex");
     assert.ok(listed.some((item) => item.invocationId === "legacy-invocation"));
 
     const page = await service.readInvocationPage("thread-1", "invocation-1");

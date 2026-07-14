@@ -74,7 +74,7 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
 
     const chatResponse = await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "architect", prompt: "Hi" }),
+      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "Hi" }),
     });
     await chatResponse.text();
 
@@ -165,7 +165,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
 
     await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "architect", prompt: "first" }),
+      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "first" }),
     }).then((response) => response.text());
 
     const firstWindow = storage.windows.listForThread(session.id)[0];
@@ -175,7 +175,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
       inputChars: Math.max(0, targetChars - persistedChars),
     });
     writeSessionMap(session.id, mapRoot, {
-      architect: {
+      codex: {
         sessionId: "provider-session-old",
         workspaceKey: firstWindow.workspaceKey,
         providerKey: firstWindow.providerKey,
@@ -184,11 +184,11 @@ test("chat seals from cumulative window usage and starts the next generation", a
 
     const sealedStream = await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "architect", prompt: "second" }),
+      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "second" }),
     }).then((response) => response.text());
     assert.match(sealedStream, /event: sealed/);
     assert.equal(storage.windows.get(firstWindow.id).state, "sealed");
-    assert.equal(readSessionMap(session.id, mapRoot).architect, undefined);
+    assert.equal(readSessionMap(session.id, mapRoot).codex, undefined);
     const rotatedWindows = storage.windows.listForThread(session.id);
     assert.equal(rotatedWindows.length, 2);
     assert.equal(rotatedWindows[1].generation, 2);
@@ -197,7 +197,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
 
     await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "architect", prompt: "third" }),
+      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "third" }),
     }).then((response) => response.text());
     const windows = storage.windows.listForThread(session.id);
     assert.equal(windows.length, 2);
@@ -233,15 +233,15 @@ test("files mode abandons an exhausted provider session", async () => {
       body: "{}",
     }).then((response) => response.json());
     writeSessionMap(session.id, mapRoot, {
-      architect: { sessionId: "provider-session-old" },
+      codex: { sessionId: "provider-session-old" },
     });
 
     const stream = await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "architect", prompt: "overflow" }),
+      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "overflow" }),
     }).then((response) => response.text());
     assert.match(stream, /event: sealed/);
-    assert.equal(readSessionMap(session.id, mapRoot).architect, undefined);
+    assert.equal(readSessionMap(session.id, mapRoot).codex, undefined);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previousCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
@@ -287,7 +287,7 @@ test("sqlite mode restores sessions after file loss and continues the message se
       method: "POST",
       body: JSON.stringify({
         sessionId: session.id,
-        agent: "architect",
+        agent: "codex",
         prompt: "durable first prompt",
       }),
     }).then((response) => response.text());
@@ -318,7 +318,7 @@ test("sqlite mode restores sessions after file loss and continues the message se
       method: "POST",
       body: JSON.stringify({
         sessionId: session.id,
-        agent: "architect",
+        agent: "codex",
         prompt: "continued after restart",
       }),
     }).then((response) => response.text());

@@ -10,30 +10,11 @@ function model(providerId, modelId, vendorId, options = {}) {
   };
 }
 
+/** Only models used by the four active agents. */
 const MODEL_PROFILES = [
   model("codex", "gpt-5.6-sol", "openai", {
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
-  model("codex", "gpt-5.5", "openai", {
-    reasoning: { supported: true, levels: ["low", "medium", "high"] },
-  }),
-  model("codex", "gpt-5.4", "openai", {
-    reasoning: { supported: true, levels: ["low", "medium", "high"] },
-  }),
-  model("opencode", "deepseek-v4-flash", "deepseek"),
-  model("opencode", "deepseek-v4-pro", "deepseek"),
-  model("opencode", "glm-5.1", "zhipu"),
-  model("opencode", "glm-5.2", "zhipu"),
-  model("opencode", "kimi-k2.6", "moonshot"),
-  model("opencode", "kimi-k2.7-code", "moonshot"),
-  model("opencode", "mimo-v2.5", "xiaomi"),
-  model("opencode", "mimo-v2.5-pro", "xiaomi"),
-  model("opencode", "minimax-m2.7", "minimax"),
-  model("opencode", "minimax-m3", "minimax", {
-    reasoning: { supported: true, levels: ["high"] },
-  }),
-  model("opencode", "qwen3.6-plus", "alibaba"),
-  model("opencode", "qwen3.7-max", "alibaba"),
   model("opencode", "qwen3.7-plus", "alibaba"),
   model("grok", "grok-4.5", "xai", {
     contextTokens: 500_000,
@@ -41,9 +22,6 @@ const MODEL_PROFILES = [
   }),
   model("antigravity", "gemini-3.5-flash", "google", {
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
-  }),
-  model("antigravity", "gemini-3.1-pro", "google", {
-    reasoning: { supported: true, levels: ["low", "high"] },
   }),
 ];
 
@@ -59,37 +37,34 @@ function agent(id, label, providerId, modelId, description, options = {}) {
     // Compatibility alias for older callers. New code should use providerId.
     name: providerId,
     model: modelId,
-    // Compatibility override; context capacity is otherwise owned by the model profile.
     ...(options.capacityTokens ? { capacityTokens: options.capacityTokens } : {}),
     reasoningEffort: options.reasoningEffort || "",
     description,
   };
 }
 
+/**
+ * Four agents only — id equals the display name (lowercase).
+ *   codex     · reasoning & discussion
+ *   gemini    · ideation / brainstorm
+ *   grok      · implementation
+ *   opencode  · code review
+ */
 const AGENTS = {
-  architect: agent("architect", "Codex", "codex", "gpt-5.6-sol", "默认主控 Agent，负责规划与编排。", {
-    reasoningEffort: "medium",
-  }),
-  orchestrator: agent(
-    "orchestrator",
-    "万事通",
-    "opencode",
-    "deepseek-v4-pro",
-    "通才型助手，兜底各种杂活与跨领域问题。"
+  codex: agent(
+    "codex",
+    "Codex",
+    "codex",
+    "gpt-5.6-sol",
+    "推理与讨论：澄清问题、权衡方案，可与 Gemini 交叉验证。",
+    { reasoningEffort: "medium" }
   ),
-  planner: agent(
-    "planner",
-    "小谋",
-    "opencode",
-    "mimo-v2.5-pro",
-    "推理与规划专家，擅长任务拆解、方案设计与决策建议。"
-  ),
-  coder: agent(
-    "coder",
-    "小码",
-    "opencode",
-    "minimax-m3",
-    "Coding 主力，负责服务端与通用代码实现与重构。",
+  gemini: agent(
+    "gemini",
+    "Gemini",
+    "antigravity",
+    "gemini-3.5-flash",
+    "想法与头脑风暴：发散灵感，可与 Codex 互证收敛。",
     { reasoningEffort: "high" }
   ),
   grok: agent(
@@ -97,30 +72,15 @@ const AGENTS = {
     "Grok",
     "grok",
     "grok-4.5",
-    "Grok 4.5 high — 本地 Grok Build CLI 编码与硬推理主力。",
+    "实现：写代码、改功能、跑测试。",
     { reasoningEffort: "high", capacityTokens: 500_000 }
   ),
-  gemini: agent(
-    "gemini",
-    "Gemini",
-    "antigravity",
-    "gemini-3.5-flash",
-    "Gemini 3.5 Flash high（Antigravity CLI）— 灵光一闪、新鲜想法与头脑风暴。",
-    { reasoningEffort: "high" }
-  ),
-  frontend: agent(
-    "frontend",
-    "小视",
+  opencode: agent(
     "opencode",
-    "glm-5.2",
-    "前端 Coding 专家，专注 UI、样式、交互与可访问性。"
-  ),
-  critic: agent(
-    "critic",
-    "小评",
+    "OpenCode",
     "opencode",
     "qwen3.7-plus",
-    "Review 专家，负责代码评审、问题诊断与质量把关。"
+    "Review：代码评审、质量与安全把关、放行确认。"
   ),
 };
 

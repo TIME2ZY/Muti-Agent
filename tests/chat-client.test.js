@@ -12,8 +12,8 @@ function makeDeps(overrides = {}) {
     runtimeStore,
     sessions: {},
     projectDir: "",
-    selectedAgent: "architect",
-    lastAgent: "architect",
+    selectedAgent: "codex",
+    lastAgent: "codex",
   };
   const promptEl = {
     value: "",
@@ -117,7 +117,7 @@ test("handleSseEvent routes canonical agent-event frames into the bound session"
 
   client.handleSseEvent("agent-event", {
     type: "progress.update",
-    agent: "planner",
+    agent: "opencode",
     invocationId: "inv-1",
     items: [],
   }, { sessionId: "background" });
@@ -144,17 +144,17 @@ test("background SSE does not mutate the visible session UI helpers", () => {
   deps.runtimeStore = deps.state.runtimeStore;
   const client = chatClientModule.createChatClient(deps);
 
-  client.handleSseEvent("agent-start", { agent: "architect", invocationId: "inv-9" }, { sessionId: "bg" });
-  client.handleSseEvent("message", { agent: "architect", text: "secret" }, { sessionId: "bg" });
-  client.handleSseEvent("stderr", { agent: "architect", text: "noise" }, { sessionId: "bg" });
+  client.handleSseEvent("agent-start", { agent: "codex", invocationId: "inv-9" }, { sessionId: "bg" });
+  client.handleSseEvent("message", { agent: "codex", text: "secret" }, { sessionId: "bg" });
+  client.handleSseEvent("stderr", { agent: "codex", text: "noise" }, { sessionId: "bg" });
   client.handleSseEvent("error", { message: "boom" }, { sessionId: "bg" });
 
   assert.deepEqual(calls, [
-    ["think", "architect", "bg"],
-    ["live", "architect", "secret", "bg"],
+    ["think", "codex", "bg"],
+    ["live", "codex", "secret", "bg"],
   ]);
   assert.equal(deps.runtimeStore.get("bg").status, "error");
-  assert.equal(deps.runtimeStore.get("bg").liveInvocations.get("architect"), "inv-9");
+  assert.equal(deps.runtimeStore.get("bg").liveInvocations.get("codex"), "inv-9");
 });
 
 test("a2a-route buffers system notice even when session is in background", () => {
@@ -170,20 +170,20 @@ test("a2a-route buffers system notice even when session is in background", () =>
       projectDir: "",
     },
     addSystem(text) { calls.push(text); },
-    agentLabel: (id) => (id === "architect" ? "小筑" : id === "planner" ? "小谋" : id),
+    agentLabel: (id) => (id === "codex" ? "Codex" : id === "opencode" ? "Gemini" : id),
   });
   const client = chatClientModule.createChatClient(deps);
 
   client.handleSseEvent("a2a-route", {
-    from: "architect",
-    to: "planner",
+    from: "codex",
+    to: "opencode",
     handoffDegraded: false,
   }, { sessionId: "bg" });
 
   assert.deepEqual(calls, []);
   const notices = runtimeStore.get("bg").systemNotices;
   assert.equal(notices.length, 1);
-  assert.match(notices[0].content, /小筑.*小谋/);
+  assert.match(notices[0].content, /Codex.*Gemini/);
   assert.equal(notices[0].kind, "a2a-route");
 });
 
@@ -205,13 +205,13 @@ test("a2a-route paints system notice when session is active", () => {
   const client = chatClientModule.createChatClient(deps);
 
   client.handleSseEvent("a2a-route", {
-    from: "architect",
-    to: "coder",
+    from: "codex",
+    to: "grok",
     handoffDegraded: true,
   }, { sessionId: "s1" });
 
   assert.equal(calls.length, 1);
-  assert.match(calls[0], /architect.*coder/);
+  assert.match(calls[0], /codex.*grok/);
   assert.match(calls[0], /交接包不完整/);
   assert.equal(runtimeStore.get("s1").systemNotices.length, 1);
 });
@@ -220,7 +220,7 @@ test("agent-exit finalizes the agent so handoffs clear writing state", () => {
   const finalized = [];
   const runtimeStore = createRuntimeStore();
   runtimeStore.beginRun("s1", { abort() {} });
-  runtimeStore.get("s1").liveMessages.set("architect", {
+  runtimeStore.get("s1").liveMessages.set("codex", {
     rawText: "done work",
     setBadge() {},
   });
@@ -240,12 +240,12 @@ test("agent-exit finalizes the agent so handoffs clear writing state", () => {
   const client = chatClientModule.createChatClient(deps);
 
   client.handleSseEvent("agent-exit", {
-    agent: "architect",
+    agent: "codex",
     code: 0,
     signal: null,
   }, { sessionId: "s1" });
 
-  assert.deepEqual(finalized, [["architect", "s1", { error: false }]]);
+  assert.deepEqual(finalized, [["codex", "s1", { error: false }]]);
 });
 
 test("sendPrompt rejects when no agent can be resolved", async () => {
@@ -289,10 +289,10 @@ test("sendPrompt uses a resolved default agent without requiring @mention", asyn
       runtimeStore,
       sessions: {},
       projectDir: "",
-      selectedAgent: "architect",
-      lastAgent: "architect",
+      selectedAgent: "codex",
+      lastAgent: "codex",
     },
-    resolvePromptAgent: () => ({ id: "architect", label: "Architect" }),
+    resolvePromptAgent: () => ({ id: "codex", label: "codex" }),
     createMessage() {},
     fetchImpl: async (_url, init) => {
       bodies.push(JSON.parse(init.body));
@@ -315,9 +315,9 @@ test("sendPrompt uses a resolved default agent without requiring @mention", asyn
   await client.sendPrompt();
 
   assert.equal(bodies.length, 1);
-  assert.equal(bodies[0].agent, "architect");
+  assert.equal(bodies[0].agent, "codex");
   assert.equal(bodies[0].prompt, "hello without mention");
-  assert.equal(deps.state.sessions.s1.lastAgent, "architect");
+  assert.equal(deps.state.sessions.s1.lastAgent, "codex");
 });
 
 test("sendPrompt keeps per-session controllers so another session can run in parallel", async () => {
@@ -365,11 +365,11 @@ test("sendPrompt keeps per-session controllers so another session can run in par
       runtimeStore,
       sessions: {},
       projectDir: "",
-      selectedAgent: "architect",
-      lastAgent: "architect",
+      selectedAgent: "codex",
+      lastAgent: "codex",
     },
     promptEl: { value: "a", disabled: false, focus() {} },
-    resolvePromptAgent: () => ({ id: "architect" }),
+    resolvePromptAgent: () => ({ id: "codex" }),
     fetchImpl: hangingFetch("sA"),
   });
   const clientA = chatClientModule.createChatClient(depsA);
@@ -387,11 +387,11 @@ test("sendPrompt keeps per-session controllers so another session can run in par
       runtimeStore,
       sessions: {},
       projectDir: "",
-      selectedAgent: "planner",
-      lastAgent: "planner",
+      selectedagent: "opencode",
+      lastagent: "opencode",
     },
     promptEl: { value: "b", disabled: false, focus() {} },
-    resolvePromptAgent: () => ({ id: "planner" }),
+    resolvePromptAgent: () => ({ id: "opencode" }),
     fetchImpl: hangingFetch("sB"),
   });
   const clientB = chatClientModule.createChatClient(depsB);

@@ -131,7 +131,7 @@ function runScriptWithSession(args, sessions) {
 
   // Determine which agent is being invoked to set the correct resume session.
   const agentIdx = args.indexOf("--agent");
-  const agentId = agentIdx >= 0 ? args[agentIdx + 1] : "architect";
+  const agentId = agentIdx >= 0 ? args[agentIdx + 1] : "codex";
   const resumeSessionId = (sessions[agentId] && sessions[agentId].sessionId) || "";
 
   const hookPath = path.join(tmpDir, "spawn-hook.js");
@@ -209,7 +209,7 @@ function parseOutputEvents(stdout) {
     .map((line) => JSON.parse(line));
 }
 
-test("uses architect agent by default", () => {
+test("uses codex agent by default", () => {
   const result = runScript(["hello"]);
 
   assert.equal(result.status, 0);
@@ -221,8 +221,8 @@ test("uses architect agent by default", () => {
   assert.equal(result.stderr, "");
 });
 
-test("uses orchestrator agent for deepseek v4 pro", () => {
-  const result = runScript(["--agent", "orchestrator", "hello"]);
+test("uses opencode agent for qwen3.7-plus", () => {
+  const result = runScript(["--agent", "opencode", "hello"]);
 
   assert.equal(result.status, 0);
   assert.deepEqual(
@@ -232,41 +232,7 @@ test("uses orchestrator agent for deepseek v4 pro", () => {
   assert.match(
     parseOutputEvents(result.stdout)[1].text,
     new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/deepseek-v4-pro hello:undefined`
-    )
-  );
-  assert.equal(result.stderr, "");
-});
-
-test("uses frontend agent for glm 5.2", () => {
-  const result = runScript(["--agent=frontend", "hello"]);
-
-  assert.equal(result.status, 0);
-  assert.deepEqual(
-    parseOutputEvents(result.stdout).map((event) => event.type),
-    ["run.started", "text.delta", "run.finished"]
-  );
-  assert.match(
-    parseOutputEvents(result.stdout)[1].text,
-    new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/glm-5.2 hello:undefined`
-    )
-  );
-  assert.equal(result.stderr, "");
-});
-
-test("uses planner agent for mimo v2.5 pro", () => {
-  const result = runScript(["--agent", "planner", "hello"]);
-
-  assert.equal(result.status, 0);
-  assert.deepEqual(
-    parseOutputEvents(result.stdout).map((event) => event.type),
-    ["run.started", "text.delta", "run.finished"]
-  );
-  assert.match(
-    parseOutputEvents(result.stdout)[1].text,
-    new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/mimo-v2\\.5-pro hello:undefined`
+      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/qwen3.7-plus hello:undefined`
     )
   );
   assert.equal(result.stderr, "");
@@ -283,13 +249,13 @@ test("invoke-cli writes normalized NDJSON events instead of plain assistant text
 });
 
 test("invoke-cli persists provider session IDs while emitting NDJSON", () => {
-  const result = runScript(["--agent", "orchestrator", "hello"]);
+  const result = runScript(["--agent", "opencode", "hello"]);
 
   assert.equal(result.status, 0);
   const events = parseOutputEvents(result.stdout);
   assert.ok(events.some((event) => event.type === "text.delta"));
   const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
-  assert.equal(sessionFile.orchestrator.sessionId, "opencode-session-1");
+  assert.equal(sessionFile.opencode.sessionId, "opencode-session-1");
 });
 
 test("rejects unknown agent", () => {
@@ -305,35 +271,24 @@ test("exports invoke function", () => {
 });
 
 test("exports the fixed agents", () => {
-  assert.deepEqual(Object.keys(AGENTS).sort(), [
-    "architect",
-    "coder",
-    "critic",
-    "frontend",
-    "gemini",
-    "grok",
-    "orchestrator",
-    "planner",
-  ]);
-  assert.equal(AGENTS.architect.model, "gpt-5.6-sol");
-  assert.equal(AGENTS.architect.reasoningEffort, "medium");
-  assert.equal(AGENTS.orchestrator.model, "deepseek-v4-pro");
-  assert.equal(AGENTS.planner.model, "mimo-v2.5-pro");
-  assert.equal(AGENTS.coder.model, "minimax-m3");
-  assert.equal(AGENTS.coder.reasoningEffort, "high");
-  assert.equal(AGENTS.grok.model, "grok-4.5");
-  assert.equal(AGENTS.grok.reasoningEffort, "high");
-  assert.equal(AGENTS.grok.name, "grok");
+  assert.deepEqual(Object.keys(AGENTS).sort(), ["codex", "gemini", "grok", "opencode"]);
+  assert.equal(AGENTS.codex.model, "gpt-5.6-sol");
+  assert.equal(AGENTS.codex.reasoningEffort, "medium");
+  assert.equal(AGENTS.codex.label, "Codex");
   assert.equal(AGENTS.gemini.model, "gemini-3.5-flash");
   assert.equal(AGENTS.gemini.reasoningEffort, "high");
   assert.equal(AGENTS.gemini.name, "antigravity");
-  assert.equal(AGENTS.frontend.model, "glm-5.2");
-  assert.equal(AGENTS.critic.model, "qwen3.7-plus");
+  assert.equal(AGENTS.grok.model, "grok-4.5");
+  assert.equal(AGENTS.grok.reasoningEffort, "high");
+  assert.equal(AGENTS.grok.name, "grok");
+  assert.equal(AGENTS.opencode.model, "qwen3.7-plus");
+  assert.equal(AGENTS.opencode.label, "OpenCode");
+  assert.equal(AGENTS.opencode.name, "opencode");
 });
 
 test("codex runtime maps agent_message and todo_list into normalized events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
+  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
   const invocationId = "inv-1";
 
   const started = runtime.transform(
@@ -341,7 +296,7 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
       type: "thread.started",
       thread_id: "codex-session-1",
     },
-    { invocationId, agent: "architect" }
+    { invocationId, agent: "codex" }
   );
 
   const todo = runtime.transform(
@@ -355,7 +310,7 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
         ],
       },
     },
-    { invocationId, agent: "architect" }
+    { invocationId, agent: "codex" }
   );
 
   const text = runtime.transform(
@@ -366,7 +321,7 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
         text: "Hello from Codex",
       },
     },
-    { invocationId, agent: "architect" }
+    { invocationId, agent: "codex" }
   );
 
   assert.equal(started[0].type, "run.started");
@@ -377,8 +332,8 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
 
 test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
-  const ctx = { invocationId: "inv-tool", agent: "architect" };
+  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const ctx = { invocationId: "inv-tool", agent: "codex" };
 
   const toolStarted = runtime.transform(
     {
@@ -449,7 +404,7 @@ test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
     {
       type: "tool.started",
       protocolVersion: 1,
-      agent: "architect",
+      agent: "codex",
       invocationId: "inv-tool",
       toolName: "web_search",
       args: { query: "codex events" },
@@ -484,10 +439,10 @@ test("opencode runtime maps tool/task parts into tool and subagent events", () =
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
     name: "opencode",
-    id: "planner",
-    model: "mimo-v2.5-pro",
+    id: "opencode",
+    model: "qwen3.7-plus",
   });
-  const ctx = { invocationId: "inv-oc", agent: "planner" };
+  const ctx = { invocationId: "inv-oc", agent: "opencode" };
 
   const started = runtime.transform(
     {
@@ -540,10 +495,10 @@ test("opencode runtime maps real tool_use events from current CLI schema", () =>
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
     name: "opencode",
-    id: "planner",
-    model: "mimo-v2.5-pro",
+    id: "opencode",
+    model: "qwen3.7-plus",
   });
-  const ctx = { invocationId: "inv-oc-tool-use", agent: "planner" };
+  const ctx = { invocationId: "inv-oc-tool-use", agent: "opencode" };
 
   const events = runtime.transform(
     {
@@ -600,10 +555,10 @@ test("opencode runtime maps read/bash tools and nests state.input", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
     name: "opencode",
-    id: "planner",
-    model: "mimo-v2.5-pro",
+    id: "opencode",
+    model: "qwen3.7-plus",
   });
-  const ctx = { invocationId: "inv-oc-tools", agent: "planner" };
+  const ctx = { invocationId: "inv-oc-tools", agent: "opencode" };
 
   const readStarted = runtime.transform(
     {
@@ -663,10 +618,10 @@ test("opencode runtime emits a single run.started and step progress updates", ()
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
     name: "opencode",
-    id: "planner",
-    model: "mimo-v2.5-pro",
+    id: "opencode",
+    model: "qwen3.7-plus",
   });
-  const ctx = { invocationId: "inv-oc-steps", agent: "planner" };
+  const ctx = { invocationId: "inv-oc-steps", agent: "opencode" };
 
   const firstSession = runtime.transform(
     {
@@ -727,8 +682,8 @@ test("opencode runtime emits a single run.started and step progress updates", ()
 
 test("codex runtime maps command, file, and transport errors into normalized events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
-  const ctx = { invocationId: "inv-1b", agent: "architect" };
+  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const ctx = { invocationId: "inv-1b", agent: "codex" };
 
   const commandStarted = runtime.transform(
     {
@@ -796,7 +751,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
     {
       type: "command.started",
       protocolVersion: 1,
-      agent: "architect",
+      agent: "codex",
       invocationId: "inv-1b",
       command: "Get-Content -Raw skill.md",
     }
@@ -805,7 +760,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
     {
       type: "command.finished",
       protocolVersion: 1,
-      agent: "architect",
+      agent: "codex",
       invocationId: "inv-1b",
       command: "Get-Content -Raw skill.md",
       output: "skill body",
@@ -816,7 +771,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
     {
       type: "file.changed",
       protocolVersion: 1,
-      agent: "architect",
+      agent: "codex",
       invocationId: "inv-1b",
       path: "C:\\worktree\\temp.txt",
       changeType: "add",
@@ -826,7 +781,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
     {
       type: "stderr",
       protocolVersion: 1,
-      agent: "architect",
+      agent: "codex",
       invocationId: "inv-1b",
       text: "Reconnecting... 2/5 (request timed out)",
     },
@@ -835,7 +790,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
     {
       type: "stderr",
       protocolVersion: 1,
-      agent: "architect",
+      agent: "codex",
       invocationId: "inv-1b",
       text: "Falling back from WebSockets to HTTPS transport. request timed out",
     },
@@ -846,10 +801,10 @@ test("opencode runtime emits incremental text deltas from repeated parts", () =>
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
     name: "opencode",
-    id: "planner",
-    model: "mimo-v2.5-pro",
+    id: "opencode",
+    model: "qwen3.7-plus",
   });
-  const ctx = { invocationId: "inv-2", agent: "planner" };
+  const ctx = { invocationId: "inv-2", agent: "opencode" };
 
   const first = runtime.transform(
     {
@@ -881,10 +836,10 @@ test("opencode runtime reads text deltas from properties.part fallback", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
     name: "opencode",
-    id: "planner",
-    model: "mimo-v2.5-pro",
+    id: "opencode",
+    model: "qwen3.7-plus",
   });
-  const ctx = { invocationId: "inv-3", agent: "planner" };
+  const ctx = { invocationId: "inv-3", agent: "opencode" };
 
   const events = runtime.transform(
     {
@@ -906,10 +861,10 @@ test("opencode runtime extracts sessionID and text events from current cli schem
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
     name: "opencode",
-    id: "planner",
-    model: "mimo-v2.5-pro",
+    id: "opencode",
+    model: "qwen3.7-plus",
   });
-  const ctx = { invocationId: "inv-3b", agent: "planner" };
+  const ctx = { invocationId: "inv-3b", agent: "opencode" };
 
   const rawStart = {
     type: "step_start",
@@ -943,10 +898,10 @@ test("opencode runtime maps reasoning events (from --thinking) to thinking.delta
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
     name: "opencode",
-    id: "planner",
-    model: "mimo-v2.5-pro",
+    id: "opencode",
+    model: "qwen3.7-plus",
   });
-  const ctx = { invocationId: "inv-think", agent: "planner" };
+  const ctx = { invocationId: "inv-think", agent: "opencode" };
 
   // Real CLI shape observed with: opencode run --format json --thinking
   const full = runtime.transform(
@@ -965,7 +920,7 @@ test("opencode runtime maps reasoning events (from --thinking) to thinking.delta
   const thinking = full.find((event) => event.type === "thinking.delta");
   assert.ok(thinking);
   assert.equal(thinking.text, "The user wants exactly one word.");
-  assert.equal(thinking.agent, "planner");
+  assert.equal(thinking.agent, "opencode");
   assert.equal(thinking.invocationId, "inv-think");
 
   // Streaming growth on the same part id should emit only the delta suffix.
@@ -1022,8 +977,8 @@ test("provider registry lists codex, grok, opencode, and antigravity", () => {
 
 test("codex runtime reads text from content and properties.content fallbacks", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
-  const ctx = { invocationId: "inv-4", agent: "architect" };
+  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const ctx = { invocationId: "inv-4", agent: "codex" };
 
   const direct = runtime.transform(
     {
@@ -1055,7 +1010,7 @@ test("codex runtime reads text from content and properties.content fallbacks", (
 
 test("codex runtime maps agent message events to text.delta", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
+  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
   const events = runtime.transform(
     {
       type: "item.completed",
@@ -1064,7 +1019,7 @@ test("codex runtime maps agent message events to text.delta", () => {
         text: "Hello from Codex",
       },
     },
-    { agent: "architect", invocationId: "inv-legacy" }
+    { agent: "codex", invocationId: "inv-legacy" }
   );
   const text = events.find((event) => event.type === "text.delta");
   assert.ok(text);
@@ -1073,7 +1028,7 @@ test("codex runtime maps agent message events to text.delta", () => {
 
 test("resumes remembered codex session", () => {
   const result = runScriptWithSession(["hello again"], {
-    architect: { sessionId: "codex-session-previous" },
+    codex: { sessionId: "codex-session-previous" },
   });
 
   assert.equal(result.status, 0);
@@ -1085,8 +1040,8 @@ test("resumes remembered codex session", () => {
 });
 
 test("resumes remembered opencode session", () => {
-  const result = runScriptWithSession(["--agent", "orchestrator", "hello again"], {
-    orchestrator: { sessionId: "opencode-session-previous" },
+  const result = runScriptWithSession(["--agent", "opencode", "hello again"], {
+    opencode: { sessionId: "opencode-session-previous" },
   });
 
   assert.equal(result.status, 0);
@@ -1096,7 +1051,7 @@ test("resumes remembered opencode session", () => {
   assert.match(
     text.text,
     new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/deepseek-v4-pro --session opencode-session-previous hello again`
+      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/qwen3.7-plus --session opencode-session-previous hello again`
     )
   );
   assert.equal(result.stderr, "");
@@ -1107,15 +1062,15 @@ test("remembers sessions from stream events", () => {
 
   assert.equal(result.status, 0);
   const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
-  assert.equal(sessionFile.architect.sessionId, "codex-session-1");
+  assert.equal(sessionFile.codex.sessionId, "codex-session-1");
 });
 
 test("remembers opencode sessions from stream events", () => {
-  const result = runScript(["--agent", "orchestrator", "hello"]);
+  const result = runScript(["--agent", "opencode", "hello"]);
 
   assert.equal(result.status, 0);
   const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
-  assert.equal(sessionFile.orchestrator.sessionId, "opencode-session-1");
+  assert.equal(sessionFile.opencode.sessionId, "opencode-session-1");
 });
 
 test("remembers workspace key from stream events when provided", () => {
@@ -1125,10 +1080,10 @@ test("remembers workspace key from stream events when provided", () => {
 
   assert.equal(result.status, 0);
   const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
-  assert.equal(sessionFile.architect.sessionId, "codex-session-1");
-  assert.equal(sessionFile.architect.workspaceKey, "base:test-workspace");
+  assert.equal(sessionFile.codex.sessionId, "codex-session-1");
+  assert.equal(sessionFile.codex.workspaceKey, "base:test-workspace");
   assert.equal(
-    sessionFile.architect.byWorkspace["base:test-workspace"].sessionId,
+    sessionFile.codex.byWorkspace["base:test-workspace"].sessionId,
     "codex-session-1"
   );
 });
@@ -1147,12 +1102,12 @@ test("persists provider sessions per workspace without overwriting the other", (
   assert.equal(second.status, 0);
 
   const sessionFile = JSON.parse(fs.readFileSync(first.sessionPath, "utf8"));
-  assert.equal(sessionFile.architect.byWorkspace["base:C:\\proj"].sessionId, "codex-session-1");
+  assert.equal(sessionFile.codex.byWorkspace["base:C:\\proj"].sessionId, "codex-session-1");
   assert.equal(
-    sessionFile.architect.byWorkspace["worktree:C:\\proj.worktrees\\s1"].sessionId,
+    sessionFile.codex.byWorkspace["worktree:C:\\proj.worktrees\\s1"].sessionId,
     "codex-session-1"
   );
-  assert.equal(sessionFile.architect.workspaceKey, "worktree:C:\\proj.worktrees\\s1");
+  assert.equal(sessionFile.codex.workspaceKey, "worktree:C:\\proj.worktrees\\s1");
 });
 
 test("cold starts when no saved session", () => {

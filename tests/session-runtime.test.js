@@ -10,13 +10,13 @@ test("runtime store isolates controller and live maps per session", () => {
 
   store.beginRun("s1", a);
   store.beginRun("s2", b);
-  store.getOrCreate("s1").liveMessages.set("architect", { rawText: "one" });
-  store.getOrCreate("s2").liveMessages.set("planner", { rawText: "two" });
+  store.getOrCreate("s1").liveMessages.set("codex", { rawText: "one" });
+  store.getOrCreate("s2").liveMessages.set("opencode", { rawText: "two" });
 
   assert.equal(store.get("s1").controller, a);
   assert.equal(store.get("s2").controller, b);
-  assert.equal(store.get("s1").liveMessages.get("architect").rawText, "one");
-  assert.equal(store.get("s2").liveMessages.has("architect"), false);
+  assert.equal(store.get("s1").liveMessages.get("codex").rawText, "one");
+  assert.equal(store.get("s2").liveMessages.has("codex"), false);
   assert.equal(store.getStatus("s1"), "running");
   assert.equal(store.getStatus("s2"), "running");
 });
@@ -68,13 +68,13 @@ test("rekey moves runtime identity when a pending session becomes real", () => {
   const store = createRuntimeStore();
   const controller = {};
   store.beginRun("_pending", controller);
-  store.getOrCreate("_pending").liveMessages.set("architect", { rawText: "hi" });
+  store.getOrCreate("_pending").liveMessages.set("codex", { rawText: "hi" });
 
   const moved = store.rekey("_pending", "s-real");
   assert.equal(moved.sessionId, "s-real");
   assert.equal(store.get("_pending"), null);
   assert.equal(store.get("s-real").controller, controller);
-  assert.equal(store.get("s-real").liveMessages.get("architect").rawText, "hi");
+  assert.equal(store.get("s-real").liveMessages.get("codex").rawText, "hi");
 });
 
 test("dispose aborts and removes the runtime", () => {

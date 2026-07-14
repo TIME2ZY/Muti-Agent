@@ -68,13 +68,13 @@
     initial: {
       // UI selection (serializable)
       agents: [],
-      selectedAgent: "architect",
+      selectedAgent: "codex",
       currentSessionId: null,
       skillsMetadata: [],
       // Per-session UI slots (lastPrompt/lastAgent for retry) — not live run data
       sessions: {},
       lastPrompt: "",
-      lastAgent: "architect",
+      lastAgent: "codex",
       skillDebounce: null,
       projectDir: "",
       worktreeStatus: null,
@@ -120,7 +120,7 @@
   function sessionSlot() {
     const sid = state.currentSessionId || "_pending";
     if (!state.sessions[sid]) {
-      state.sessions[sid] = { lastPrompt: "", lastAgent: state.selectedAgent || "architect" };
+      state.sessions[sid] = { lastPrompt: "", lastAgent: state.selectedAgent || "codex" };
     }
     return state.sessions[sid];
   }
@@ -165,7 +165,7 @@
       agents: state.agents,
       selectedAgent: state.selectedAgent,
       lastAgent: slot.lastAgent || state.lastAgent,
-      defaultAgent: "architect",
+      defaultAgent: "codex",
     }).agent;
   }
 
@@ -184,9 +184,9 @@
   function applySessionAgent(sessionId, lastAgent) {
     const sid = sessionId || state.currentSessionId || "_pending";
     if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "" };
-    const agentId = lastAgent || state.selectedAgent || "architect";
+    const agentId = lastAgent || state.selectedAgent || "codex";
     const known = state.agents.find((a) => a.id === agentId);
-    const resolvedId = known ? known.id : (state.agents[0]?.id || "architect");
+    const resolvedId = known ? known.id : (state.agents[0]?.id || "codex");
     state.sessions[sid].lastAgent = resolvedId;
     if (sid === state.currentSessionId || !state.currentSessionId) {
       uiStore.patch({ selectedAgent: resolvedId, lastAgent: resolvedId }, { source: "applySessionAgent" });
@@ -513,7 +513,7 @@
       const data = await jsonOrThrow(res);
       state.agents = data.agents;
       if (!state.agents.find((a) => a.id === state.selectedAgent)) {
-        state.selectedAgent = state.agents[0]?.id || "architect";
+        state.selectedAgent = state.agents[0]?.id || "codex";
       }
       state.lastAgent = state.selectedAgent;
       renderAgentTabs();

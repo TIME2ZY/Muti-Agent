@@ -164,7 +164,7 @@
         renderWorkspacePanel();
         state.projectDir = "";
         if (typeof applySessionAgent === "function") {
-          applySessionAgent(session.id, state.selectedAgent || "architect");
+          applySessionAgent(session.id, state.selectedAgent || "codex");
         }
         await loadProjectDir(session.id);
         setStatus("就绪");

@@ -23,7 +23,7 @@ function sessionFixture(id = "thread-1") {
     id,
     title: "Window lifecycle",
     projectDir: "C:/repo",
-    lastAgent: "architect",
+    lastAgent: "codex",
     createdAt: "2026-07-12T00:00:00.000Z",
     messages: [],
   };
@@ -31,8 +31,8 @@ function sessionFixture(id = "thread-1") {
 
 function baseCoordinate(overrides = {}) {
   return {
-    agentId: "architect",
-    providerKey: "codex:gpt-5.5",
+    agentId: "codex",
+    providerKey: "codex:gpt-5.6-sol",
     workspaceKey: "base:C:/repo",
     capacityTokens: 200000,
     ...overrides,
@@ -71,12 +71,12 @@ test("after seal the next invocation does not carry the old provider_session_id"
         },
       },
     });
-    abandonProviderSession(session.id, mapRoot, "architect", "base:C:/repo");
+    abandonProviderSession(session.id, mapRoot, "codex", "base:C:/repo");
     const resume = resolveResumeSessionId(
       readSessionMap(session.id, mapRoot),
-      "architect",
+      "codex",
       "base:C:/repo",
-      "codex:gpt-5.5"
+      "codex:gpt-5.6-sol"
     );
     assert.equal(resume, "");
 
@@ -171,7 +171,7 @@ test("different agents and base/worktree workspaces keep independent windows", (
     const coderBase = recorder.ensureWindow({
       session,
       threadId: session.id,
-      ...baseCoordinate({ agentId: "coder" }),
+      ...baseCoordinate({ agentId: "grok" }),
     });
     const architectWorktree = recorder.ensureWindow({
       session,
@@ -196,8 +196,8 @@ test("different agents and base/worktree workspaces keep independent windows", (
     assert.equal(
       storage.windows.getOpen({
         threadId: session.id,
-        agentId: "coder",
-        providerKey: "codex:gpt-5.5",
+        agentId: "grok",
+        providerKey: "codex:gpt-5.6-sol",
         workspaceKey: "base:C:/repo",
       }).generation,
       1
@@ -205,8 +205,8 @@ test("different agents and base/worktree workspaces keep independent windows", (
     assert.equal(
       storage.windows.getOpen({
         threadId: session.id,
-        agentId: "architect",
-        providerKey: "codex:gpt-5.5",
+        agentId: "codex",
+        providerKey: "codex:gpt-5.6-sol",
         workspaceKey: "worktree:C:/repo/.shift/wt-1",
       }).id,
       architectWorktree.id
@@ -242,7 +242,7 @@ test("across 10 sealed windows original messages remain searchable and invocatio
       session.messages.push({
         id: `msg-${generation}`,
         role: "assistant",
-        agent: "architect",
+        agent: "codex",
         content,
         invocationId,
         createdAt: `2026-07-12T00:${String(generation).padStart(2, "0")}:01.000Z`,
@@ -408,7 +408,7 @@ test("database exceptions do not present memory as empty when file data exists",
   const fileInvocations = [
     {
       invocationId: "file-inv",
-      agent: "architect",
+      agent: "codex",
       startedAt: "2026-07-12T00:00:00.000Z",
       endedAt: null,
       state: null,
@@ -465,8 +465,8 @@ test("FTS index corruption can be rebuilt from recall_items source projection", 
     storage.windows.create({
       id: "window-1",
       threadId: "thread-1",
-      agentId: "architect",
-      providerKey: "codex:gpt-5.5",
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
       workspaceKey: "base:C:/repo",
       generation: 1,
       capacityTokens: 200000,
@@ -585,8 +585,8 @@ test("100k events: search and invocation list stay within acceptable latency", (
     storage.windows.create({
       id: "window-scale",
       threadId: "thread-scale",
-      agentId: "architect",
-      providerKey: "codex:gpt-5.5",
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
       workspaceKey: "base:C:/repo",
       generation: 1,
       capacityTokens: 200000,
@@ -594,7 +594,7 @@ test("100k events: search and invocation list stay within acceptable latency", (
 
     const startInv = storage.db.prepare(`
       INSERT INTO invocations (id, thread_id, window_id, agent_id, state, started_at)
-      VALUES (@id, 'thread-scale', 'window-scale', 'architect', 'completed', @startedAt)
+      VALUES (@id, 'thread-scale', 'window-scale', 'codex', 'completed', @startedAt)
     `);
     const startEvent = storage.db.prepare(`
       INSERT INTO invocation_events (invocation_id, sequence_no, kind, payload_json, created_at)
@@ -605,7 +605,7 @@ test("100k events: search and invocation list stay within acceptable latency", (
         (thread_id, window_id, source_kind, source_id, title, content, agent_id, created_at, metadata_json)
       VALUES
         ('thread-scale', 'window-scale', 'invocation-event', @sourceId, @title, @content,
-         'architect', @createdAt, @metadata)
+         'codex', @createdAt, @metadata)
     `);
 
     const EVENT_COUNT = 100_000;
@@ -671,18 +671,18 @@ test("100k events: search and invocation list stay within acceptable latency", (
 
 test("clearAgentProviderSession only drops the sealed workspace slot", () => {
   const sessions = {};
-  upsertAgentProviderSession(sessions, "architect", "ps-base", "base:C:/repo", "codex:gpt-5.5");
+  upsertAgentProviderSession(sessions, "codex", "ps-base", "base:C:/repo", "codex:gpt-5.6-sol");
   upsertAgentProviderSession(
     sessions,
-    "architect",
+    "codex",
     "ps-wt",
     "worktree:C:/repo/wt",
-    "codex:gpt-5.5"
+    "codex:gpt-5.6-sol"
   );
-  clearAgentProviderSession(sessions, "architect", "base:C:/repo");
-  assert.equal(resolveResumeSessionId(sessions, "architect", "base:C:/repo", "codex:gpt-5.5"), "");
+  clearAgentProviderSession(sessions, "codex", "base:C:/repo");
+  assert.equal(resolveResumeSessionId(sessions, "codex", "base:C:/repo", "codex:gpt-5.6-sol"), "");
   assert.equal(
-    resolveResumeSessionId(sessions, "architect", "worktree:C:/repo/wt", "codex:gpt-5.5"),
+    resolveResumeSessionId(sessions, "codex", "worktree:C:/repo/wt", "codex:gpt-5.6-sol"),
     "ps-wt"
   );
 });

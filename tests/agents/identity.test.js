@@ -33,20 +33,20 @@ test("default identities dir contains one file per catalog agent", () => {
 });
 
 test("getIdentity returns catalog agents and null for unknown", () => {
-  assert.equal(getIdentity("coder").label, "小码");
+  assert.equal(getIdentity("grok").label, "Grok");
   assert.equal(getIdentity("no-such-agent"), null);
   assert.equal(getIdentity(""), null);
 });
 
 test("renderIdentityBlock includes markers, role meta, and body", () => {
-  const block = renderIdentityBlock("critic");
-  assert.match(block, /<!-- Agent Identity: critic \/ 小评 -->/);
+  const block = renderIdentityBlock("opencode");
+  assert.match(block, /<!-- Agent Identity: opencode \/ OpenCode -->/);
   assert.match(block, /<!-- \/Agent Identity -->/);
   assert.match(block, /Role: reviewer/);
   assert.match(block, /Duties:/);
   assert.match(block, /Boundaries:/);
-  assert.match(block, /你是 \*\*小评/);
-  assert.ok(!block.includes("你是 **小码"), "must not leak other agent bodies");
+  assert.match(block, /你是 \*\*OpenCode/);
+  assert.ok(!block.includes("你是 **Grok"), "must not leak other agent bodies");
 });
 
 test("renderIdentityBlock falls back when file missing", () => {
@@ -114,16 +114,16 @@ test("loadIdentities skips files without frontmatter", () => {
 
 test("publicIdentities returns metadata without body", () => {
   const list = publicIdentities();
-  assert.ok(list.length >= 6);
-  const coder = list.find((a) => a.id === "coder");
+  assert.ok(list.length >= 4);
+  const coder = list.find((a) => a.id === "grok");
   assert.ok(coder);
-  assert.equal(coder.label, "小码");
+  assert.equal(coder.label, "Grok");
   assert.ok(Array.isArray(coder.duties));
   assert.equal("body" in coder, false);
 });
 
 test("assertIdentitiesForAgents reports missing ids", () => {
-  const missing = assertIdentitiesForAgents(["coder", "missing-one", "missing-two"]);
+  const missing = assertIdentitiesForAgents(["grok", "missing-one", "missing-two"]);
   assert.deepEqual(missing, ["missing-one", "missing-two"]);
 });
 

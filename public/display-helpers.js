@@ -108,14 +108,10 @@
   /** Stable palette slots (1..AGENT_COLOR_COUNT) for multi-agent scanning. */
   const AGENT_COLOR_COUNT = 6;
   const AGENT_COLOR_BY_ID = {
-    architect: 1,
-    orchestrator: 2,
-    planner: 3,
-    gemini: 3, // brainstorm / ideation cohort with 小谋
-    coder: 4,
-    grok: 4, // coding cohort shares palette slot with 小码
-    frontend: 5,
-    critic: 6,
+    codex: 1,
+    gemini: 2,
+    grok: 3,
+    opencode: 4,
   };
 
   function agentColorIndex(id) {

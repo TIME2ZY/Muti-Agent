@@ -25,7 +25,7 @@
     function renderCurrentAgent() {
       const agent = state.agents.find((a) => a.id === state.selectedAgent)
         || state.agents[0]
-        || { id: state.selectedAgent || "architect", label: state.selectedAgent || "architect" };
+        || { id: state.selectedAgent || "codex", label: state.selectedAgent || "codex" };
       const label = agentLabel(agent.id);
       if (currentAgentNameEl) currentAgentNameEl.textContent = label;
       if (currentAgentEl) {

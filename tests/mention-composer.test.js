@@ -15,8 +15,8 @@ test("getMentionTrigger returns null without mention", () => {
 });
 
 test("getMentionTrigger supports start-of-line mention", () => {
-  const t = getMentionTrigger("@coder do work", 6);
+  const t = getMentionTrigger("@grok do work", 5);
   assert.ok(t);
-  assert.equal(t.query, "coder");
+  assert.equal(t.query, "grok");
   assert.equal(t.start, 0);
 });

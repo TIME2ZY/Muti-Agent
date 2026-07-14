@@ -9,7 +9,7 @@ function sessionFixture() {
     id: "thread-1",
     title: "Dual write",
     projectDir: "C:/repo",
-    lastAgent: "architect",
+    lastAgent: "codex",
     createdAt: "2026-07-12T00:00:00.000Z",
     messages: [],
   };
@@ -23,15 +23,15 @@ test("dual-write recorder mirrors thread, window, message, and invocation data",
     const window = recorder.ensureWindow({
       session,
       threadId: session.id,
-      agentId: "architect",
-      providerKey: "codex:gpt-5.5",
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
       workspaceKey: "base:C:/repo",
       capacityTokens: 200000,
     });
     session.messages.push({
       id: "message-user",
       role: "user",
-      agent: "architect",
+      agent: "codex",
       content: "Remember this",
       createdAt: "2026-07-12T00:00:01.000Z",
     });
@@ -41,8 +41,8 @@ test("dual-write recorder mirrors thread, window, message, and invocation data",
       session,
       invocationId: "invocation-1",
       threadId: session.id,
-      agentId: "architect",
-      providerKey: "codex:gpt-5.5",
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
       workspaceKey: "base:C:/repo",
       capacityTokens: 200000,
       resumeSessionId: "provider-session-1",
@@ -52,7 +52,7 @@ test("dual-write recorder mirrors thread, window, message, and invocation data",
     session.messages.push({
       id: "message-assistant",
       role: "assistant",
-      agent: "architect",
+      agent: "codex",
       content: "Stored",
       invocationId: "invocation-1",
       createdAt: "2026-07-12T00:00:03.000Z",
@@ -61,7 +61,7 @@ test("dual-write recorder mirrors thread, window, message, and invocation data",
     recorder.finishInvocation("invocation-1", 0, null);
 
     assert.equal(run.window.id, window.id);
-    assert.equal(storage.threads.get("thread-1").lastAgentId, "architect");
+    assert.equal(storage.threads.get("thread-1").lastAgentId, "codex");
     assert.equal(storage.windows.listForThread("thread-1").length, 1);
     recorder.addWindowUsage(window.id, { inputChars: 100, outputChars: 50 });
     assert.equal(storage.windows.get(window.id).providerSessionId, "provider-session-1");
@@ -121,8 +121,8 @@ test("deleting a thread suppresses late writes from its active invocation", () =
       session,
       invocationId: "invocation-1",
       threadId: session.id,
-      agentId: "architect",
-      providerKey: "codex:gpt-5.5",
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
       workspaceKey: "base:C:/repo",
       capacityTokens: 200000,
     });

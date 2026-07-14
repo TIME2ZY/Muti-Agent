@@ -25,7 +25,7 @@ test("recordInvocationEvent and finalizeInvocationEvent append lifecycle events"
     ["inv1", {
       invocationId: "inv1",
       sessionId: "s1",
-      agent: "architect",
+      agent: "codex",
       startedAt: "2026-01-01T00:00:00.000Z",
       endedAt: null,
       state: "active",
@@ -47,7 +47,7 @@ test("list/search/read helpers stay session-scoped", () => {
     ["inv1", {
       invocationId: "inv1",
       sessionId: "s1",
-      agent: "architect",
+      agent: "codex",
       startedAt: "2026-01-01T00:00:00.000Z",
       endedAt: null,
       state: "active",
@@ -73,7 +73,7 @@ test("list/search/read helpers stay session-scoped", () => {
   assert.equal(invocationStore.searchInvocationsInMap(map, "s1", "beta", 20).length, 0);
   assert.deepEqual(invocationStore.readInvocationFromMap(map, "s1", "inv1", 0, 10), {
     invocationId: "inv1",
-    agent: "architect",
+    agent: "codex",
     startedAt: "2026-01-01T00:00:00.000Z",
     endedAt: null,
     state: "active",

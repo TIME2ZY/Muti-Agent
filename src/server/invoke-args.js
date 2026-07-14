@@ -1,6 +1,6 @@
 function createInvokeArgsBuilder({ agents }) {
   function buildInvokeArgs(body, augmentedPrompt) {
-    const agent = typeof body.agent === "string" ? body.agent : "architect";
+    const agent = typeof body.agent === "string" ? body.agent : "codex";
     const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
 
     if (!agents[agent]) throw new Error(`Unsupported agent "${agent}".`);

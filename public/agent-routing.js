@@ -42,7 +42,7 @@
       agents = [],
       selectedAgent = "",
       lastAgent = "",
-      defaultAgent = "architect",
+      defaultAgent = "codex",
     } = options;
 
     const explicit = findExplicitLeadingAgent(prompt, agents);

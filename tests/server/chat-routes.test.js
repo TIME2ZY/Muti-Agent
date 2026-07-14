@@ -32,7 +32,7 @@ function baseDeps(res, overrides = {}) {
     rootDir: "/root",
     selfGitRoot: null,
     options: {},
-    AGENTS: { architect: { id: "architect", label: "Architect" } },
+    AGENTS: { codex: { id: "codex", label: "Codex" } },
     callbacks: {
       buildCallbackInstructions: () => "",
       registerThread() {},

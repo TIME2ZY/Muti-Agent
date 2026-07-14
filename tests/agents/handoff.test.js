@@ -14,12 +14,12 @@ const {
 } = handoff;
 
 const FULL_BLOCK = `
-@小评
+@OpenCode
 
 请接手。
 
 \`\`\`handoff
-to: critic
+to: opencode
 goal: review auth
 what: 新增 POST /api/login
 why: 多实例不能用 session
@@ -38,7 +38,7 @@ test("parseHandoffBlocks extracts a full handoff", () => {
   const blocks = parseHandoffBlocks(FULL_BLOCK);
   assert.equal(blocks.length, 1);
   const h = blocks[0];
-  assert.equal(h.to, "critic");
+  assert.equal(h.to, "opencode");
   assert.equal(h.goal, "review auth");
   assert.equal(h.what, "新增 POST /api/login");
   assert.equal(h.why, "多实例不能用 session");
@@ -50,7 +50,7 @@ test("parseHandoffBlocks extracts a full handoff", () => {
 });
 
 test("parseHandoffBlocks returns empty for no fence", () => {
-  assert.deepEqual(parseHandoffBlocks("@小评\n请 review"), []);
+  assert.deepEqual(parseHandoffBlocks("@OpenCode\n请 review"), []);
   assert.deepEqual(parseHandoffBlocks(""), []);
   assert.deepEqual(parseHandoffBlocks(null), []);
 });
@@ -76,41 +76,41 @@ test("parseHandoffBody supports comma-separated list on one line", () => {
 test("extractPrimaryHandoff prefers last block", () => {
   const text = [
     "```handoff",
-    "to: coder",
+    "to: grok",
     "what: first",
     "why: w1",
     "next_action: n1",
     "```",
     "",
     "```handoff",
-    "to: critic",
+    "to: opencode",
     "what: second",
     "why: w2",
     "next_action: n2",
     "```",
   ].join("\n");
   const h = extractPrimaryHandoff(text);
-  assert.equal(h.to, "critic");
+  assert.equal(h.to, "opencode");
   assert.equal(h.what, "second");
 });
 
 test("extractPrimaryHandoff prefers block matching routedTo", () => {
   const text = [
     "```handoff",
-    "to: coder",
-    "what: for coder",
+    "to: grok",
+    "what: for grok",
     "why: w",
     "next_action: n",
     "```",
     "```handoff",
-    "to: critic",
-    "what: for critic",
+    "to: opencode",
+    "what: for opencode",
     "why: w",
     "next_action: n",
     "```",
   ].join("\n");
-  const h = extractPrimaryHandoff(text, { routedTo: "coder" });
-  assert.equal(h.what, "for coder");
+  const h = extractPrimaryHandoff(text, { routedTo: "grok" });
+  assert.equal(h.what, "for grok");
 });
 
 test("evaluateHandoff marks complete packs ok", () => {
@@ -145,8 +145,8 @@ test("renderHandoffTask uses structured fields for complete handoff", () => {
   const text = renderHandoffTask({
     handoff: h,
     quality: q,
-    fromAgent: "coder",
-    fromLabel: "小码",
+    fromagent: "grok",
+    fromLabel: "Grok",
     fromContent: "long narrative should be appendix only " + "x".repeat(100),
     userPrompt: "实现登录",
   });
@@ -164,8 +164,8 @@ test("renderHandoffTask marks incomplete packs degraded but still structured", (
   const h = parseHandoffBody("what: only\nnext_action: go");
   const text = renderHandoffTask({
     handoff: h,
-    fromAgent: "coder",
-    fromLabel: "小码",
+    fromagent: "grok",
+    fromLabel: "Grok",
     fromContent: "body",
     userPrompt: "task",
   });
@@ -177,9 +177,9 @@ test("renderHandoffTask marks incomplete packs degraded but still structured", (
 test("renderHandoffTask falls back when no block", () => {
   const text = renderHandoffTask({
     handoff: null,
-    fromAgent: "architect",
+    fromAgent: "codex",
     fromLabel: "Codex",
-    fromContent: "@小谋\nplease plan",
+    fromContent: "@Gemini\nplease plan",
     userPrompt: "start",
   });
   assert.match(text, /未提供标准/);
@@ -204,7 +204,7 @@ test("summarizeHandoff is compact for SSE", () => {
   const s = summarizeHandoff(h, q);
   assert.equal(s.hasBlock, true);
   assert.equal(s.ok, true);
-  assert.equal(s.to, "critic");
+  assert.equal(s.to, "opencode");
   assert.ok(s.next_action);
   assert.ok(!("raw" in s));
 });

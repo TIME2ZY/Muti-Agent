@@ -41,10 +41,10 @@ test("resolveCapabilities respects explicit false flags", () => {
 
 test("findAgentCapabilities looks up agent list by id", () => {
   const agents = [
-    { id: "architect", capabilities: { thinking: false, tools: true, subagents: true } },
+    { id: "codex", capabilities: { thinking: false, tools: true, subagents: true } },
     { id: "grok", capabilities: { thinking: true, tools: false, subagents: false } },
   ];
-  assert.equal(helpers.findAgentCapabilities(agents, "architect").thinking, false);
+  assert.equal(helpers.findAgentCapabilities(agents, "codex").thinking, false);
   assert.equal(helpers.findAgentCapabilities(agents, "grok").tools, false);
   assert.equal(helpers.findAgentCapabilities(agents, "missing").thinking, true);
 });

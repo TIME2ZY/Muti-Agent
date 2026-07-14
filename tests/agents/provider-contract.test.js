@@ -21,7 +21,7 @@ const path = require("node:path");
 
 const CONFIGS = {
   codex: { providerId: "codex", model: "gpt-5.6-sol", reasoningEffort: "medium" },
-  opencode: { providerId: "opencode", model: "deepseek-v4-pro" },
+  opencode: { providerId: "opencode", model: "qwen3.7-plus" },
   grok: { providerId: "grok", model: "grok-4.5", reasoningEffort: "high" },
   antigravity: {
     providerId: "antigravity",
@@ -62,9 +62,12 @@ test("unknown providers fail fast instead of falling through to Codex", () => {
 });
 
 test("model catalog separates execution provider from model vendor", () => {
-  const glm = getModelProfile("opencode", "glm-5.2");
-  assert.equal(glm.providerId, "opencode");
-  assert.equal(glm.vendorId, "zhipu");
+  const qwen = getModelProfile("opencode", "qwen3.7-plus");
+  assert.equal(qwen.providerId, "opencode");
+  assert.equal(qwen.vendorId, "alibaba");
+  const codex = getModelProfile("codex", "gpt-5.6-sol");
+  assert.equal(codex.providerId, "codex");
+  assert.equal(codex.vendorId, "openai");
   assert.ok(MODEL_PROFILES.every((profile) => profile.contextTokens > 0));
 });
 
@@ -75,7 +78,7 @@ test("canonical event validator rejects missing fields and unknown event types",
   assert.throws(() => assertCanonicalEvent({ type: "vendor.magic" }), /unsupported event type/);
   const ok = assertCanonicalEvent({
     type: "text.delta",
-    agent: "architect",
+    agent: "codex",
     invocationId: "inv-1",
     text: "hello",
   });
@@ -85,7 +88,7 @@ test("canonical event validator rejects missing fields and unknown event types",
 
 test("runtime envelope enforces started-before-content and one terminal event", () => {
   const runtime = createProviderRuntime(CONFIGS.codex);
-  const context = { agent: "architect", invocationId: "inv-life" };
+  const context = { agent: "codex", invocationId: "inv-life" };
   const content = runtime.transform(
     {
       type: "item.completed",
@@ -113,7 +116,7 @@ test("provider options configure adapters without central provider branches", ()
     "hello"
   );
   assert.equal(opencode.args.includes("--thinking"), false);
-  assert.ok(opencode.args.includes("custom/deepseek-v4-pro"));
+  assert.ok(opencode.args.includes("custom/qwen3.7-plus"));
 
   const grok = buildProviderInvocation(
     {

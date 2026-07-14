@@ -105,7 +105,7 @@ test("serves fixed agent list", async () => {
     const body = await response.json();
 
     assert.equal(response.status, 200);
-    assert.deepEqual(body.agents.map((agent) => agent.id), ["architect", "orchestrator", "planner", "coder", "grok", "gemini", "frontend", "critic"]);
+    assert.deepEqual(body.agents.map((agent) => agent.id), ["codex", "gemini", "grok", "opencode"]);
     // Every agent must surface a non-empty description so the UI can show it.
     for (const agent of body.agents) {
       assert.ok(agent.description && agent.description.length > 0, `Agent ${agent.id} missing description`);
@@ -165,7 +165,7 @@ test("UI API rejects non-JSON mutation requests before spawning an agent", async
         "content-type": "text/plain",
         "X-Shift-UI-Token": TEST_UI_TOKEN,
       },
-      body: JSON.stringify({ agent: "architect", prompt: "probe" }),
+      body: JSON.stringify({ agent: "codex", prompt: "probe" }),
     });
     assert.equal(response.status, 415);
     assert.equal(spawnCount, 0);
@@ -183,14 +183,14 @@ test("chat rejects unsafe and unknown client-supplied session IDs", async () => 
     const unsafe = await fetch(`${baseUrl}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent: "architect", prompt: "probe", sessionId: ".." }),
+      body: JSON.stringify({ agent: "codex", prompt: "probe", sessionId: ".." }),
     });
     assert.equal(unsafe.status, 400);
 
     const unknown = await fetch(`${baseUrl}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent: "architect", prompt: "probe", sessionId: "unknown-session" }),
+      body: JSON.stringify({ agent: "codex", prompt: "probe", sessionId: "unknown-session" }),
     });
     assert.equal(unknown.status, 404);
     assert.equal(spawnCount, 0);
@@ -231,7 +231,7 @@ test("streams child stdout and exit events", async () => {
       const response = await fetch(`${baseUrl}/api/invoke`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "orchestrator", prompt: "hello" }),
+        body: JSON.stringify({ agent: "opencode", prompt: "hello" }),
       });
       const text = await response.text();
 
@@ -240,7 +240,7 @@ test("streams child stdout and exit events", async () => {
       assert.equal(calls[0].command, process.execPath);
       assert.equal(calls[0].args[0], "src/agents/invoke-cli.js");
       assert.equal(calls[0].args[1], "--agent");
-      assert.equal(calls[0].args[2], "orchestrator");
+      assert.equal(calls[0].args[2], "opencode");
       assert.ok(calls[0].args[3].endsWith("hello"), `Expected last arg to end with "hello", got: ${calls[0].args[3]?.slice(-50)}`);
       assert.ok(calls[0].args[3].includes("APPLICATION SKILL"), "Expected augmented prompt to contain APPLICATION SKILL marker");
       assert.match(text, /event: stdout\ndata: \{"text":"hello"\}/);
@@ -260,8 +260,8 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
         calls.push({ command, args });
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-test", text: "partial " }) + "\n");
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-test", text: "answer" }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-test", text: "partial " }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-test", text: "answer" }) + "\n");
           child.emit("close", 0, null);
         });
         return child;
@@ -271,19 +271,19 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "hello" }),
+        body: JSON.stringify({ agent: "opencode", prompt: "hello" }),
       });
       const text = await response.text();
 
       assert.equal(response.status, 200);
       assert.equal(calls[0].args[0], "src/agents/invoke-cli.js");
       assert.equal(calls[0].args[1], "--agent");
-      assert.equal(calls[0].args[2], "planner");
+      assert.equal(calls[0].args[2], "opencode");
       assert.ok(calls[0].args[3].includes("hello"), `Expected prompt to contain "hello", got: ${calls[0].args[3]?.slice(-50)}`);
       assert.ok(calls[0].args[3].includes("APPLICATION SKILL"), "Expected augmented prompt to contain APPLICATION SKILL marker");
       assert.ok(calls[0].args[3].includes("MCP 回调工具说明"), "Expected prompt to contain callback instructions");
-      assert.match(text, /event: message\ndata: \{"agent":"planner","role":"assistant","text":"partial "\}/);
-      assert.match(text, /event: message\ndata: \{"agent":"planner","role":"assistant","text":"answer"\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"partial "\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"answer"\}/);
       // Verify session event is emitted
       const sessionMatch = text.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
       assert.ok(sessionMatch, "Expected SSE session event with sessionId");
@@ -294,7 +294,7 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       const history = await historyResponse.json();
       assert.equal(history.messages.length, 2);
       assert.equal(history.messages[0].role, "user");
-      assert.equal(history.messages[0].agent, "planner");
+      assert.equal(history.messages[0].agent, "opencode");
       assert.equal(history.messages[1].role, "assistant");
       assert.equal(history.messages[1].content, "partial answer");
     }
@@ -309,19 +309,19 @@ test("chat endpoint emits canonical agent-event SSE frames", async () => {
         process.nextTick(() => {
           child.stdout.write(JSON.stringify({
             type: "run.started",
-            agent: "planner",
+            agent: "opencode",
             invocationId: "inv-1",
             provider: "opencode",
           }) + "\n");
           child.stdout.write(JSON.stringify({
             type: "text.delta",
-            agent: "planner",
+            agent: "opencode",
             invocationId: "inv-1",
             text: "hello ",
           }) + "\n");
           child.stdout.write(JSON.stringify({
             type: "progress.update",
-            agent: "planner",
+            agent: "opencode",
             invocationId: "inv-1",
             items: [{ text: "done", done: true }],
           }) + "\n");
@@ -334,7 +334,7 @@ test("chat endpoint emits canonical agent-event SSE frames", async () => {
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "hello" }),
+        body: JSON.stringify({ agent: "opencode", prompt: "hello" }),
       });
       const text = await response.text();
       assert.match(text, /event: agent-event/);
@@ -352,25 +352,25 @@ test("chat history stores only assistant text reconstructed from text.delta", as
         process.nextTick(() => {
           child.stdout.write(JSON.stringify({
             type: "run.started",
-            agent: "planner",
+            agent: "opencode",
             invocationId: "inv-2",
             provider: "opencode",
           }) + "\n");
           child.stdout.write(JSON.stringify({
             type: "thinking.delta",
-            agent: "planner",
+            agent: "opencode",
             invocationId: "inv-2",
             text: "inspect",
           }) + "\n");
           child.stdout.write(JSON.stringify({
             type: "text.delta",
-            agent: "planner",
+            agent: "opencode",
             invocationId: "inv-2",
             text: "final answer",
           }) + "\n");
           child.stdout.write(JSON.stringify({
             type: "run.finished",
-            agent: "planner",
+            agent: "opencode",
             invocationId: "inv-2",
             exitCode: 0,
             signal: null,
@@ -384,7 +384,7 @@ test("chat history stores only assistant text reconstructed from text.delta", as
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "hello" }),
+        body: JSON.stringify({ agent: "opencode", prompt: "hello" }),
       });
       const sse = await response.text();
       const sid = sse.match(/"sessionId":"([^"]+)"/)[1];
@@ -401,9 +401,9 @@ test("chat endpoint preserves raw stdout chunk boundaries in SSE message events"
       spawnRunner() {
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-chunks", text: "line 1\n\n" }) + "\n");
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-chunks", text: "    code-ish indent\n" }) + "\n");
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-chunks", text: "- list item" }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-chunks", text: "line 1\n\n" }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-chunks", text: "    code-ish indent\n" }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-chunks", text: "- list item" }) + "\n");
           child.emit("close", 0, null);
         });
         return child;
@@ -413,13 +413,13 @@ test("chat endpoint preserves raw stdout chunk boundaries in SSE message events"
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "hello chunks" }),
+        body: JSON.stringify({ agent: "opencode", prompt: "hello chunks" }),
       });
       const text = await response.text();
 
-      assert.match(text, /event: message\ndata: \{"agent":"planner","role":"assistant","text":"line 1\\n\\n"\}/);
-      assert.match(text, /event: message\ndata: \{"agent":"planner","role":"assistant","text":" {4}code-ish indent\\n"\}/);
-      assert.match(text, /event: message\ndata: \{"agent":"planner","role":"assistant","text":"- list item"\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"line 1\\n\\n"\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":" {4}code-ish indent\\n"\}/);
+      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"- list item"\}/);
     }
   );
 });
@@ -458,7 +458,7 @@ test("chat endpoint suppresses benign codex startup stderr", async () => {
         process.nextTick(() => {
           child.stderr.write("Reading additional input from stdin...\n");
           child.stderr.write("2026-06-28T13:52:47.421934Z WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported\n");
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "inv-answer", text: "answer" }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "inv-answer", text: "answer" }) + "\n");
           child.emit("close", 0, null);
         });
         return child;
@@ -468,7 +468,7 @@ test("chat endpoint suppresses benign codex startup stderr", async () => {
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "architect", prompt: "@Codex hello" }),
+        body: JSON.stringify({ agent: "codex", prompt: "@Codex hello" }),
       });
       const text = await response.text();
 
@@ -490,10 +490,10 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
         prompts.push(args[args.length - 1]);
         const child = createMockChild();
         process.nextTick(() => {
-          if (args[2] === "architect") {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "inv-a2a-1", text: "@小谋\n请继续实现。\narchitect result" }) + "\n");
+          if (args[2] === "codex") {
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "inv-a2a-1", text: "@Gemini\n请继续实现。\ncodex result" }) + "\n");
           } else {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-a2a-2", text: "planner received" }) + "\n");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "gemini", invocationId: "inv-a2a-2", text: "gemini received" }) + "\n");
           }
           child.emit("close", 0, null);
         });
@@ -504,16 +504,16 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "architect", prompt: "build feature" }),
+        body: JSON.stringify({ agent: "codex", prompt: "build feature" }),
       });
       const text = await response.text();
 
       assert.equal(response.status, 200);
       assert.equal(prompts.length, 2);
-      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"architect"[^\n]*"to":"planner"/);
-      assert.match(text, /event: handoff-parsed\ndata: \{[^\n]*"to":"planner"/);
+      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"codex"[^\n]*"to":"gemini"/);
+      assert.match(text, /event: handoff-parsed\ndata: \{[^\n]*"to":"gemini"/);
       assert.match(prompts[1], /任务交接/);
-      assert.match(prompts[1], /architect result/);
+      assert.match(prompts[1], /codex result/);
       assert.match(prompts[1], /用户原始请求/);
       assert.match(prompts[1], /build feature/);
       assert.match(prompts[1], /未提供标准/);
@@ -525,8 +525,8 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
       const body = await messagesResp.json();
       const systemRoutes = (body.messages || []).filter((m) => m.role === "system" && m.kind === "a2a-route");
       assert.equal(systemRoutes.length, 1);
-      assert.equal(systemRoutes[0].from, "architect");
-      assert.equal(systemRoutes[0].to, "planner");
+      assert.equal(systemRoutes[0].from, "codex");
+      assert.equal(systemRoutes[0].to, "gemini");
       assert.match(systemRoutes[0].content, /→/);
     }
   );
@@ -671,7 +671,7 @@ test("DELETE /api/sessions/:id discards an attached worktree", async () => {
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "hello", projectDir: baseDir, useWorktree: true }),
+        body: JSON.stringify({ agent: "opencode", prompt: "hello", projectDir: baseDir, useWorktree: true }),
       });
       const text = await response.text();
       const sessionId = text.match(/"sessionId":"([^"]+)"/)[1];
@@ -712,7 +712,7 @@ test("DELETE /api/sessions/:id does not let a still-running chat recreate the se
       const chatPromise = fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "architect", prompt: "long task", sessionId: session.id }),
+        body: JSON.stringify({ agent: "codex", prompt: "long task", sessionId: session.id }),
       }).then((res) => res.text());
 
       const deadline = Date.now() + 2000;
@@ -755,7 +755,7 @@ test("POST /api/chat with explicit sessionId stores messages there", async () =>
       const chatResp = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "architect", prompt: "hello", sessionId: session.id }),
+        body: JSON.stringify({ agent: "codex", prompt: "hello", sessionId: session.id }),
       });
       await chatResp.text(); // drain SSE stream — ensures appendToSession ran
 
@@ -785,7 +785,7 @@ test("POST /api/chat rejects invalid projectDir", async () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          agent: "architect",
+          agent: "codex",
           prompt: "hello",
           projectDir: path.join(os.tmpdir(), "definitely-missing-project-dir"),
         }),
@@ -849,7 +849,7 @@ test("project endpoint stores projectDir per session and chat reuses the saved d
       response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "hello A", sessionId: sessionA.id }),
+        body: JSON.stringify({ agent: "opencode", prompt: "hello A", sessionId: sessionA.id }),
       });
       assert.equal(response.status, 200);
       await response.text();
@@ -857,7 +857,7 @@ test("project endpoint stores projectDir per session and chat reuses the saved d
       response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "hello B", sessionId: sessionB.id }),
+        body: JSON.stringify({ agent: "opencode", prompt: "hello B", sessionId: sessionB.id }),
       });
       assert.equal(response.status, 200);
       await response.text();
@@ -892,7 +892,7 @@ test("chat endpoint does not create a worktree by default", async () => {
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "@小谋 hello", projectDir: baseDir }),
+        body: JSON.stringify({ agent: "opencode", prompt: "@Gemini hello", projectDir: baseDir }),
       });
       await response.text();
 
@@ -942,7 +942,7 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "@小谋 hello", projectDir: baseDir, useWorktree: true }),
+        body: JSON.stringify({ agent: "opencode", prompt: "@Gemini hello", projectDir: baseDir, useWorktree: true }),
       });
       const text = await response.text();
 
@@ -997,7 +997,7 @@ test("chat endpoint reuses the session worktree on later turns", async () => {
         const response = await fetch(`${baseUrl}/api/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "planner", prompt, sessionId: session.id, projectDir: baseDir, useWorktree: true }),
+          body: JSON.stringify({ agent: "opencode", prompt, sessionId: session.id, projectDir: baseDir, useWorktree: true }),
         });
         assert.equal(response.status, 200);
         await response.text();
@@ -1045,7 +1045,7 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
       const first = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "first", sessionId: session.id, projectDir: baseDir, useWorktree: true }),
+        body: JSON.stringify({ agent: "opencode", prompt: "first", sessionId: session.id, projectDir: baseDir, useWorktree: true }),
       });
       assert.equal(first.status, 200);
       await first.text();
@@ -1053,7 +1053,7 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
       const second = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "second", sessionId: session.id, projectDir: baseDir, useWorktree: false }),
+        body: JSON.stringify({ agent: "opencode", prompt: "second", sessionId: session.id, projectDir: baseDir, useWorktree: false }),
       });
       assert.equal(second.status, 200);
       await second.text();
@@ -1123,7 +1123,7 @@ test("chat endpoint does not reuse a readonly provider session after switching t
     const sessionMapDir = path.join(sessionMapRoot, session.id);
     fs.mkdirSync(sessionMapDir, { recursive: true });
     fs.writeFileSync(path.join(sessionMapDir, "sessions.json"), JSON.stringify({
-      orchestrator: {
+      opencode: {
         sessionId: "readonly-session-1",
         workspaceKey: `base:${baseDir}`,
         updatedAt: "2026-07-02T00:00:00.000Z",
@@ -1134,7 +1134,7 @@ test("chat endpoint does not reuse a readonly provider session after switching t
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        agent: "orchestrator",
+        agent: "opencode",
         prompt: "switch to worktree",
         sessionId: session.id,
         projectDir: baseDir,
@@ -1209,7 +1209,7 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     const sessionMapDir = path.join(sessionMapRoot, session.id);
     fs.mkdirSync(sessionMapDir, { recursive: true });
     fs.writeFileSync(path.join(sessionMapDir, "sessions.json"), JSON.stringify({
-      orchestrator: {
+      opencode: {
         sessionId: "provider-base-1",
         workspaceKey: `base:${baseDir}`,
         updatedAt: "2026-07-02T00:00:00.000Z",
@@ -1243,7 +1243,7 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        agent: "orchestrator",
+        agent: "opencode",
         prompt: "worktree turn",
         sessionId: session.id,
         projectDir: baseDir,
@@ -1257,7 +1257,7 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        agent: "orchestrator",
+        agent: "opencode",
         prompt: "base turn again",
         sessionId: session.id,
         projectDir: baseDir,
@@ -1363,20 +1363,20 @@ test("worktree diff endpoint truncates oversized payloads", async () => {
 // ── A2A routing unit tests ────────────────────────────────────
 
 test("parseA2AMentions routes @label and @id consistently", () => {
-  assert.deepEqual(parseA2AMentions("@Codex 帮我 review", "planner"), ["architect"]);
-  assert.deepEqual(parseA2AMentions("@architect 帮我 review", "planner"), ["architect"]);
-  assert.deepEqual(parseA2AMentions("@小谋 继续实现", "architect"), ["planner"]);
-  assert.deepEqual(parseA2AMentions("@planner 继续实现", "architect"), ["planner"]);
+  assert.deepEqual(parseA2AMentions("@Codex 帮我 review", "opencode"), ["codex"]);
+  assert.deepEqual(parseA2AMentions("@codex 帮我 review", "opencode"), ["codex"]);
+  assert.deepEqual(parseA2AMentions("@Gemini 继续实现", "codex"), ["gemini"]);
+  assert.deepEqual(parseA2AMentions("@gemini 继续实现", "codex"), ["gemini"]);
 });
 
 test("parseA2AMentions filters self and code blocks", () => {
-  assert.deepEqual(parseA2AMentions("@planner 帮我", "planner"), []);
-  assert.deepEqual(parseA2AMentions("```\n@planner 帮我\n```\n@critic 看下", "architect"), ["critic"]);
+  assert.deepEqual(parseA2AMentions("@gemini 帮我", "gemini"), []);
+  assert.deepEqual(parseA2AMentions("```\n@gemini 帮我\n```\n@OpenCode 看下", "codex"), ["opencode"]);
 });
 
 test("parseA2AMentions caps at 2 targets", () => {
-  const text = "@Codex 方案\n@小谋 实现\n@万事通 测试\n@小评 review";
-  const mentions = parseA2AMentions(text, "architect");
+  const text = "@Codex 方案\n@Gemini 实现\n@万事通 测试\n@OpenCode review";
+  const mentions = parseA2AMentions(text, "codex");
   assert.equal(mentions.length, 2);
 });
 
@@ -1413,7 +1413,7 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       const first = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "architect", prompt: "long task", sessionId: session.id }),
+        body: JSON.stringify({ agent: "codex", prompt: "long task", sessionId: session.id }),
       });
       assert.equal(first.status, 200);
 
@@ -1421,12 +1421,12 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       const second = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "new task", sessionId: session.id }),
+        body: JSON.stringify({ agent: "opencode", prompt: "new task", sessionId: session.id }),
       });
       assert.equal(second.status, 200);
 
       const text = await second.text();
-      assert.match(text, /event: agent-start\ndata: \{"agent":"planner","invocationId":"[^"]+"\}/);
+      assert.match(text, /event: agent-start\ndata: \{"agent":"opencode","invocationId":"[^"]+"\}/);
       assert.equal(callCount, 2);
     }
   );
@@ -1456,7 +1456,7 @@ test("stale aborted chat cleanup does not unregister the replacement chat callba
       const firstPromise = fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "architect", prompt: "old task", sessionId: session.id }),
+        body: JSON.stringify({ agent: "codex", prompt: "old task", sessionId: session.id }),
       }).then((r) => r.text());
 
       const deadline1 = Date.now() + 2000;
@@ -1468,7 +1468,7 @@ test("stale aborted chat cleanup does not unregister the replacement chat callba
       const secondPromise = fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "replacement task", sessionId: session.id }),
+        body: JSON.stringify({ agent: "opencode", prompt: "replacement task", sessionId: session.id }),
       }).then((r) => r.text());
 
       const deadline2 = Date.now() + 2000;
@@ -1535,7 +1535,7 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   };
 
   const sessionId = "session-cb-1";
-  const worklist = ["architect"];
+  const worklist = ["codex"];
   const controller = new AbortController();
   const threadCtx = {
     res: fakeRes,
@@ -1548,32 +1548,32 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
 
   const invocationId = "invocation-cb-1";
   const callbackToken = "token-cb-1";
-  threadCtx.tokens.set(invocationId, { agentId: "architect", callbackToken });
+  threadCtx.tokens.set(invocationId, { agentId: "codex", callbackToken });
   callbacks.registerThread(sessionId, threadCtx);
 
   const appended = [];
   const appendFn = (file, sid, msg) => appended.push({ file, sid, msg });
 
-  const ok = callbacks.postMessage(sessionId, invocationId, "@小谋 请继续实现", {
+  const ok = callbacks.postMessage(sessionId, invocationId, "@Gemini 请继续实现", {
     appendToSession: appendFn,
   });
 
   assert.equal(ok, true);
   assert.equal(appended.length, 2);
   assert.equal(appended[0].msg.role, "assistant");
-  assert.equal(appended[0].msg.agent, "architect");
-  assert.equal(appended[0].msg.content, "@小谋 请继续实现");
+  assert.equal(appended[0].msg.agent, "codex");
+  assert.equal(appended[0].msg.content, "@Gemini 请继续实现");
   assert.equal(appended[1].msg.role, "system");
   assert.equal(appended[1].msg.kind, "a2a-route");
-  assert.equal(appended[1].msg.from, "architect");
-  assert.equal(appended[1].msg.to, "planner");
-  assert.match(appended[1].msg.content, /architect.*planner/);
-  assert.equal(worklist.includes("planner"), true);
+  assert.equal(appended[1].msg.from, "codex");
+  assert.equal(appended[1].msg.to, "gemini");
+  assert.match(appended[1].msg.content, /codex.*gemini/);
+  assert.equal(worklist.includes("gemini"), true);
   assert.equal(threadCtx.a2aCount, 1);
 
   const joined = sseEvents.join("");
-  assert.match(joined, /event: message\ndata: \{"agent":"architect","role":"assistant","text":"@小谋 请继续实现"\}/);
-  assert.match(joined, /event: a2a-route\ndata: \{"from":"architect","to":"planner"\}/);
+  assert.match(joined, /event: message\ndata: \{"agent":"codex","role":"assistant","text":"@Gemini 请继续实现"\}/);
+  assert.match(joined, /event: a2a-route\ndata: \{"from":"codex","to":"gemini"\}/);
 
   callbacks.unregisterThread(sessionId);
 });
@@ -1583,7 +1583,7 @@ test("callbacks.validateToken accepts only exact matches", () => {
   const invocationId = "invocation-vt-1";
   const callbackToken = "token-vt-1";
   const threadCtx = {
-    tokens: new Map([[invocationId, { agentId: "architect", callbackToken }]]),
+    tokens: new Map([[invocationId, { agentId: "codex", callbackToken }]]),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
@@ -1601,7 +1601,7 @@ test("createInvocation returns expiresAt and stamps expiresAt on the token", () 
   const sessionId = "session-ttl-1";
   const threadCtx = {
     res: { destroyed: false, writableEnded: false, write() { return true; } },
-    worklist: ["architect"],
+    worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
     sessionsFile: "/tmp/sessions.json",
@@ -1610,7 +1610,7 @@ test("createInvocation returns expiresAt and stamps expiresAt on the token", () 
   callbacks.registerThread(sessionId, threadCtx);
 
   const before = Date.now();
-  const { invocationId, callbackToken, expiresAt } = callbacks.createInvocation(sessionId, "architect");
+  const { invocationId, callbackToken, expiresAt } = callbacks.createInvocation(sessionId, "codex");
   const after = Date.now();
 
   assert.ok(typeof invocationId === "string" && invocationId.length > 0);
@@ -1630,7 +1630,7 @@ test("SHIFT_TOKEN_TTL_MS overrides the default TTL", () => {
   const sessionId = "session-ttl-2";
   const threadCtx = {
     res: { destroyed: false, writableEnded: false, write() { return true; } },
-    worklist: ["architect"],
+    worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
     sessionsFile: "/tmp/sessions.json",
@@ -1641,7 +1641,7 @@ test("SHIFT_TOKEN_TTL_MS overrides the default TTL", () => {
   const prev = process.env.SHIFT_TOKEN_TTL_MS;
   process.env.SHIFT_TOKEN_TTL_MS = "60000";
   try {
-    const { expiresAt } = callbacks.createInvocation(sessionId, "architect");
+    const { expiresAt } = callbacks.createInvocation(sessionId, "codex");
     const expected = Date.now() + 60000;
     assert.ok(Math.abs(expiresAt - expected) < 100, `expiresAt should be ~60s in the future, got diff ${Math.abs(expiresAt - expected)}ms`);
   } finally {
@@ -1657,12 +1657,12 @@ test("validateToken rejects expired tokens and lazily cleans them up", () => {
   const callbackToken = "token-exp-1";
   const threadCtx = {
     res: { destroyed: false, writableEnded: false, write() { return true; } },
-    worklist: ["architect"],
+    worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
     sessionsFile: "/tmp/sessions.json",
     tokens: new Map([[invocationId, {
-      agentId: "architect",
+      agentId: "codex",
       callbackToken,
       createdAt: Date.now() - 60_000,
       expiresAt: Date.now() - 1000, // already expired
@@ -1682,11 +1682,11 @@ test("validateToken accepts non-expiring legacy tokens (backward compat)", () =>
   const callbackToken = "token-leg-1";
   const threadCtx = {
     res: { destroyed: false, writableEnded: false, write() { return true; } },
-    worklist: ["architect"],
+    worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
     sessionsFile: "/tmp/sessions.json",
-    tokens: new Map([[invocationId, { agentId: "architect", callbackToken }]]), // no expiresAt
+    tokens: new Map([[invocationId, { agentId: "codex", callbackToken }]]), // no expiresAt
   };
   callbacks.registerThread(sessionId, threadCtx);
 
@@ -1703,7 +1703,7 @@ test("postMessage rejects cross-thread callbacks (Thread Affinity guard)", () =>
     write(chunk) { sseEvents.push(chunk); return true; },
   };
   const sessionId = "session-guard-1";
-  const worklist = ["architect"];
+  const worklist = ["codex"];
   const controller = new AbortController();
   const threadCtx = {
     sessionId,
@@ -1739,7 +1739,7 @@ test("postMessage allows callbacks for the bound thread (stamped by registerThre
     write(chunk) { sseEvents.push(chunk); return true; },
   };
   const sessionId = "session-guard-2";
-  const worklist = ["architect"];
+  const worklist = ["codex"];
   const controller = new AbortController();
   const threadCtx = {
     sessionId,
@@ -1790,8 +1790,8 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
         spawnRunner(_command, _args) {
           const child = createMockChild();
           process.nextTick(() => {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-transcript", text: "partial " }) + "\n");
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-transcript", text: "answer" }) + "\n");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-transcript", text: "partial " }) + "\n");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-transcript", text: "answer" }) + "\n");
             child.emit("close", 0, null);
           });
           return child;
@@ -1801,7 +1801,7 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
         const response = await fetch(`${baseUrl}/api/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "planner", prompt: "hello transcript" }),
+          body: JSON.stringify({ agent: "opencode", prompt: "hello transcript" }),
         });
         const text = await response.text();
         const sessionMatch = text.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
@@ -1843,7 +1843,7 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
     const userPromptEvents = await transcript.readInvocation(capturedSessionId, "_user_prompt");
     assert.equal(userPromptEvents.length, 1);
     assert.equal(userPromptEvents[0].kind, "user-prompt");
-      assert.equal(userPromptEvents[0].payload.agent, "planner");
+      assert.equal(userPromptEvents[0].payload.agent, "opencode");
 
     // Search should find the user prompt
     const hits = await transcript.searchTranscript(capturedSessionId, "transcript");
@@ -1872,7 +1872,7 @@ test("chat endpoint emits context-warning when fillRatio crosses warn threshold"
             // 25 chars output → ratio 25/80 = 0.31 (under warn)
             // 60 chars output → ratio 60/80 = 0.75 (under warn, since warn is 0.85)
             // 80 chars output → ratio 80/80 = 1.0 (above action 0.90, triggers seal)
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "inv-warn", text: "x".repeat(80) }) + "\n");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-warn", text: "x".repeat(80) }) + "\n");
             child.emit("close", 0, null);
           });
           return child;
@@ -1882,7 +1882,7 @@ test("chat endpoint emits context-warning when fillRatio crosses warn threshold"
         const response = await fetch(`${baseUrl}/api/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "planner", prompt: "hi" }),
+          body: JSON.stringify({ agent: "opencode", prompt: "hi" }),
         });
         const text = await response.text();
         // We expect context-warning (or sealed, depending on ratio) because
@@ -1909,8 +1909,8 @@ test("chat endpoint terminates the chain with sealed event when action threshold
           const child = createMockChild();
           process.nextTick(() => {
             // 80 chars × 4 chars/token / 20 tokens capacity = ratio 4.0, well past 0.90
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "inv-seal", text: "x".repeat(80) }) + "\n");
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "inv-seal", text: "\n@sage please continue" }) + "\n");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "inv-seal", text: "x".repeat(80) }) + "\n");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "inv-seal", text: "\n@sage please continue" }) + "\n");
             child.emit("close", 0, null);
           });
           return child;
@@ -1920,12 +1920,12 @@ test("chat endpoint terminates the chain with sealed event when action threshold
         const response = await fetch(`${baseUrl}/api/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "architect", prompt: "start" }),
+          body: JSON.stringify({ agent: "codex", prompt: "start" }),
         });
         const text = await response.text();
-        // The sealed event must fire for the first agent (architect), not after
+        // The sealed event must fire for the first agent (codex), not after
         // A2A routing to sage.
-        assert.match(text, /event: sealed\ndata: \{"agent":"architect".*"reason":"context overflow"\}/);
+        assert.match(text, /event: sealed\ndata: \{"agent":"codex".*"reason":"context overflow"\}/);
       }
     );
   } finally {
@@ -1976,7 +1976,7 @@ async function withActiveChat(fn) {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            agent: "planner",
+            agent: "opencode",
             prompt: "long running task about redis clustering",
             sessionId: knownSessionId,
           }),
@@ -2091,7 +2091,7 @@ test("/api/callbacks/list-invocations returns agent + state metadata", async () 
     // The active invocation should appear (in-flight, no end event yet)
     const active = body.invocations.find((i) => i.invocationId === captured.env.SHIFT_INVOCATION_ID);
     assert.ok(active, `active invocation should be listed, got: ${JSON.stringify(body.invocations)}`);
-    assert.equal(active.agent, "planner");
+    assert.equal(active.agent, "opencode");
     assert.ok(active.startedAt);
     assert.equal(active.endedAt, null);
     assert.equal(active.state, null);
@@ -2671,7 +2671,7 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            agent: "planner",
+            agent: "gemini",
             prompt: "hello world",
             sessionId: "bootstrap-test-session",
           }),
@@ -2682,13 +2682,13 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
 
     assert.ok(capturedPrompt, "spawnRunner should have been called");
     // Agent persona identity (from identities/*.md) comes first
-    assert.match(capturedPrompt, /<!-- Agent Identity: planner \/ 小谋 -->/);
+    assert.match(capturedPrompt, /<!-- Agent Identity: gemini \/ Gemini -->/);
     assert.match(capturedPrompt, /<!-- \/Agent Identity -->/);
     // Session coords section
     assert.match(capturedPrompt, /<!-- Session Identity -->/);
     assert.match(capturedPrompt, /Thread: bootstrap-test-session/);
     assert.match(capturedPrompt, /Session: bootstrap-test-session/);
-    assert.match(capturedPrompt, /Agent: 小谋/);
+    assert.match(capturedPrompt, /Agent: Gemini/);
     // Digest section (empty for new session with fresh dir)
     assert.match(capturedPrompt, /<!-- Digest -->/);
     assert.match(capturedPrompt, /第一个 invocation/);
@@ -2719,10 +2719,10 @@ test("A2A-routed agents get persona identity + light session header, not full bo
         prompts.push(args[args.length - 1]);
         const child = createMockChild();
         process.nextTick(() => {
-          if (args[2] === "architect") {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "architect", invocationId: "bootstrap-a2a-1", text: "@小谋\nhandoff please\narchitect result" }) + "\n");
+          if (args[2] === "codex") {
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "bootstrap-a2a-1", text: "@Gemini\nhandoff please\ncodex result" }) + "\n");
           } else {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "bootstrap-a2a-2", text: "planner received" }) + "\n");
+            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "gemini", invocationId: "bootstrap-a2a-2", text: "gemini received" }) + "\n");
           }
           child.emit("close", 0, null);
         });
@@ -2734,7 +2734,7 @@ test("A2A-routed agents get persona identity + light session header, not full bo
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          agent: "architect",
+          agent: "codex",
           prompt: "start",
           sessionId: "bootstrap-a2a-test",
         }),
@@ -2745,29 +2745,29 @@ test("A2A-routed agents get persona identity + light session header, not full bo
 
   assert.equal(prompts.length, 2);
   // First agent: full bootstrap (session + digest + recall) + its persona
-  assert.match(prompts[0], /<!-- Agent Identity: architect \/ Codex -->/);
+  assert.match(prompts[0], /<!-- Agent Identity: codex \/ Codex -->/);
   assert.match(prompts[0], /<!-- Session Identity -->/);
   assert.match(prompts[0], /<!-- 回忆铁律/);
   assert.match(prompts[0], /<!-- Digest/);
   // A2A agent: own persona + light session header + handoff, but no full digest/recall pack
-  assert.match(prompts[1], /<!-- Agent Identity: planner \/ 小谋 -->/);
+  assert.match(prompts[1], /<!-- Agent Identity: gemini \/ Gemini -->/);
   assert.match(prompts[1], /<!-- Session Identity -->/);
-  assert.match(prompts[1], /Agent: 小谋/);
+  assert.match(prompts[1], /Agent: Gemini/);
   assert.doesNotMatch(prompts[1], /<!-- 回忆铁律/);
   assert.doesNotMatch(prompts[1], /<!-- Digest/);
   assert.match(prompts[1], /任务交接/);
-  assert.match(prompts[1], /architect result/);
+  assert.match(prompts[1], /codex result/);
   // No ```handoff block → soft degraded path still routes with warning
   assert.match(prompts[1], /未提供标准/);
 });
 
 test("A2A-routed agents receive structured handoff fields when present", async () => {
   const prompts = [];
-  const architectOut = [
-    "@小谋",
+  const codexOut = [
+    "@Gemini",
     "",
     "```handoff",
-    "to: planner",
+    "to: gemini",
     "goal: 拆解登录方案",
     "what: 用户要登录功能",
     "why: 需要无状态鉴权支持多实例",
@@ -2777,7 +2777,7 @@ test("A2A-routed agents receive structured handoff fields when present", async (
     "  - docs/auth.md",
     "```",
     "",
-    "architect narrative",
+    "codex narrative",
   ].join("\n");
 
   await withServer(
@@ -2787,20 +2787,20 @@ test("A2A-routed agents receive structured handoff fields when present", async (
         prompts.push(args[args.length - 1]);
         const child = createMockChild();
         process.nextTick(() => {
-          if (args[2] === "architect") {
+          if (args[2] === "codex") {
             child.stdout.write(
               JSON.stringify({
                 type: "text.delta",
-                agent: "architect",
+                agent: "codex",
                 invocationId: "sh-1",
-                text: architectOut,
+                text: codexOut,
               }) + "\n"
             );
           } else {
             child.stdout.write(
               JSON.stringify({
                 type: "text.delta",
-                agent: "planner",
+                agent: "opencode",
                 invocationId: "sh-2",
                 text: "planned",
               }) + "\n"
@@ -2816,7 +2816,7 @@ test("A2A-routed agents receive structured handoff fields when present", async (
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          agent: "architect",
+          agent: "codex",
           prompt: "做登录",
           sessionId: "structured-handoff-test",
         }),
@@ -2863,7 +2863,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
         await (await fetch(`${baseUrl}/api/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "planner", prompt: "first", sessionId }),
+          body: JSON.stringify({ agent: "opencode", prompt: "first", sessionId }),
         })).text();
       }
     );
@@ -2888,7 +2888,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
         await (await fetch(`${baseUrl}/api/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "orchestrator", prompt: "second", sessionId }),
+          body: JSON.stringify({ agent: "opencode", prompt: "second", sessionId }),
         })).text();
       }
     );
@@ -2923,7 +2923,7 @@ test("chat records invocation events and recall routes expose them (no token = f
       spawnRunner() {
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "planner", invocationId: "recall-1", text: "hello recall" }) + "\n");
+          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "recall-1", text: "hello recall" }) + "\n");
           child.stderr.write("a stderr line\n");
           child.emit("close", 0, null);
         });
@@ -2934,13 +2934,13 @@ test("chat records invocation events and recall routes expose them (no token = f
       const chat = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "planner", prompt: "remember this" }),
+        body: JSON.stringify({ agent: "opencode", prompt: "remember this" }),
       });
       const chatText = await chat.text();
       const sidMatch = chatText.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
       assert.ok(sidMatch, "expected session event");
       const sid = sidMatch[1];
-      const invMatch = chatText.match(/event: agent-start\ndata: \{"agent":"planner","invocationId":"([^"]+)"\}/);
+      const invMatch = chatText.match(/event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"\}/);
       assert.ok(invMatch, "expected agent-start with invocationId");
       const invId = invMatch[1];
 
@@ -2949,7 +2949,7 @@ test("chat records invocation events and recall routes expose them (no token = f
       assert.equal(listRes.status, 200);
       assert.equal(list.invocations.length, 1);
       assert.equal(list.invocations[0].invocationId, invId);
-      assert.equal(list.invocations[0].agent, "planner");
+      assert.equal(list.invocations[0].agent, "opencode");
       assert.equal(list.invocations[0].state, "completed");
       assert.ok(list.invocations[0].eventCount >= 3, "should have start + text.delta + stderr + end events");
 
@@ -3021,7 +3021,7 @@ test("invocation event helpers are pure and session-scoped", () => {
   map.set("inv-1", {
     invocationId: "inv-1",
     sessionId: "s-1",
-    agent: "planner",
+    agent: "opencode",
     startedAt: "2026-06-30T10:00:00Z",
     endedAt: null,
     state: "active",

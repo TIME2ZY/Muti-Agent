@@ -192,7 +192,7 @@
 
       const sid = state.currentSessionId;
       if (!state.sessions) state.sessions = {};
-      if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "architect" };
+      if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "codex" };
       state.sessions[sid].lastPrompt = prompt;
       state.sessions[sid].lastAgent = targetAgent.id;
       state.lastPrompt = prompt;

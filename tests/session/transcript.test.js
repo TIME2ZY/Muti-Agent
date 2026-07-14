@@ -19,7 +19,7 @@ function withTempDir(fn) {
 }
 
 test("appendEvent then readInvocation returns the same events", withTempDir(async () => {
-  transcript.appendEvent("s1", "i1", "invocation-start", { agent: "architect" });
+  transcript.appendEvent("s1", "i1", "invocation-start", { agent: "codex" });
   transcript.appendEvent("s1", "i1", "stdout", { text: "hello" });
   transcript.appendEvent("s1", "i1", "stdout", { text: " world" });
   transcript.appendEvent("s1", "i1", "invocation-end", { code: 0, signal: null });
@@ -28,7 +28,7 @@ test("appendEvent then readInvocation returns the same events", withTempDir(asyn
   const events = await transcript.readInvocation("s1", "i1");
   assert.equal(events.length, 4);
   assert.equal(events[0].kind, "invocation-start");
-  assert.equal(events[0].payload.agent, "architect");
+  assert.equal(events[0].payload.agent, "codex");
   assert.equal(events[1].payload.text, "hello");
   assert.equal(events[2].payload.text, " world");
   assert.equal(events[3].kind, "invocation-end");
@@ -110,7 +110,7 @@ test("searchTranscript returns [] for empty query or unknown session", withTempD
 }));
 
 test("getInvocationStats aggregates event counts and kinds", withTempDir(async () => {
-  transcript.appendEvent("s1", "i1", "invocation-start", { agent: "architect" });
+  transcript.appendEvent("s1", "i1", "invocation-start", { agent: "codex" });
   transcript.appendEvent("s1", "i1", "stdout", { text: "a" });
   transcript.appendEvent("s1", "i1", "stdout", { text: "b" });
   transcript.appendEvent("s1", "i1", "invocation-end", { code: 0 });
@@ -260,11 +260,11 @@ test("readInvocationMeta returns null for unknown invocation", withTempDir(async
 }));
 
 test("readInvocationMeta returns state=null for in-flight invocation (no end event)", withTempDir(async () => {
-  transcript.appendEvent("s1", "i1", "invocation-start", { agent: "architect" });
+  transcript.appendEvent("s1", "i1", "invocation-start", { agent: "codex" });
   await transcript.flush();
 
   const meta = await transcript.readInvocationMeta("s1", "i1");
-  assert.equal(meta.agent, "architect");
+  assert.equal(meta.agent, "codex");
   assert.ok(meta.startedAt);
   assert.equal(meta.endedAt, null);
   assert.equal(meta.state, null);
@@ -272,7 +272,7 @@ test("readInvocationMeta returns state=null for in-flight invocation (no end eve
 }));
 
 test("listInvocationsWithMeta returns invocations sorted newest first", withTempDir(async () => {
-  transcript.appendEvent("s1", "i1", "invocation-start", { agent: "architect" });
+  transcript.appendEvent("s1", "i1", "invocation-start", { agent: "codex" });
   await new Promise((r) => setTimeout(r, 5));
   transcript.appendEvent("s1", "i1", "invocation-end", { code: 0, sealerState: "active" });
   await new Promise((r) => setTimeout(r, 5));
@@ -285,7 +285,7 @@ test("listInvocationsWithMeta returns invocations sorted newest first", withTemp
   assert.equal(list[0].invocationId, "i2");
   assert.equal(list[0].agent, "sage");
   assert.equal(list[1].invocationId, "i1");
-  assert.equal(list[1].agent, "architect");
+  assert.equal(list[1].agent, "codex");
   assert.equal(list[1].state, "completed");
 }));
 

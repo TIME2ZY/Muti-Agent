@@ -107,27 +107,23 @@ http://127.0.0.1:8787
 
 ## Agent 角色
 
-定义见 `src/agents/catalog.js` 中的 `AGENTS`：
+定义见 `src/agents/catalog.js` 中的 `AGENTS`（id 与界面名一致，共四席）：
 
-| ID             | 界面标签 | Provider              | 默认模型            | 角色说明                                                 |
-| -------------- | -------- | --------------------- | ------------------- | -------------------------------------------------------- |
-| `architect`    | Codex    | codex                 | gpt-5.6-sol         | 默认主控，规划与编排（`reasoning-effort medium`）        |
-| `orchestrator` | 万事通   | opencode              | deepseek-v4-pro     | 通才兜底、跨领域杂活                                     |
-| `planner`      | 小谋     | opencode              | mimo-v2.5-pro       | 任务拆解、方案与决策                                     |
-| `coder`        | 小码     | opencode              | minimax-m3          | 服务端与通用实现/重构                                    |
-| `grok`         | Grok     | grok (Grok Build CLI) | grok-4.5            | 高难度编码与硬推理（本地 CLI + `reasoning-effort high`） |
-| `gemini`       | Gemini   | antigravity (`agy`)   | gemini-3.5-flash    | 灵光一闪、新鲜想法与头脑风暴（Flash High）               |
-| `frontend`     | 小视     | opencode              | glm-5.2             | UI、样式、交互与 a11y                                    |
-| `critic`       | 小评     | opencode              | qwen3.7-plus        | 代码评审与质量把关                                       |
+| ID         | 名字     | Provider              | 默认模型         | 职责                                               |
+| ---------- | -------- | --------------------- | ---------------- | -------------------------------------------------- |
+| `codex`    | Codex    | codex                 | gpt-5.6-sol      | 推理与讨论；可与 Gemini 交叉验证                   |
+| `gemini`   | Gemini   | antigravity (`agy`)   | gemini-3.5-flash | 想法与头脑风暴                                     |
+| `grok`     | Grok     | grok (Grok Build CLI) | grok-4.5         | 写代码、实现功能                                   |
+| `opencode` | OpenCode | opencode              | qwen3.7-plus     | 代码 Review                                        |
 
-> **Grok 接入（与 Codex/OpenCode 同模式）**：安装 [Grok Build CLI](https://x.ai/cli)，`grok login` 或设置 `XAI_API_KEY`。服务端 spawn：`grok -p ... --output-format streaming-json -m grok-4.5 --reasoning-effort high --always-approve`。  
-> **代理（仅 Grok）**：若直连 `api.x.ai` 超时，启动前设 `GROK_PROXY=http://127.0.0.1:7892`（只注入 Grok 子进程，不影响 OpenCode/Codex）。  
-> **Gemini / Antigravity**：安装 [Antigravity CLI](https://antigravity.google/)（本地命令 `agy`）。服务端 spawn：`agy -p "..." --model "Gemini 3.5 Flash (High)" --dangerously-skip-permissions --mode plan`。可用 `AGY_PATH` 覆盖可执行文件路径。
+> **Grok**：安装 [Grok Build CLI](https://x.ai/cli)，`grok login` 或设置 `XAI_API_KEY`。spawn：`grok -p ... --output-format streaming-json -m grok-4.5 --reasoning-effort high --always-approve`。直连超时可设 `GROK_PROXY`（仅注入 Grok 子进程）。  
+> **Gemini / Antigravity**：安装 [Antigravity CLI](https://antigravity.google/)（`agy`）。spawn：`agy -p "..." --model "Gemini 3.5 Flash (High)" --dangerously-skip-permissions --mode plan`。可用 `AGY_PATH` 覆盖路径。  
+> **OpenCode**：本机 `opencode` CLI + `qwen3.7-plus`。
 
 使用方式：
 
-- 右侧 **Agents** 面板切换默认 Agent
-- 输入框 `@标签` 或 `@id` 可单次覆盖
+- 右侧 **Agents** 面板切换默认 Agent（默认 **Codex**）
+- 输入框 `@Codex` / `@Gemini` / `@Grok` / `@OpenCode` 可单次覆盖
 - Agent 输出行首 `@其他Agent` 可触发 A2A 接力（深度由 `MAX_A2A_DEPTH` 限制）
 
 ## 工作区与只读模式

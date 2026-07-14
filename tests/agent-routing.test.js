@@ -4,62 +4,63 @@ const test = require("node:test");
 const routing = require("../public/agent-routing.js");
 
 const agents = [
-  { id: "architect", label: "Architect", mention: "Architect" },
-  { id: "planner", label: "Planner", mention: "Planner" },
-  { id: "coder", label: "Coder", mention: "Coder" },
+  { id: "codex", label: "Codex", mention: "Codex" },
+  { id: "gemini", label: "Gemini", mention: "Gemini" },
+  { id: "grok", label: "Grok", mention: "Grok" },
+  { id: "opencode", label: "OpenCode", mention: "OpenCode" },
 ];
 
 test("resolvePromptAgent prefers a leading @mention", () => {
   const result = routing.resolvePromptAgent({
-    prompt: "@Planner please plan",
+    prompt: "@Gemini please brainstorm",
     agents,
-    selectedAgent: "architect",
-    lastAgent: "coder",
+    selectedAgent: "codex",
+    lastAgent: "grok",
   });
   assert.equal(result.source, "mention");
-  assert.equal(result.agent.id, "planner");
+  assert.equal(result.agent.id, "gemini");
 });
 
 test("resolvePromptAgent falls back to session lastAgent without @", () => {
   const result = routing.resolvePromptAgent({
     prompt: "continue the work",
     agents,
-    selectedAgent: "architect",
-    lastAgent: "coder",
+    selectedAgent: "codex",
+    lastAgent: "grok",
   });
   assert.equal(result.source, "session");
-  assert.equal(result.agent.id, "coder");
+  assert.equal(result.agent.id, "grok");
 });
 
 test("resolvePromptAgent uses selectedAgent when session has no lastAgent", () => {
   const result = routing.resolvePromptAgent({
     prompt: "hello",
     agents,
-    selectedAgent: "planner",
+    selectedAgent: "gemini",
     lastAgent: "",
   });
   assert.equal(result.source, "selected");
-  assert.equal(result.agent.id, "planner");
+  assert.equal(result.agent.id, "gemini");
 });
 
-test("resolvePromptAgent defaults to architect when nothing else matches", () => {
+test("resolvePromptAgent defaults to codex when nothing else matches", () => {
   const result = routing.resolvePromptAgent({
     prompt: "hello",
     agents,
     selectedAgent: "missing",
     lastAgent: "also-missing",
-    defaultAgent: "architect",
+    defaultAgent: "codex",
   });
   assert.equal(result.source, "default");
-  assert.equal(result.agent.id, "architect");
+  assert.equal(result.agent.id, "codex");
 });
 
 test("resolvePromptAgent returns none when the agent list is empty", () => {
   const result = routing.resolvePromptAgent({
     prompt: "hello",
     agents: [],
-    selectedAgent: "architect",
-    lastAgent: "architect",
+    selectedAgent: "codex",
+    lastAgent: "codex",
   });
   assert.equal(result.source, "none");
   assert.equal(result.agent, null);
@@ -67,7 +68,7 @@ test("resolvePromptAgent returns none when the agent list is empty", () => {
 
 test("findExplicitLeadingAgent ignores mid-prompt mentions", () => {
   assert.equal(
-    routing.findExplicitLeadingAgent("please ask @Planner later", agents),
+    routing.findExplicitLeadingAgent("please ask @Gemini later", agents),
     null
   );
 });

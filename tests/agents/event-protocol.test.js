@@ -13,7 +13,7 @@ const { createProviderRuntime } = require("../../src/agents/providers");
 
 test("makeEvent stamps protocolVersion", () => {
   const event = makeEvent("text.delta", {
-    agent: "architect",
+    agent: "codex",
     invocationId: "inv-1",
     text: "hi",
   });
@@ -24,7 +24,7 @@ test("makeEvent stamps protocolVersion", () => {
 test("normalize coerces loose field types before validation", () => {
   const event = normalizeCanonicalEvent({
     type: "text.delta",
-    agent: "architect",
+    agent: "codex",
     invocationId: "inv-1",
     text: 42,
   });
@@ -36,7 +36,7 @@ test("normalize coerces loose field types before validation", () => {
 test("validateCanonicalEvent rejects wrong types when not coerced", () => {
   const errors = validateCanonicalEvent({
     type: "text.delta",
-    agent: "architect",
+    agent: "codex",
     invocationId: "inv-1",
     text: 42,
   });
@@ -72,7 +72,7 @@ test("runtime envelope drops content after terminal and stamps protocolVersion",
     providerId: "codex",
     model: "gpt-5.6-sol",
   });
-  const ctx = { agent: "architect", invocationId: "inv-proto" };
+  const ctx = { agent: "codex", invocationId: "inv-proto" };
 
   const first = runtime.transform(
     { type: "item.completed", item: { type: "agent_message", text: "hello" } },
@@ -102,7 +102,7 @@ test("shared lifecycle across recreated runtimes suppresses second run.started",
   const { createRunLifecycle } = require("../../src/agents/event-protocol");
   const lifecycle = createRunLifecycle();
   const config = { providerId: "codex", model: "gpt-5.6-sol" };
-  const ctx = { agent: "architect", invocationId: "inv-retry" };
+  const ctx = { agent: "codex", invocationId: "inv-retry" };
 
   const attempt1 = createProviderRuntime(config, { lifecycle });
   const first = attempt1.transform(

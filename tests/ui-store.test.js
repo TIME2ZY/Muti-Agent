@@ -7,7 +7,7 @@ test("ui store patches state and notifies subscribers", () => {
   const bus = createEventBus();
   const store = createUiStore({
     bus,
-    initial: { selectedAgent: "architect", count: 0 },
+    initial: { selectedAgent: "codex", count: 0 },
   });
   const events = [];
   store.subscribe((e) => events.push(e.partial));

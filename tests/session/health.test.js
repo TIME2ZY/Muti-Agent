@@ -4,15 +4,15 @@ const contextHealth = require("../../src/session/health");
 const { AGENTS } = require("../../src/agents/invoke-cli");
 
 test("makeTracker with default capacity uses 200k tokens", () => {
-  const tracker = contextHealth.makeTracker("architect");
-  assert.equal(tracker.agentId, "architect");
+  const tracker = contextHealth.makeTracker("codex");
+  assert.equal(tracker.agentId, "codex");
   assert.equal(tracker.capacityTokens, 200_000);
   assert.equal(tracker.getUsedChars(), 0);
   assert.equal(tracker.getFillRatio(), 0);
 });
 
 test("makeTracker with explicit capacity overrides default", () => {
-  const tracker = contextHealth.makeTracker("architect", { capacityTokens: 100_000 });
+  const tracker = contextHealth.makeTracker("codex", { capacityTokens: 100_000 });
   assert.equal(tracker.capacityTokens, 100_000);
 });
 
@@ -22,14 +22,14 @@ test("makeTracker for unknown agent falls back to default", () => {
 });
 
 test("addInput / addOutput accumulate chars", () => {
-  const tracker = contextHealth.makeTracker("architect");
+  const tracker = contextHealth.makeTracker("codex");
   tracker.addInput(1000);
   tracker.addOutput(500);
   assert.equal(tracker.getUsedChars(), 1500);
 });
 
 test("makeTracker resumes persisted window usage", () => {
-  const tracker = contextHealth.makeTracker("architect", {
+  const tracker = contextHealth.makeTracker("codex", {
     capacityTokens: 1000,
     inputChars: 1200,
     outputChars: 800,
@@ -41,7 +41,7 @@ test("makeTracker resumes persisted window usage", () => {
 });
 
 test("addInput / addOutput ignore non-positive values", () => {
-  const tracker = contextHealth.makeTracker("architect");
+  const tracker = contextHealth.makeTracker("codex");
   tracker.addInput(0);
   tracker.addInput(-5);
   tracker.addInput("not a number");
@@ -50,7 +50,7 @@ test("addInput / addOutput ignore non-positive values", () => {
 });
 
 test("fillRatio is (input+output) / (capacity * charsPerToken)", () => {
-  const tracker = contextHealth.makeTracker("architect", { capacityTokens: 1000 });
+  const tracker = contextHealth.makeTracker("codex", { capacityTokens: 1000 });
   // 4000 chars total = 1000 tokens = fillRatio 1.0
   tracker.addInput(2000);
   tracker.addOutput(2000);
@@ -58,7 +58,7 @@ test("fillRatio is (input+output) / (capacity * charsPerToken)", () => {
 });
 
 test("fillRatio grows monotonically as input/output accumulate", () => {
-  const tracker = contextHealth.makeTracker("architect", { capacityTokens: 1000 });
+  const tracker = contextHealth.makeTracker("codex", { capacityTokens: 1000 });
   const r0 = tracker.getFillRatio();
   tracker.addInput(1000);
   const r1 = tracker.getFillRatio();
@@ -69,11 +69,11 @@ test("fillRatio grows monotonically as input/output accumulate", () => {
 
 test("snapshot returns a consistent view of all counters", () => {
   // capacity 2000 tokens × 4 chars/token = 8000 char capacity
-  const tracker = contextHealth.makeTracker("architect", { capacityTokens: 2000 });
+  const tracker = contextHealth.makeTracker("codex", { capacityTokens: 2000 });
   tracker.addInput(4000);
   tracker.addOutput(4000);
   const snap = tracker.snapshot();
-  assert.equal(snap.agentId, "architect");
+  assert.equal(snap.agentId, "codex");
   assert.equal(snap.capacityTokens, 2000);
   assert.equal(snap.inputChars, 4000);
   assert.equal(snap.outputChars, 4000);
@@ -85,13 +85,13 @@ test("snapshot returns a consistent view of all counters", () => {
 
 test("getAgentCapacity honors per-agent capacityTokens override", () => {
   // Mutate AGENTS for this test and restore after.
-  const original = AGENTS.architect.capacityTokens;
-  AGENTS.architect.capacityTokens = 50_000;
+  const original = AGENTS.codex.capacityTokens;
+  AGENTS.codex.capacityTokens = 50_000;
   try {
-    const tracker = contextHealth.makeTracker("architect");
+    const tracker = contextHealth.makeTracker("codex");
     assert.equal(tracker.capacityTokens, 50_000);
   } finally {
-    if (original === undefined) delete AGENTS.architect.capacityTokens;
-    else AGENTS.architect.capacityTokens = original;
+    if (original === undefined) delete AGENTS.codex.capacityTokens;
+    else AGENTS.codex.capacityTokens = original;
   }
 });

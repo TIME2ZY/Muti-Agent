@@ -8,7 +8,7 @@ function makeState(overrides = {}) {
   const runtimeStore = createRuntimeStore();
   return {
     currentSessionId: null,
-    selectedAgent: "architect",
+    selectedAgent: "codex",
     rightPanelTab: "workspace",
     worktreeStatus: { branch: "x" },
     workspace: { old: true },
@@ -24,7 +24,7 @@ function baseDeps(state, extra = {}) {
     runtimeStore: state.runtimeStore,
     sessionApi: {
       listSessions: async () => [{ id: "s1" }],
-      readMessages: async () => [{ role: "user", agent: "architect", content: "hi" }],
+      readMessages: async () => [{ role: "user", agent: "codex", content: "hi" }],
       createSession: async () => ({ id: "s2" }),
       deleteSession: async () => ({ ok: true }),
     },
@@ -56,7 +56,7 @@ test("loadSessions auto-switches to the first session when none is active", asyn
   const deps = baseDeps(state, {
     sessionApi: {
       listSessions: async () => [{ id: "s1" }],
-      readMessages: async () => [{ role: "user", agent: "architect", content: "hi" }],
+      readMessages: async () => [{ role: "user", agent: "codex", content: "hi" }],
     },
     createMessage(msg) { seenMessages.push(msg); },
   });
@@ -67,7 +67,7 @@ test("loadSessions auto-switches to the first session when none is active", asyn
   assert.equal(state.currentSessionId, "s1");
   assert.deepEqual(seenMessages, [{
     role: "user",
-    agent: "architect",
+    agent: "codex",
     content: "hi",
     variant: "",
     invocationId: null,
@@ -117,7 +117,7 @@ test("switchSession does not abort a running previous session", async () => {
   state.currentSessionId = "s1";
   let aborted = 0;
   state.runtimeStore.beginRun("s1", { abort() { aborted += 1; } });
-  state.runtimeStore.get("s1").liveMessages.set("architect", {
+  state.runtimeStore.get("s1").liveMessages.set("codex", {
     rawText: "partial",
     wrapper: { id: "live-node" },
   });
@@ -126,14 +126,14 @@ test("switchSession does not abort a running previous session", async () => {
   const deps = baseDeps(state, {
     sessionApi: {
       listSessions: async () => [{ id: "s1" }, { id: "s2" }],
-      readMessages: async () => [{ role: "assistant", agent: "architect", content: "history" }],
+      readMessages: async () => [{ role: "assistant", agent: "codex", content: "history" }],
     },
     remountLiveMessages(id) { remounted.push(id); },
   });
 
   // Pretend s2 is also running so remount path is exercised when we switch to it.
   state.runtimeStore.beginRun("s2", { abort() {} });
-  state.runtimeStore.get("s2").liveMessages.set("planner", {
+  state.runtimeStore.get("s2").liveMessages.set("opencode", {
     rawText: "bg",
     wrapper: { id: "bg-node" },
   });
@@ -152,10 +152,10 @@ test("switchSession replays buffered a2a system notices not already in history",
   state.currentSessionId = "s1";
   state.runtimeStore.beginRun("s2", { abort() {} });
   state.runtimeStore.get("s2").systemNotices = [
-    { role: "system", agent: "system", content: "🔄 小筑 → 小谋", kind: "a2a-route" },
+    { role: "system", agent: "system", content: "🔄 小筑 → Gemini", kind: "a2a-route" },
     { role: "system", agent: "system", content: "already in history", kind: "a2a-route" },
   ];
-  state.runtimeStore.get("s2").liveMessages.set("planner", {
+  state.runtimeStore.get("s2").liveMessages.set("opencode", {
     rawText: "",
     detached: true,
   });
@@ -166,7 +166,7 @@ test("switchSession replays buffered a2a system notices not already in history",
     sessionApi: {
       listSessions: async () => [{ id: "s1" }, { id: "s2" }],
       readMessages: async () => [
-        { role: "user", agent: "architect", content: "go" },
+        { role: "user", agent: "codex", content: "go" },
         { role: "system", agent: "system", content: "already in history" },
       ],
     },
@@ -182,7 +182,7 @@ test("switchSession replays buffered a2a system notices not already in history",
   // history system + one replayed notice (duplicate skipped)
   assert.equal(systemCreated.length, 2);
   assert.equal(systemCreated[0].content, "already in history");
-  assert.equal(systemCreated[1].content, "🔄 小筑 → 小谋");
+  assert.equal(systemCreated[1].content, "🔄 小筑 → Gemini");
 });
 
 test("switchSession ignores stale async loads from an earlier session switch", async () => {
@@ -197,7 +197,7 @@ test("switchSession ignores stale async loads from an earlier session switch", a
       listSessions: async () => [{ id: "s1" }, { id: "s2" }],
       readMessages: async (id) => {
         if (id === "s1") return firstMessages;
-        return [{ role: "assistant", agent: "architect", content: "new" }];
+        return [{ role: "assistant", agent: "codex", content: "new" }];
       },
     },
     createMessage(msg) { seenMessages.push([state.currentSessionId, msg.content]); },
@@ -208,7 +208,7 @@ test("switchSession ignores stale async loads from an earlier session switch", a
   const secondSwitch = controller.switchSession("s2");
 
   await secondSwitch;
-  resolveFirstMessages([{ role: "assistant", agent: "architect", content: "old" }]);
+  resolveFirstMessages([{ role: "assistant", agent: "codex", content: "old" }]);
   await firstSwitch;
 
   assert.equal(state.currentSessionId, "s2");
@@ -216,14 +216,14 @@ test("switchSession ignores stale async loads from an earlier session switch", a
 });
 
 test("switchSession restores lastAgent from session metadata", async () => {
-  const state = makeState({ selectedAgent: "architect" });
+  const state = makeState({ selectedAgent: "codex" });
   const applied = [];
   const deps = baseDeps(state, {
     sessionApi: {
-      listSessions: async () => [{ id: "s1", lastAgent: "planner" }],
+      listSessions: async () => [{ id: "s1", lastagent: "opencode" }],
       readMessages: async () => [
-        { role: "user", agent: "planner", content: "hi" },
-        { role: "assistant", agent: "planner", content: "hello" },
+        { role: "user", agent: "opencode", content: "hi" },
+        { role: "assistant", agent: "opencode", content: "hello" },
       ],
     },
     applySessionAgent(sessionId, lastAgent) {
@@ -234,5 +234,5 @@ test("switchSession restores lastAgent from session metadata", async () => {
   const controller = sessionControllerModule.createSessionController(deps);
   await controller.switchSession("s1");
 
-  assert.deepEqual(applied, [["s1", "planner"]]);
+  assert.deepEqual(applied, [["s1", "opencode"]]);
 });

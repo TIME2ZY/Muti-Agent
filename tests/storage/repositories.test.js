@@ -9,8 +9,8 @@ function createFixture() {
   const window = storage.windows.create({
     id: "window-1",
     threadId: "thread-1",
-    agentId: "architect",
-    providerKey: "codex:gpt-5.5",
+    agentId: "codex",
+    providerKey: "codex:gpt-5.6-sol",
     workspaceKey: "base:C:/repo",
     generation: 1,
     capacityTokens: 200000,
@@ -30,13 +30,13 @@ test("repositories persist a complete invocation record", () => {
       id: "invocation-1",
       threadId: "thread-1",
       windowId: "window-1",
-      agentId: "architect",
+      agentId: "codex",
     });
     storage.invocations.appendEvent({
       invocationId: "invocation-1",
       sequenceNo: 0,
       kind: "run.started",
-      payload: { agent: "architect" },
+      payload: { agent: "codex" },
     });
     storage.invocations.appendEvent({
       invocationId: "invocation-1",
@@ -51,7 +51,7 @@ test("repositories persist a complete invocation record", () => {
       invocationId: "invocation-1",
       sequenceNo: 0,
       role: "assistant",
-      agentId: "architect",
+      agentId: "codex",
       content: "hello",
       metadata: { source: "stream" },
     });
@@ -97,8 +97,8 @@ test("only one open window is allowed per agent provider workspace coordinate", 
         storage.windows.create({
           id: "window-2",
           threadId: "thread-1",
-          agentId: "architect",
-          providerKey: "codex:gpt-5.5",
+          agentId: "codex",
+          providerKey: "codex:gpt-5.6-sol",
           workspaceKey: "base:C:/repo",
           generation: 2,
           capacityTokens: 200000,
@@ -117,7 +117,7 @@ test("memory candidates preserve provenance and default to captured", () => {
       id: "invocation-1",
       threadId: "thread-1",
       windowId: "window-1",
-      agentId: "architect",
+      agentId: "codex",
     });
     storage.messages.append({
       id: "message-1",
@@ -135,7 +135,7 @@ test("memory candidates preserve provenance and default to captured", () => {
       content: "Use SQLite as the durable store.",
       sourceMessageId: "message-1",
       sourceInvocationId: "invocation-1",
-      createdBy: "architect",
+      createdBy: "codex",
     });
 
     assert.equal(memory.status, "captured");
@@ -154,7 +154,7 @@ test("deleting a thread cascades through durable memory records", () => {
       id: "invocation-1",
       threadId: "thread-1",
       windowId: "window-1",
-      agentId: "architect",
+      agentId: "codex",
     });
     storage.invocations.appendEvent({
       invocationId: "invocation-1",
@@ -167,7 +167,7 @@ test("deleting a thread cascades through durable memory records", () => {
       kind: "lesson",
       content: "Keep raw evidence.",
       sourceInvocationId: "invocation-1",
-      createdBy: "architect",
+      createdBy: "codex",
     });
 
     assert.equal(storage.threads.delete("thread-1"), true);

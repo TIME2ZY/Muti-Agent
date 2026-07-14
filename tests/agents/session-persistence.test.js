@@ -11,16 +11,16 @@ test("persistProviderSession writes providerKey and workspace slots", () => {
 
   persistProviderSession({
     file,
-    agentKey: "architect",
+    agentKey: "codex",
     sessionId: "sess-1",
     workspaceKey: "base:C:\\proj",
-    providerKey: "codex:gpt-5.5",
+    providerKey: "codex:gpt-5.6-sol",
   });
 
   const saved = JSON.parse(fs.readFileSync(file, "utf8"));
-  assert.equal(saved.architect.sessionId, "sess-1");
-  assert.equal(saved.architect.providerKey, "codex:gpt-5.5");
-  assert.equal(saved.architect.byWorkspace["base:C:\\proj"].sessionId, "sess-1");
+  assert.equal(saved.codex.sessionId, "sess-1");
+  assert.equal(saved.codex.providerKey, "codex:gpt-5.6-sol");
+  assert.equal(saved.codex.byWorkspace["base:C:\\proj"].sessionId, "sess-1");
 });
 
 test("persistSessionId reads INVOKE_* env without server imports", () => {
@@ -28,7 +28,7 @@ test("persistSessionId reads INVOKE_* env without server imports", () => {
   const file = path.join(dir, "sessions.json");
 
   persistSessionId(
-    { id: "planner", providerId: "opencode", model: "mimo-v2.5-pro" },
+    { id: "opencode", providerId: "opencode", model: "qwen3.7-plus" },
     "oc-1",
     {
       INVOKE_SESSION_FILE: file,
@@ -37,7 +37,7 @@ test("persistSessionId reads INVOKE_* env without server imports", () => {
   );
 
   const saved = JSON.parse(fs.readFileSync(file, "utf8"));
-  assert.equal(saved.planner.sessionId, "oc-1");
-  assert.equal(saved.planner.providerKey, "opencode:mimo-v2.5-pro");
-  assert.equal(saved.planner.workspaceKey, "base:ws");
+  assert.equal(saved.opencode.sessionId, "oc-1");
+  assert.equal(saved.opencode.providerKey, "opencode:qwen3.7-plus");
+  assert.equal(saved.opencode.workspaceKey, "base:ws");
 });
