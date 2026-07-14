@@ -79,8 +79,8 @@ function createAntigravityRuntime(cli) {
 
   return {
     /**
-     * Antigravity print mode does not emit session ids on stdout.
-     * Resume works only when the server already stored a conversation id.
+     * Print mode does not emit conversation ids on stdout, so resume cannot be
+     * wired through the normal session-map path.
      */
     extractSessionId() {
       return "";
@@ -142,9 +142,10 @@ function createAntigravityRuntime(cli) {
 const antigravityProvider = {
   id: "antigravity",
   capabilities: {
-    // Conversation resume is supported via --conversation when an id is known.
-    // Print mode does not currently surface new ids on stdout, so cold-start is common.
-    resume: true,
+    // --conversation works when a caller already has an id, but print mode never
+    // emits session ids on stdout, so the server cannot persist resume handles.
+    // Advertise false until extractSessionId has a real source.
+    resume: false,
     thinking: false,
     tools: true,
     subagents: false,

@@ -301,6 +301,43 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
   );
 });
 
+test("chat endpoint defaults to codex when agent field is omitted", async () => {
+  const calls = [];
+
+  await withServer(
+    {
+      spawnRunner(_command, args) {
+        calls.push(args);
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "codex",
+              invocationId: "inv-default",
+              text: "ok",
+            }) + "\n"
+          );
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "hello without agent" }),
+      });
+      assert.equal(response.status, 200);
+      assert.ok(calls.length >= 1, "expected spawn");
+      assert.equal(calls[0][1], "--agent");
+      assert.equal(calls[0][2], "codex");
+      await response.text();
+    }
+  );
+});
+
 test("chat endpoint emits canonical agent-event SSE frames", async () => {
   await withServer(
     {

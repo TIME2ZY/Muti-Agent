@@ -7,6 +7,10 @@
  * similar providers interleave the two streams; flushing on every kind switch
  * re-fragments recall).
  *
+ * Trade-off: interleaved think/text may be written as two contiguous segments
+ * in first-seen kind order (not micro-interleaved chronology). Prefer fewer
+ * durable rows over strict token-level timeline fidelity.
+ *
  * Flush when:
  *   - a buffer reaches maxChars
  *   - a buffer is idle for maxMs (timer resets on each append)

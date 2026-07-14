@@ -104,7 +104,7 @@ test("createAntigravityRuntime maps plain stdout lines to text.delta", () => {
 
 test("antigravity adapter declares expected capabilities", () => {
   assert.equal(antigravityProvider.id, "antigravity");
-  assert.equal(antigravityProvider.capabilities.resume, true);
+  assert.equal(antigravityProvider.capabilities.resume, false);
   assert.equal(antigravityProvider.capabilities.thinking, false);
   assert.ok(antigravityProvider.allowedProviderOptions.includes("mode"));
 });

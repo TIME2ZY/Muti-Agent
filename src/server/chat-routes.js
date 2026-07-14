@@ -111,7 +111,7 @@ function createChatRoutes({
       return true;
     }
 
-    const requestedAgent = typeof body.agent === "string" ? body.agent : "architect";
+    const requestedAgent = typeof body.agent === "string" ? body.agent : "codex";
     const rawPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     const useWorktree = body.useWorktree === true;
     let sessionId = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : null;

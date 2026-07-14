@@ -64,7 +64,7 @@ const AGENTS = {
     "Gemini",
     "antigravity",
     "gemini-3.5-flash",
-    "想法与头脑风暴：发散灵感，可与 Codex 互证收敛。",
+    "想法与头脑风暴：发散灵感，可与 Codex 互证收敛（默认 plan，少改文件）。",
     { reasoningEffort: "high" }
   ),
   grok: agent(
