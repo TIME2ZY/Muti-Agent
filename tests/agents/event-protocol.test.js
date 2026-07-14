@@ -70,7 +70,7 @@ test("run lifecycle accepts started → content → one terminal only", () => {
 test("runtime envelope drops content after terminal and stamps protocolVersion", () => {
   const runtime = createProviderRuntime({
     providerId: "codex",
-    model: "gpt-5.5",
+    model: "gpt-5.6-sol",
   });
   const ctx = { agent: "architect", invocationId: "inv-proto" };
 
@@ -101,7 +101,7 @@ test("runtime envelope drops content after terminal and stamps protocolVersion",
 test("shared lifecycle across recreated runtimes suppresses second run.started", () => {
   const { createRunLifecycle } = require("../../src/agents/event-protocol");
   const lifecycle = createRunLifecycle();
-  const config = { providerId: "codex", model: "gpt-5.5" };
+  const config = { providerId: "codex", model: "gpt-5.6-sol" };
   const ctx = { agent: "architect", invocationId: "inv-retry" };
 
   const attempt1 = createProviderRuntime(config, { lifecycle });

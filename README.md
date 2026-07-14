@@ -111,7 +111,7 @@ http://127.0.0.1:8787
 
 | ID             | 界面标签 | Provider              | 默认模型        | 角色说明                                                 |
 | -------------- | -------- | --------------------- | --------------- | -------------------------------------------------------- |
-| `architect`    | Codex    | codex                 | gpt-5.5         | 默认主控，规划与编排                                     |
+| `architect`    | Codex    | codex                 | gpt-5.6-sol     | 默认主控，规划与编排（`reasoning-effort medium`）        |
 | `orchestrator` | 万事通   | opencode              | deepseek-v4-pro | 通才兜底、跨领域杂活                                     |
 | `planner`      | 小谋     | opencode              | mimo-v2.5-pro   | 任务拆解、方案与决策                                     |
 | `coder`        | 小码     | opencode              | minimax-m3      | 服务端与通用实现/重构                                    |

@@ -20,7 +20,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const CONFIGS = {
-  codex: { providerId: "codex", model: "gpt-5.5", reasoningEffort: "high" },
+  codex: { providerId: "codex", model: "gpt-5.6-sol", reasoningEffort: "medium" },
   opencode: { providerId: "opencode", model: "deepseek-v4-pro" },
   grok: { providerId: "grok", model: "grok-4.5", reasoningEffort: "high" },
 };

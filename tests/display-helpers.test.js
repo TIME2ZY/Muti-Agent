@@ -37,7 +37,7 @@ test("agent helpers format mention and meta", () => {
 test("agentMeta appends capability tags when capabilities are present", () => {
   const meta = agentMeta({
     cli: "codex",
-    model: "gpt-5.5",
+    model: "gpt-5.6-sol",
     capabilities: { thinking: false, tools: true, subagents: true, resume: true },
   });
   assert.match(meta, /工具/);

@@ -11,6 +11,9 @@ function model(providerId, modelId, vendorId, options = {}) {
 }
 
 const MODEL_PROFILES = [
+  model("codex", "gpt-5.6-sol", "openai", {
+    reasoning: { supported: true, levels: ["low", "medium", "high"] },
+  }),
   model("codex", "gpt-5.5", "openai", {
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
@@ -58,8 +61,8 @@ function agent(id, label, providerId, modelId, description, options = {}) {
 }
 
 const AGENTS = {
-  architect: agent("architect", "Codex", "codex", "gpt-5.5", "默认主控 Agent，负责规划与编排。", {
-    reasoningEffort: "high",
+  architect: agent("architect", "Codex", "codex", "gpt-5.6-sol", "默认主控 Agent，负责规划与编排。", {
+    reasoningEffort: "medium",
   }),
   orchestrator: agent(
     "orchestrator",

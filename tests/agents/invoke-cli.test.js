@@ -314,8 +314,8 @@ test("exports the fixed agents", () => {
     "orchestrator",
     "planner",
   ]);
-  assert.equal(AGENTS.architect.model, "gpt-5.5");
-  assert.equal(AGENTS.architect.reasoningEffort, "high");
+  assert.equal(AGENTS.architect.model, "gpt-5.6-sol");
+  assert.equal(AGENTS.architect.reasoningEffort, "medium");
   assert.equal(AGENTS.orchestrator.model, "deepseek-v4-pro");
   assert.equal(AGENTS.planner.model, "mimo-v2.5-pro");
   assert.equal(AGENTS.coder.model, "minimax-m3");
@@ -329,7 +329,7 @@ test("exports the fixed agents", () => {
 
 test("codex runtime maps agent_message and todo_list into normalized events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
   const invocationId = "inv-1";
 
   const started = runtime.transform(
@@ -373,7 +373,7 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
 
 test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
   const ctx = { invocationId: "inv-tool", agent: "architect" };
 
   const toolStarted = runtime.transform(
@@ -723,7 +723,7 @@ test("opencode runtime emits a single run.started and step progress updates", ()
 
 test("codex runtime maps command, file, and transport errors into normalized events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
   const ctx = { invocationId: "inv-1b", agent: "architect" };
 
   const commandStarted = runtime.transform(
@@ -1006,7 +1006,7 @@ test("provider registry lists codex, grok, and opencode", () => {
 
 test("codex runtime reads text from content and properties.content fallbacks", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
   const ctx = { invocationId: "inv-4", agent: "architect" };
 
   const direct = runtime.transform(
@@ -1039,7 +1039,7 @@ test("codex runtime reads text from content and properties.content fallbacks", (
 
 test("codex runtime maps agent message events to text.delta", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.5" });
+  const runtime = createProviderRuntime({ name: "codex", id: "architect", model: "gpt-5.6-sol" });
   const events = runtime.transform(
     {
       type: "item.completed",
