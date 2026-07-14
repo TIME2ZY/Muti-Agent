@@ -277,18 +277,18 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.codex.label, "Codex");
   assert.equal(AGENTS.gemini.model, "gemini-3.5-flash");
   assert.equal(AGENTS.gemini.reasoningEffort, "high");
-  assert.equal(AGENTS.gemini.name, "antigravity");
+  assert.equal(AGENTS.gemini.providerId, "antigravity");
   assert.equal(AGENTS.grok.model, "grok-4.5");
   assert.equal(AGENTS.grok.reasoningEffort, "high");
-  assert.equal(AGENTS.grok.name, "grok");
+  assert.equal(AGENTS.grok.providerId, "grok");
   assert.equal(AGENTS.opencode.model, "qwen3.7-plus");
   assert.equal(AGENTS.opencode.label, "OpenCode");
-  assert.equal(AGENTS.opencode.name, "opencode");
+  assert.equal(AGENTS.opencode.providerId, "opencode");
 });
 
 test("codex runtime maps agent_message and todo_list into normalized events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
   const invocationId = "inv-1";
 
   const started = runtime.transform(
@@ -332,7 +332,7 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
 
 test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
   const ctx = { invocationId: "inv-tool", agent: "codex" };
 
   const toolStarted = runtime.transform(
@@ -438,7 +438,7 @@ test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
 test("opencode runtime maps tool/task parts into tool and subagent events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
-    name: "opencode",
+    providerId: "opencode",
     id: "opencode",
     model: "qwen3.7-plus",
   });
@@ -494,7 +494,7 @@ test("opencode runtime maps tool/task parts into tool and subagent events", () =
 test("opencode runtime maps real tool_use events from current CLI schema", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
-    name: "opencode",
+    providerId: "opencode",
     id: "opencode",
     model: "qwen3.7-plus",
   });
@@ -554,7 +554,7 @@ test("opencode runtime maps real tool_use events from current CLI schema", () =>
 test("opencode runtime maps read/bash tools and nests state.input", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
-    name: "opencode",
+    providerId: "opencode",
     id: "opencode",
     model: "qwen3.7-plus",
   });
@@ -617,7 +617,7 @@ test("opencode runtime maps read/bash tools and nests state.input", () => {
 test("opencode runtime emits a single run.started and step progress updates", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
-    name: "opencode",
+    providerId: "opencode",
     id: "opencode",
     model: "qwen3.7-plus",
   });
@@ -682,7 +682,7 @@ test("opencode runtime emits a single run.started and step progress updates", ()
 
 test("codex runtime maps command, file, and transport errors into normalized events", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
   const ctx = { invocationId: "inv-1b", agent: "codex" };
 
   const commandStarted = runtime.transform(
@@ -800,7 +800,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
 test("opencode runtime emits incremental text deltas from repeated parts", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
-    name: "opencode",
+    providerId: "opencode",
     id: "opencode",
     model: "qwen3.7-plus",
   });
@@ -835,7 +835,7 @@ test("opencode runtime emits incremental text deltas from repeated parts", () =>
 test("opencode runtime reads text deltas from properties.part fallback", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
-    name: "opencode",
+    providerId: "opencode",
     id: "opencode",
     model: "qwen3.7-plus",
   });
@@ -860,7 +860,7 @@ test("opencode runtime reads text deltas from properties.part fallback", () => {
 test("opencode runtime extracts sessionID and text events from current cli schema", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
-    name: "opencode",
+    providerId: "opencode",
     id: "opencode",
     model: "qwen3.7-plus",
   });
@@ -897,7 +897,7 @@ test("opencode runtime extracts sessionID and text events from current cli schem
 test("opencode runtime maps reasoning events (from --thinking) to thinking.delta", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
-    name: "opencode",
+    providerId: "opencode",
     id: "opencode",
     model: "qwen3.7-plus",
   });
@@ -963,11 +963,11 @@ test("provider registry lists codex, grok, opencode, and antigravity", () => {
     "grok",
     "opencode",
   ]);
-  assert.ok(createProviderRuntime({ name: "codex" }));
-  assert.ok(createProviderRuntime({ name: "grok", model: "grok-4.5" }));
+  assert.ok(createProviderRuntime({ providerId: "codex" }));
+  assert.ok(createProviderRuntime({ providerId: "grok", model: "grok-4.5" }));
   assert.ok(
     createProviderRuntime({
-      name: "antigravity",
+      providerId: "antigravity",
       model: "gemini-3.5-flash",
       reasoningEffort: "high",
     })
@@ -977,7 +977,7 @@ test("provider registry lists codex, grok, opencode, and antigravity", () => {
 
 test("codex runtime reads text from content and properties.content fallbacks", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
   const ctx = { invocationId: "inv-4", agent: "codex" };
 
   const direct = runtime.transform(
@@ -1010,7 +1010,7 @@ test("codex runtime reads text from content and properties.content fallbacks", (
 
 test("codex runtime maps agent message events to text.delta", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
-  const runtime = createProviderRuntime({ name: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
   const events = runtime.transform(
     {
       type: "item.completed",

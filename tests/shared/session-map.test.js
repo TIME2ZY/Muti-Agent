@@ -11,7 +11,7 @@ test("providerKeyFromConfig uses providerId:model fingerprint", () => {
     providerKeyFromConfig({ providerId: "codex", model: "gpt-5.6-sol" }),
     "codex:gpt-5.6-sol"
   );
-  assert.equal(providerKeyFromConfig({ name: "grok" }), "grok");
+  assert.equal(providerKeyFromConfig({ providerId: "grok" }), "grok");
 });
 
 test("shared session-map pure helpers keep workspace slots isolated", () => {

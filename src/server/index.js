@@ -104,7 +104,6 @@ function publicAgents() {
       id: agent.id,
       label: agent.label,
       providerId: agent.providerId,
-      cli: agent.providerId,
       model: agent.model,
       modelVendor: modelProfile ? modelProfile.vendorId : "",
       contextTokens: modelProfile ? modelProfile.contextTokens : null,

@@ -2,7 +2,7 @@
 
 本地多 Agent 协作控制台：在浏览器里选择 Agent、发送任务、观察 SSE 流式输出，并通过 skills / worktree / A2A 回调组织跨 Agent 协作。你发令排班，Agent 上工交班。
 
-运行时通过子进程调用本机已安装的 **Codex** / **OpenCode** CLI（本仓库不打包这些 CLI）。
+运行时通过子进程调用本机已安装的 **Codex** / **Antigravity** / **Grok Build** / **OpenCode** CLI（本仓库不打包这些 CLI）。
 
 ## 项目目标
 
@@ -18,7 +18,7 @@
 | ------- | --------------------------------------------------------------------------- |
 | Node.js | **>= 20**（见 `package.json` `engines` 与 `.nvmrc`）                        |
 | 包管理  | 使用 `npm ci` 安装 SQLite 运行时依赖与开发工具                              |
-| CLI     | 本机可执行 `codex`、`opencode`、`grok`（Grok Build CLI，按所用 Agent 安装） |
+| CLI     | 本机可执行 `codex`、`agy`、`grok`、`opencode`（按所用 Agent 安装）      |
 | 系统    | Windows / macOS / Linux；Windows 建议 PowerShell 7（`pwsh`）                |
 
 ```bash

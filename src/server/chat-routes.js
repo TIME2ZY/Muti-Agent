@@ -204,7 +204,7 @@ function createChatRoutes({
     };
     const workspaceKey = `${activeWorktree ? "worktree" : "base"}:${runWorkspace.worktreeDir}`;
     const requestedAgentConfig = AGENTS[requestedAgent];
-    const requestedProviderId = requestedAgentConfig.providerId || requestedAgentConfig.name || "";
+    const requestedProviderId = requestedAgentConfig.providerId || "";
     const requestedProviderKey =
       requestedProviderId && requestedAgentConfig.model
         ? `${requestedProviderId}:${requestedAgentConfig.model}`
@@ -293,7 +293,7 @@ function createChatRoutes({
         const agent = worklist[i];
         const agentConfig = AGENTS[agent] || { id: agent, label: agent, description: "" };
         const sessionMap = readSessionMap(sessionId, sessionMapRoot);
-        const providerId = agentConfig.providerId || agentConfig.name || "";
+        const providerId = agentConfig.providerId || "";
         const providerKey =
           providerId && agentConfig.model ? `${providerId}:${agentConfig.model}` : providerId;
         const resumeSessionId = resolveResumeSessionId(

@@ -4,7 +4,7 @@ const { createInvokeArgsBuilder } = require("../../src/server/invoke-args");
 
 test("invoke argument builder owns request validation but leaves provider options to adapters", () => {
   const builder = createInvokeArgsBuilder({
-    agents: { codex: { name: "codex" } },
+    agents: { codex: { providerId: "codex" } },
   });
 
   assert.deepEqual(builder.buildChatArgs("codex", "hello", "augmented"), [

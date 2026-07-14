@@ -184,7 +184,7 @@ function clearAgentProviderSession(sessions, agentKey, workspaceKey = "") {
 }
 
 function providerKeyFromConfig(config = {}) {
-  const providerId = config.providerId || config.name || "";
+  const providerId = config.providerId || "";
   return providerId && config.model ? `${providerId}:${config.model}` : providerId;
 }
 

@@ -38,7 +38,7 @@ function persistSessionId(cli, sessionId, env = process.env) {
   if (!file || !sessionId) return;
   persistProviderSession({
     file,
-    agentKey: cli.id || cli.name,
+    agentKey: cli.id,
     sessionId,
     workspaceKey: env.INVOKE_WORKSPACE_KEY || "",
     providerKey: providerKeyFromConfig(cli),

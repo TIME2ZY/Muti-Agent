@@ -34,8 +34,6 @@ function agent(id, label, providerId, modelId, description, options = {}) {
     id,
     label,
     providerId,
-    // Compatibility alias for older callers. New code should use providerId.
-    name: providerId,
     model: modelId,
     ...(options.capacityTokens ? { capacityTokens: options.capacityTokens } : {}),
     reasoningEffort: options.reasoningEffort || "",

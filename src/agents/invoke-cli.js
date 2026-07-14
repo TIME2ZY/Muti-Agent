@@ -136,12 +136,12 @@ function parseNonNegativeInteger(value, name) {
 }
 
 function buildInvocation(cli, prompt) {
-  const config = typeof cli === "string" ? { name: cli } : cli;
+  const config = typeof cli === "string" ? { providerId: cli } : cli;
   return buildProviderInvocation(config, prompt);
 }
 
 function invoke(cli, prompt, options = {}) {
-  const baseConfig = typeof cli === "string" ? { name: cli } : cli;
+  const baseConfig = typeof cli === "string" ? { providerId: cli } : cli;
   const runOptions = normalizeRunOptions(options, {
     timeoutMs: DEFAULT_TIMEOUT_MS,
     killGraceMs: DEFAULT_KILL_GRACE_MS,
@@ -154,7 +154,7 @@ function invoke(cli, prompt, options = {}) {
       ...runOptions.providerOptions,
     },
   };
-  const providerId = config.providerId || config.name;
+  const providerId = config.providerId;
   // Read session ID from env (set by server). If present, resume the previous
   // CLI session; if absent, cold start.
   const resumeSessionId = process.env.INVOKE_SESSION_ID || "";

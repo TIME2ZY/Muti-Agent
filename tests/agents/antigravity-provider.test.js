@@ -25,7 +25,6 @@ test("AGENTS.gemini is catalogued as Gemini 3.5 Flash high brainstormer", () => 
   assert.ok(AGENTS.gemini);
   assert.equal(AGENTS.gemini.label, "Gemini");
   assert.equal(AGENTS.gemini.providerId, "antigravity");
-  assert.equal(AGENTS.gemini.name, "antigravity");
   assert.equal(AGENTS.gemini.model, "gemini-3.5-flash");
   assert.equal(AGENTS.gemini.reasoningEffort, "high");
   assert.match(AGENTS.gemini.description, /头脑风暴|灵光/);

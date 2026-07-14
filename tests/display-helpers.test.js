@@ -30,13 +30,13 @@ test("roleBadgeLabel covers roles", () => {
 test("agent helpers format mention and meta", () => {
   assert.equal(agentLabelFromList([{ id: "grok", label: "grok" }], "grok"), "grok");
   assert.equal(agentMention({ id: "x", label: "X" }), "X");
-  assert.match(agentMeta({ cli: "codex", model: "gpt", reasoningEffort: "high" }), /codex/);
+  assert.match(agentMeta({ providerId: "codex", model: "gpt", reasoningEffort: "high" }), /codex/);
   assert.equal(agentRoleSummary({ description: "a".repeat(40) }).length, 33);
 });
 
 test("agentMeta appends capability tags when capabilities are present", () => {
   const meta = agentMeta({
-    cli: "codex",
+    providerId: "codex",
     model: "gpt-5.6-sol",
     capabilities: { thinking: false, tools: true, subagents: true, resume: true },
   });

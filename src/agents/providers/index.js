@@ -50,10 +50,6 @@ const PROVIDER_RUNTIMES = Object.fromEntries(
   Object.entries(PROVIDERS).map(([id, adapter]) => [id, adapter.createRuntime])
 );
 
-function providerIdFrom(config) {
-  return config && (config.providerId || config.name);
-}
-
 function getProviderAdapter(providerId) {
   const adapter = PROVIDERS[providerId];
   if (!adapter) {
@@ -87,7 +83,7 @@ function validateProviderOptions(adapter, providerOptions) {
 }
 
 function validateProviderConfig(config) {
-  const providerId = providerIdFrom(config);
+  const providerId = config && config.providerId;
   const adapter = getProviderAdapter(providerId);
   const modelProfile = config.model ? requireModelProfile(providerId, config.model) : null;
 

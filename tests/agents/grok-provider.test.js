@@ -14,14 +14,14 @@ const { createProviderRuntime, listSupportedProviders } = require("../../src/age
 
 test("provider registry includes grok", () => {
   assert.ok(listSupportedProviders().includes("grok"));
-  const runtime = createProviderRuntime({ name: "grok", model: "grok-4.5" });
+  const runtime = createProviderRuntime({ providerId: "grok", model: "grok-4.5" });
   assert.equal(typeof runtime.transform, "function");
   assert.equal(typeof runtime.extractSessionId, "function");
 });
 
 test("AGENTS.grok is catalogued with grok-4.5 high", () => {
   assert.ok(AGENTS.grok);
-  assert.equal(AGENTS.grok.name, "grok");
+  assert.equal(AGENTS.grok.providerId, "grok");
   assert.equal(AGENTS.grok.model, "grok-4.5");
   assert.equal(AGENTS.grok.reasoningEffort, "high");
   assert.equal(AGENTS.grok.capacityTokens, 500_000);
@@ -53,7 +53,7 @@ test("buildInvocation for grok resumes with -r session id", () => {
 
 test("buildInvocation rejects unsupported grok model", () => {
   assert.throws(
-    () => buildInvocation({ name: "grok", model: "grok-nope" }, "x"),
+    () => buildInvocation({ providerId: "grok", model: "grok-nope" }, "x"),
     /Unsupported grok model/
   );
 });
@@ -65,7 +65,7 @@ test("resolveGrokCommand returns a string", () => {
 });
 
 test("createGrokRuntime coalesces many tiny thought tokens", () => {
-  const runtime = createGrokRuntime({ name: "grok", model: "grok-4.5" });
+  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.5" });
   const ctx = { agent: "grok", invocationId: "inv-1" };
 
   const pieces = ["The", " user", " wants", " a", " short", " answer."];
@@ -100,7 +100,7 @@ test("createGrokRuntime coalesces many tiny thought tokens", () => {
 });
 
 test("createGrokRuntime flushes thinking before text and coalesces text", () => {
-  const runtime = createGrokRuntime({ name: "grok", model: "grok-4.5" });
+  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.5" });
   const ctx = { agent: "grok", invocationId: "inv-2" };
 
   // Under threshold: still buffered
@@ -124,7 +124,7 @@ test("createGrokRuntime flushes thinking before text and coalesces text", () => 
 });
 
 test("createGrokRuntime extracts session id from end", () => {
-  const runtime = createGrokRuntime({ name: "grok", model: "grok-4.5" });
+  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.5" });
   assert.equal(
     runtime.extractSessionId({
       type: "end",

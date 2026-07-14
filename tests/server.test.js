@@ -1412,9 +1412,14 @@ test("parseA2AMentions filters self and code blocks", () => {
 });
 
 test("parseA2AMentions caps at 2 targets", () => {
-  const text = "@Codex 方案\n@Gemini 实现\n@万事通 测试\n@OpenCode review";
+  const text = "@Gemini 方案\n@Grok 实现\n@OpenCode review";
   const mentions = parseA2AMentions(text, "codex");
   assert.equal(mentions.length, 2);
+});
+
+test("parseA2AMentions rejects removed agent names", () => {
+  const text = "@architect 方案\n@万事通 测试\n@小码 实现\n@小评 review";
+  assert.deepEqual(parseA2AMentions(text, "codex"), []);
 });
 
 test("chat endpoint aborts previous invocation on same session", async () => {

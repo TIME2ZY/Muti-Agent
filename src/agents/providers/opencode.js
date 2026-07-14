@@ -288,7 +288,7 @@ function createOpencodeRuntime(cli) {
       makeEvent("run.started", {
         ...base,
         sessionId: sessionId || "",
-        provider: cli.providerId || cli.name,
+        provider: cli.providerId,
         model: cli.model || "",
       }),
     ];

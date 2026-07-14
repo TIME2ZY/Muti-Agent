@@ -57,22 +57,22 @@
 
   function agentMeta(agent) {
     if (!agent) return "";
-    const cliLabel = agent.cli === "opencode" ? "opencode go" : agent.cli || agent.providerId || "";
+    const providerLabel = agent.providerId === "opencode" ? "opencode go" : agent.providerId || "";
     let base;
-    if (agent.cli === "opencode" || agent.providerId === "opencode") {
-      base = `${cliLabel || "opencode go"} · ${agent.model}`;
-    } else if (agent.cli === "grok" || agent.providerId === "grok") {
+    if (agent.providerId === "opencode") {
+      base = `${providerLabel || "opencode go"} · ${agent.model}`;
+    } else if (agent.providerId === "grok") {
       base = agent.reasoningEffort
         ? `xAI · ${agent.model} · ${agent.reasoningEffort}`
         : `xAI · ${agent.model}`;
-    } else if (agent.cli === "antigravity" || agent.providerId === "antigravity") {
+    } else if (agent.providerId === "antigravity") {
       base = agent.reasoningEffort
         ? `Antigravity · ${agent.model} · ${agent.reasoningEffort}`
         : `Antigravity · ${agent.model}`;
     } else {
       base = agent.reasoningEffort
-        ? `${cliLabel} · ${agent.model} · ${agent.reasoningEffort}`
-        : `${cliLabel} · ${agent.model}`;
+        ? `${providerLabel} · ${agent.model} · ${agent.reasoningEffort}`
+        : `${providerLabel} · ${agent.model}`;
     }
     // Capability tags only when the API provided an explicit capabilities object.
     if (agent.capabilities && typeof agent.capabilities === "object") {

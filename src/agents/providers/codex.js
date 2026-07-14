@@ -129,7 +129,7 @@ function createCodexRuntime(cli) {
           makeEvent("run.started", {
             ...base,
             sessionId: event.thread_id || "",
-            provider: cli.providerId || cli.name,
+            provider: cli.providerId,
             model: cli.model || "",
           }),
         ];
