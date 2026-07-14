@@ -65,6 +65,10 @@
       base = agent.reasoningEffort
         ? `xAI · ${agent.model} · ${agent.reasoningEffort}`
         : `xAI · ${agent.model}`;
+    } else if (agent.cli === "antigravity" || agent.providerId === "antigravity") {
+      base = agent.reasoningEffort
+        ? `Antigravity · ${agent.model} · ${agent.reasoningEffort}`
+        : `Antigravity · ${agent.model}`;
     } else {
       base = agent.reasoningEffort
         ? `${cliLabel} · ${agent.model} · ${agent.reasoningEffort}`
@@ -107,6 +111,7 @@
     architect: 1,
     orchestrator: 2,
     planner: 3,
+    gemini: 3, // brainstorm / ideation cohort with 小谋
     coder: 4,
     grok: 4, // coding cohort shares palette slot with 小码
     frontend: 5,

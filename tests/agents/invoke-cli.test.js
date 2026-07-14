@@ -310,6 +310,7 @@ test("exports the fixed agents", () => {
     "coder",
     "critic",
     "frontend",
+    "gemini",
     "grok",
     "orchestrator",
     "planner",
@@ -323,6 +324,9 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.grok.model, "grok-4.5");
   assert.equal(AGENTS.grok.reasoningEffort, "high");
   assert.equal(AGENTS.grok.name, "grok");
+  assert.equal(AGENTS.gemini.model, "gemini-3.5-flash");
+  assert.equal(AGENTS.gemini.reasoningEffort, "high");
+  assert.equal(AGENTS.gemini.name, "antigravity");
   assert.equal(AGENTS.frontend.model, "glm-5.2");
   assert.equal(AGENTS.critic.model, "qwen3.7-plus");
 });
@@ -996,11 +1000,23 @@ test("opencode runtime maps reasoning events (from --thinking) to thinking.delta
   assert.deepEqual(empty, []);
 });
 
-test("provider registry lists codex, grok, and opencode", () => {
+test("provider registry lists codex, grok, opencode, and antigravity", () => {
   const { listSupportedProviders, createProviderRuntime } = require("../../src/agents/providers");
-  assert.deepEqual(listSupportedProviders().sort(), ["codex", "grok", "opencode"]);
+  assert.deepEqual(listSupportedProviders().sort(), [
+    "antigravity",
+    "codex",
+    "grok",
+    "opencode",
+  ]);
   assert.ok(createProviderRuntime({ name: "codex" }));
   assert.ok(createProviderRuntime({ name: "grok", model: "grok-4.5" }));
+  assert.ok(
+    createProviderRuntime({
+      name: "antigravity",
+      model: "gemini-3.5-flash",
+      reasoningEffort: "high",
+    })
+  );
   assert.throws(() => createProviderRuntime({ name: "claude" }), /Unsupported provider/);
 });
 

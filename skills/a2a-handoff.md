@@ -7,6 +7,7 @@ triggers:
   - "@小谋"
   - "@小码"
   - "@Grok"
+  - "@Gemini"
   - "@小视"
   - "@小评"
   - "帮我 review"
@@ -28,6 +29,7 @@ always: true
 | **@小谋** | planner | 推理与规划 | 需要任务拆解、方案设计、决策权衡 |
 | **@小码** | coder | Coding 主力（服务端 / 通用，OpenCode） | 需要写后端代码、修 bug、重构、跑测试 |
 | **@Grok** | grok | Grok 4.5 high（本地 CLI）— 高难度编码与硬推理 | 难题拆解、复杂实现、深度 debug、改代码 |
+| **@Gemini** | gemini | Gemini 3.5 Flash high（Antigravity CLI）— 灵光一闪与头脑风暴 | 需要新鲜想法、命名、产品灵感、方案发散 |
 | **@小视** | frontend | 前端 Coding 专家 | 需要写 UI、样式、交互、可访问性 |
 | **@小评** | critic | Review 专家 | 代码写完了需要 review、修复后需要确认 |
 

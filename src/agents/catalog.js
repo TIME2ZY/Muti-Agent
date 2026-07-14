@@ -39,6 +39,12 @@ const MODEL_PROFILES = [
     contextTokens: 500_000,
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
+  model("antigravity", "gemini-3.5-flash", "google", {
+    reasoning: { supported: true, levels: ["low", "medium", "high"] },
+  }),
+  model("antigravity", "gemini-3.1-pro", "google", {
+    reasoning: { supported: true, levels: ["low", "high"] },
+  }),
 ];
 
 const MODELS = Object.fromEntries(
@@ -93,6 +99,14 @@ const AGENTS = {
     "grok-4.5",
     "Grok 4.5 high — 本地 Grok Build CLI 编码与硬推理主力。",
     { reasoningEffort: "high", capacityTokens: 500_000 }
+  ),
+  gemini: agent(
+    "gemini",
+    "Gemini",
+    "antigravity",
+    "gemini-3.5-flash",
+    "Gemini 3.5 Flash high（Antigravity CLI）— 灵光一闪、新鲜想法与头脑风暴。",
+    { reasoningEffort: "high" }
   ),
   frontend: agent(
     "frontend",

@@ -105,22 +105,24 @@ http://127.0.0.1:8787
 | `tests/`        | Node 内置 test runner 用例                                                  |
 | `data/runtime/` | 运行时状态（默认 gitignore）                                                |
 
-## 六个 Agent 角色
+## Agent 角色
 
-定义见 `src/agents/invoke-cli.js` 中的 `AGENTS`：
+定义见 `src/agents/catalog.js` 中的 `AGENTS`：
 
-| ID             | 界面标签 | Provider              | 默认模型        | 角色说明                                                 |
-| -------------- | -------- | --------------------- | --------------- | -------------------------------------------------------- |
-| `architect`    | Codex    | codex                 | gpt-5.6-sol     | 默认主控，规划与编排（`reasoning-effort medium`）        |
-| `orchestrator` | 万事通   | opencode              | deepseek-v4-pro | 通才兜底、跨领域杂活                                     |
-| `planner`      | 小谋     | opencode              | mimo-v2.5-pro   | 任务拆解、方案与决策                                     |
-| `coder`        | 小码     | opencode              | minimax-m3      | 服务端与通用实现/重构                                    |
-| `grok`         | Grok     | grok (Grok Build CLI) | grok-4.5        | 高难度编码与硬推理（本地 CLI + `reasoning-effort high`） |
-| `frontend`     | 小视     | opencode              | glm-5.2         | UI、样式、交互与 a11y                                    |
-| `critic`       | 小评     | opencode              | qwen3.7-plus    | 代码评审与质量把关                                       |
+| ID             | 界面标签 | Provider              | 默认模型            | 角色说明                                                 |
+| -------------- | -------- | --------------------- | ------------------- | -------------------------------------------------------- |
+| `architect`    | Codex    | codex                 | gpt-5.6-sol         | 默认主控，规划与编排（`reasoning-effort medium`）        |
+| `orchestrator` | 万事通   | opencode              | deepseek-v4-pro     | 通才兜底、跨领域杂活                                     |
+| `planner`      | 小谋     | opencode              | mimo-v2.5-pro       | 任务拆解、方案与决策                                     |
+| `coder`        | 小码     | opencode              | minimax-m3          | 服务端与通用实现/重构                                    |
+| `grok`         | Grok     | grok (Grok Build CLI) | grok-4.5            | 高难度编码与硬推理（本地 CLI + `reasoning-effort high`） |
+| `gemini`       | Gemini   | antigravity (`agy`)   | gemini-3.5-flash    | 灵光一闪、新鲜想法与头脑风暴（Flash High）               |
+| `frontend`     | 小视     | opencode              | glm-5.2             | UI、样式、交互与 a11y                                    |
+| `critic`       | 小评     | opencode              | qwen3.7-plus        | 代码评审与质量把关                                       |
 
 > **Grok 接入（与 Codex/OpenCode 同模式）**：安装 [Grok Build CLI](https://x.ai/cli)，`grok login` 或设置 `XAI_API_KEY`。服务端 spawn：`grok -p ... --output-format streaming-json -m grok-4.5 --reasoning-effort high --always-approve`。  
-> **代理（仅 Grok）**：若直连 `api.x.ai` 超时，启动前设 `GROK_PROXY=http://127.0.0.1:7892`（只注入 Grok 子进程，不影响 OpenCode/Codex）。
+> **代理（仅 Grok）**：若直连 `api.x.ai` 超时，启动前设 `GROK_PROXY=http://127.0.0.1:7892`（只注入 Grok 子进程，不影响 OpenCode/Codex）。  
+> **Gemini / Antigravity**：安装 [Antigravity CLI](https://antigravity.google/)（本地命令 `agy`）。服务端 spawn：`agy -p "..." --model "Gemini 3.5 Flash (High)" --dangerously-skip-permissions --mode plan`。可用 `AGY_PATH` 覆盖可执行文件路径。
 
 使用方式：
 

@@ -23,6 +23,11 @@ const CONFIGS = {
   codex: { providerId: "codex", model: "gpt-5.6-sol", reasoningEffort: "medium" },
   opencode: { providerId: "opencode", model: "deepseek-v4-pro" },
   grok: { providerId: "grok", model: "grok-4.5", reasoningEffort: "high" },
+  antigravity: {
+    providerId: "antigravity",
+    model: "gemini-3.5-flash",
+    reasoningEffort: "high",
+  },
 };
 
 test("every provider implements the complete adapter contract", () => {

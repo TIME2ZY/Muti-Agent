@@ -1,6 +1,7 @@
 const { codexProvider } = require("./codex");
 const { opencodeProvider } = require("./opencode");
 const { grokProvider } = require("./grok");
+const { antigravityProvider } = require("./antigravity");
 const { requireModelProfile } = require("../catalog");
 const {
   assertCanonicalEvent,
@@ -40,7 +41,7 @@ function assertProviderAdapter(adapter) {
 }
 
 const PROVIDERS = Object.fromEntries(
-  [codexProvider, opencodeProvider, grokProvider].map((adapter) => {
+  [codexProvider, opencodeProvider, grokProvider, antigravityProvider].map((adapter) => {
     assertProviderAdapter(adapter);
     return [adapter.id, adapter];
   })
@@ -162,6 +163,10 @@ function createProviderRuntime(config, options = {}) {
       typeof runtime.extractSessionId === "function"
         ? runtime.extractSessionId.bind(runtime)
         : () => "",
+    parseStdoutLine:
+      typeof runtime.parseStdoutLine === "function"
+        ? runtime.parseStdoutLine.bind(runtime)
+        : undefined,
     transform(event, context) {
       if (lifecycle.terminal) return [];
       const sessionId =

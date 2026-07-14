@@ -128,9 +128,19 @@ function superviseProviderProcess({
       try {
         event = JSON.parse(line);
       } catch {
-        console.error("Failed to parse JSON line:", line);
-        if (onRawEvent) onRawEvent({ parseError: true, line });
-        return;
+        // Providers like Antigravity print plain text (not NDJSON). Adapters may
+        // expose parseStdoutLine() to wrap lines as synthetic events.
+        if (typeof providerRuntime.parseStdoutLine === "function") {
+          event = providerRuntime.parseStdoutLine(line);
+          if (!event) {
+            if (onRawEvent) onRawEvent({ parseError: true, line });
+            return;
+          }
+        } else {
+          console.error("Failed to parse JSON line:", line);
+          if (onRawEvent) onRawEvent({ parseError: true, line });
+          return;
+        }
       }
 
       if (onRawEvent) onRawEvent(event);
