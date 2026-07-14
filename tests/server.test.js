@@ -1827,7 +1827,7 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
     const invocations = await waitForInvocations(capturedSessionId, 1, 3000);
     assert.ok(invocations.length >= 1, `expected at least one invocation, got: ${JSON.stringify(invocations)}`);
 
-    // The actual agent invocation should have start, stdout (×2), and end events
+    // Durable path coalesces consecutive text.delta fragments (SSE stays fine-grained).
     const agentInv = invocations.find((id) => id !== "_user_prompt");
     assert.ok(agentInv, "expected a non-user-prompt invocation");
     const events = await transcript.readInvocation(capturedSessionId, agentInv);
@@ -1836,9 +1836,8 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
     assert.ok(kinds.includes("text.delta"), `kinds: ${kinds.join(",")}`);
     assert.ok(kinds.includes("invocation-end"), `kinds: ${kinds.join(",")}`);
     const stdoutEvents = events.filter((e) => e.kind === "text.delta");
-    assert.equal(stdoutEvents.length, 2, "two text.delta chunks (partial + answer)");
-    assert.equal(stdoutEvents[0].payload.text, "partial ");
-    assert.equal(stdoutEvents[1].payload.text, "answer");
+    assert.equal(stdoutEvents.length, 1, "coalesced text.delta into one durable segment");
+    assert.equal(stdoutEvents[0].payload.text, "partial answer");
 
     // The synthetic user-prompt invocation should be searchable
     const userPromptEvents = await transcript.readInvocation(capturedSessionId, "_user_prompt");

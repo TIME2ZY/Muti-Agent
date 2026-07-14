@@ -1,5 +1,9 @@
 const { assertValidOpaqueId } = require("./id-policy");
 const { resolveResumeSessionId, abandonProviderSession } = require("./session-map-store");
+const {
+  createStreamDeltaCoalescer,
+  resolveCoalesceOptionsFromEnv,
+} = require("./stream-delta-coalescer");
 const { ENV } = require("../shared/brand");
 
 const NOOP_DURABLE_RECORDER = Object.freeze({
@@ -411,6 +415,19 @@ function createChatRoutes({
           fillRatioAtStart: healthTracker.getFillRatio(),
         });
 
+        // Live SSE stays fine-grained; only durable sinks (transcript / registry /
+        // SQLite+recall) go through the coalescer so recall and logs are not
+        // flooded with micro text.delta / thinking.delta fragments.
+        const persistDurableEvent = (kind, payload) => {
+          transcript.appendEvent(sessionId, invocationId, kind, payload);
+          recordInvocationEvent(invocationEvents, invocationId, kind, payload);
+          durable.appendInvocationEvent(invocationId, kind, payload);
+        };
+        const durableCoalescer = createStreamDeltaCoalescer({
+          ...resolveCoalesceOptionsFromEnv(),
+          write: persistDurableEvent,
+        });
+
         const { code, signal } = await runChildStream({
           spawnRunner,
           args: buildChatArgs(agent, agentPrompt, promptForAgent),
@@ -421,21 +438,18 @@ function createChatRoutes({
           signal: invocationController.signal,
           env: invocationEnv,
           onEvent(event) {
-            transcript.appendEvent(sessionId, invocationId, event.type, event);
-            recordInvocationEvent(invocationEvents, invocationId, event.type, event);
-            durable.appendInvocationEvent(invocationId, event.type, event);
+            // Realtime path first — UI should not wait on durable batching.
             sendSse(res, "agent-event", event);
-
             if (event.type === "text.delta") {
               const text = typeof event.text === "string" ? event.text : "";
               assistantContent += text;
               sendSse(res, "message", { agent, role: "assistant", text });
             }
+            durableCoalescer.accept(event);
           },
           onStderr(text) {
-            transcript.appendEvent(sessionId, invocationId, "stderr", { agent, text });
-            recordInvocationEvent(invocationEvents, invocationId, "stderr", { text });
-            durable.appendInvocationEvent(invocationId, "stderr", { agent, text });
+            durableCoalescer.flushAll();
+            persistDurableEvent("stderr", { agent, text });
             const visible = filterBenignStderr(text);
             if (visible) sendSse(res, "stderr", { agent, text: visible });
           },
@@ -447,6 +461,9 @@ function createChatRoutes({
               sendSse(res, "context-warning", { agent, ratio, threshold: sealer.thresholds.warn });
               contextWarned = true;
             } else if (state === sessionSealer.STATE.SEALED && !contextSealedSseSent) {
+              // Flush pending prose before seal side-effects so partial output
+              // is durable even when the child is about to be stopped.
+              durableCoalescer.flushAll();
               sendSse(res, "sealed", { agent, ratio, reason: "context overflow" });
               contextSealedSseSent = true;
               if (durableRun?.window?.id) {
@@ -471,6 +488,9 @@ function createChatRoutes({
           },
           shouldStop: () => sealer.isSealed(),
         });
+
+        // Always drain residual deltas before end markers / finishInvocation.
+        durableCoalescer.flushAll();
 
         if (durableRun) {
           durable.addWindowUsage(durableRun.window.id, {
