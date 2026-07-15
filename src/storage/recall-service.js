@@ -108,12 +108,14 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       const invocation = storage.invocations.get(invocationId);
       if (!invocation || invocation.threadId !== threadId) return null;
       const page = storage.invocations.readEventsPage(invocationId, options);
+      const start = Math.max(0, Number(options.from) || 0);
       return {
         ...page,
-        events: page.events.map((event) => ({
+        events: page.events.map((event, i) => ({
           ts: event.createdAt,
           kind: event.kind,
           payload: event.payload,
+          eventNo: Number.isInteger(event.sequenceNo) ? event.sequenceNo : start + i,
         })),
       };
     });

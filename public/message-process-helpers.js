@@ -172,6 +172,176 @@
     return tags;
   }
 
+  /** Attach absolute event index for Phase B focus / highlight. */
+  function resolveEventNo(evt) {
+    if (!evt || typeof evt !== "object") return null;
+    if (Number.isInteger(evt.eventNo)) return evt.eventNo;
+    if (Number.isInteger(evt.sequenceNo)) return evt.sequenceNo;
+    return null;
+  }
+
+  function mergeEventNos(prev, evt) {
+    const nos = Array.isArray(prev && prev._eventNos) ? prev._eventNos.slice() : [];
+    const n = resolveEventNo(evt);
+    if (n != null && !nos.includes(n)) nos.push(n);
+    return nos;
+  }
+
+  /**
+   * Map a single event to a process-row anchor (for focus/highlight).
+   * @returns {{ rowKind: "subagent"|"tool"|"command", rowId: string } | null}
+   */
+  function processAnchorFromEvent(evt) {
+    if (!evt || typeof evt !== "object") return null;
+    const kind = evt.kind || evt.type || "";
+    const payload = evt.payload && typeof evt.payload === "object" ? evt.payload : null;
+    const data = payload
+      ? payload.type
+        ? payload
+        : { ...payload, type: kind }
+      : evt;
+    const type = data.type || kind;
+    if (!type) return null;
+
+    if (type.startsWith("subagent.")) {
+      const id = String(data.subagentId || data.toolId || data.name || "");
+      if (!id) return null;
+      return { rowKind: "subagent", rowId: id };
+    }
+    if (type === "tool.started" || type === "tool.finished") {
+      const detail = toolDetailFromEvent(data);
+      const id = String(data.toolId || `${data.toolName || "tool"}:${detail}`);
+      return { rowKind: "tool", rowId: id };
+    }
+    if (type === "command.started" || type === "command.finished") {
+      if (!data.command) return null;
+      return { rowKind: "command", rowId: String(data.command) };
+    }
+    return null;
+  }
+
+  /**
+   * Pure data contract: transcript/SSE-shaped events → process buckets.
+   * Shared by message hydrate, live final panel, and recall (no DOM).
+   * Accepts either durable { kind, payload } or live { type, ...fields }.
+   * Each bucket value may include `_eventNos: number[]` for Phase B focus.
+   *
+   * @param {Array<object>} events
+   * @returns {{ subById: Map<string, object>, toolById: Map<string, object>, commandByKey: Map<string, object> }}
+   */
+  function aggregateProcessBuckets(events) {
+    const subById = new Map();
+    const toolById = new Map();
+    const commandByKey = new Map();
+
+    for (const evt of events || []) {
+      if (!evt || typeof evt !== "object") continue;
+      const kind = evt.kind || evt.type || "";
+      const payload = evt.payload && typeof evt.payload === "object" ? evt.payload : null;
+      // Live events are flat; durable events nest fields under payload.
+      const data = payload
+        ? payload.type
+          ? payload
+          : { ...payload, type: kind }
+        : evt;
+      const type = data.type || kind;
+      if (!type) continue;
+
+      if (type.startsWith("subagent.")) {
+        const id = String(data.subagentId || data.toolId || data.name || subById.size);
+        const prev = subById.get(id) || {};
+        subById.set(id, {
+          ...prev,
+          ...data,
+          type,
+          _eventNos: mergeEventNos(prev, evt),
+          _traceKind: "subagent",
+          _traceId: id,
+        });
+        continue;
+      }
+      if (type === "tool.started" || type === "tool.finished") {
+        const detail = toolDetailFromEvent(data);
+        const id = String(data.toolId || `${data.toolName || "tool"}:${detail}`);
+        const prev = toolById.get(id) || {};
+        toolById.set(id, {
+          ...prev,
+          ...data,
+          type,
+          args: data.args || prev.args,
+          toolName: data.toolName || prev.toolName,
+          result: data.result !== undefined ? data.result : prev.result,
+          output: data.output !== undefined ? data.output : prev.output,
+          status: data.status || prev.status,
+          _eventNos: mergeEventNos(prev, evt),
+          _traceKind: "tool",
+          _traceId: id,
+        });
+        continue;
+      }
+      if (type === "command.started" || type === "command.finished") {
+        if (data.command) {
+          const prev = commandByKey.get(data.command) || {};
+          commandByKey.set(data.command, {
+            ...prev,
+            ...data,
+            type,
+            _eventNos: mergeEventNos(prev, evt),
+            _traceKind: "command",
+            _traceId: String(data.command),
+          });
+        }
+      }
+    }
+
+    return { subById, toolById, commandByKey };
+  }
+
+  /**
+   * Stamp absolute eventNo on a page slice when the store omits it.
+   * Search hits use the same absolute index.
+   */
+  function stampEventNos(events, from = 0) {
+    const start = Math.max(0, Number(from) || 0);
+    return (events || []).map((evt, i) => {
+      if (!evt || typeof evt !== "object") return evt;
+      if (Number.isInteger(evt.eventNo)) return evt;
+      return { ...evt, eventNo: start + i };
+    });
+  }
+
+  function isProcessBucketsEmpty(buckets) {
+    if (!buckets) return true;
+    const sub = buckets.subById;
+    const tool = buckets.toolById;
+    const cmd = buckets.commandByKey;
+    return (
+      !(sub && sub.size) &&
+      !(tool && tool.size) &&
+      !(cmd && cmd.size)
+    );
+  }
+
+  /**
+   * Lightweight text.delta / text.final concatenation for empty-process UI.
+   * @param {Array<object>} events
+   * @param {number} [max=200]
+   */
+  function textDeltaSummary(events, max = 200) {
+    let out = "";
+    for (const evt of events || []) {
+      if (!evt || typeof evt !== "object") continue;
+      const kind = evt.kind || evt.type || "";
+      if (kind !== "text.delta" && kind !== "text.final") continue;
+      const payload = evt.payload && typeof evt.payload === "object" ? evt.payload : evt;
+      const t = typeof payload.text === "string" ? payload.text : "";
+      if (!t) continue;
+      out += t;
+      if (out.length >= max * 2) break;
+    }
+    return truncateDisplay(out, max);
+  }
+
   const api = {
     collapseWs,
     truncateDisplay,
@@ -188,6 +358,12 @@
     shouldRenderTools,
     shouldRenderSubagents,
     capabilityTagList,
+    resolveEventNo,
+    processAnchorFromEvent,
+    aggregateProcessBuckets,
+    isProcessBucketsEmpty,
+    textDeltaSummary,
+    stampEventNos,
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = api;

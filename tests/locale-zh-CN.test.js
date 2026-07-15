@@ -12,3 +12,13 @@ test("t resolves dotted paths", () => {
   assert.equal(t("role.user"), "用户");
   assert.equal(t("missing.key", "fallback"), "fallback");
 });
+
+test("locale.recall covers process-panel and empty states", () => {
+  assert.equal(locale.recall.toggle, "回忆");
+  assert.match(locale.recall.toggleTitle, /执行过程|定位/);
+  assert.equal(locale.recall.noTools, "无工具调用");
+  assert.equal(locale.recall.noEvents, "无事件记录");
+  assert.match(locale.recall.rawEvents(3), /原始事件/);
+  assert.match(locale.recall.pageTruncated(200, 500), /200/);
+  assert.match(locale.recall.pageTruncated(200, 500), /500/);
+});

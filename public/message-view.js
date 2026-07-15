@@ -41,9 +41,246 @@
         done: "完成",
         success: "成功",
         failed: "失败",
+        noTools: "无工具调用",
         progressDone: (n) => `进度 · ${n} 步已完成`,
         progressPartial: (done, total) => `进度 · ${done}/${total}`,
       },
+    };
+  }
+
+  /**
+   * Shared process-panel DOM renderer (locale injected).
+   * Pure aggregation lives in MessageProcessHelpers.aggregateProcessBuckets.
+   * Used by message hydrate and recall expand — one code path for both.
+   */
+  function createProcessPanelRenderer(options = {}) {
+    const helpers = resolveProcessHelpers() || {};
+    const L = options.locale || resolveMsgLocale();
+    const msg = (L && L.message) || {};
+    const truncateDisplay =
+      typeof helpers.truncateDisplay === "function"
+        ? helpers.truncateDisplay
+        : (t, max = 160) => {
+            const v = String(t || "");
+            return v.length > max ? `${v.slice(0, max - 1)}…` : v;
+          };
+    const toolDetailFromEvent =
+      typeof helpers.toolDetailFromEvent === "function" ? helpers.toolDetailFromEvent : () => "";
+    const processSummaryFromEvent =
+      typeof helpers.processSummaryFromEvent === "function"
+        ? helpers.processSummaryFromEvent
+        : () => "";
+    const isTaskLikeTool =
+      typeof helpers.isTaskLikeTool === "function" ? helpers.isTaskLikeTool : () => false;
+    const aggregateProcessBuckets =
+      typeof helpers.aggregateProcessBuckets === "function"
+        ? helpers.aggregateProcessBuckets
+        : () => ({ subById: new Map(), toolById: new Map(), commandByKey: new Map() });
+    const isProcessBucketsEmpty =
+      typeof helpers.isProcessBucketsEmpty === "function"
+        ? helpers.isProcessBucketsEmpty
+        : (b) => !b || (!b.subById?.size && !b.toolById?.size && !b.commandByKey?.size);
+    const textDeltaSummary =
+      typeof helpers.textDeltaSummary === "function" ? helpers.textDeltaSummary : () => "";
+
+    function countProcessSteps(panel) {
+      if (!panel) return 0;
+      return panel.querySelectorAll(".live-subagent, .live-tool-row").length;
+    }
+
+    function updateProcessDetailsLabel(details) {
+      if (!details) return;
+      const summary =
+        details.querySelector(":scope > .msg-process-summary") ||
+        details.querySelector(".msg-process-summary");
+      if (!summary) return;
+      const panel = details.querySelector(".live-subagents");
+      const n = countProcessSteps(panel);
+      summary.textContent = n > 0 ? `执行过程 · ${n} 步` : msg.process || "执行过程";
+    }
+
+    function wrapProcessDetails(panel, { open = false, live = false } = {}) {
+      if (!panel) return null;
+      if (panel.classList && panel.classList.contains("msg-process")) {
+        panel.open = open;
+        if (!live) panel.removeAttribute("data-live");
+        else panel.dataset.live = "true";
+        updateProcessDetailsLabel(panel);
+        return panel;
+      }
+      const details = document.createElement("details");
+      details.className = "msg-process";
+      details.open = open;
+      if (live) details.dataset.live = "true";
+      const summary = document.createElement("summary");
+      summary.className = "msg-process-summary";
+      summary.textContent = msg.process || "执行过程";
+      if (panel.parentNode) panel.parentNode.insertBefore(details, panel);
+      details.append(summary, panel);
+      updateProcessDetailsLabel(details);
+      return details;
+    }
+
+    function appendTraceRow(panel, fields) {
+      const row = document.createElement("div");
+      row.className = "live-subagent live-tool-row status-" + (fields.status || "done");
+      if (fields.traceKind) row.dataset.traceKind = fields.traceKind;
+      if (fields.traceId != null && fields.traceId !== "") {
+        row.dataset.traceId = String(fields.traceId);
+      }
+      if (Array.isArray(fields.eventNos) && fields.eventNos.length) {
+        row.dataset.eventNos = fields.eventNos.join(",");
+      }
+      const head = document.createElement("div");
+      head.className = "live-subagent-head";
+      const name = document.createElement("span");
+      name.className = "live-subagent-name";
+      name.textContent = fields.name || "tool";
+      const status = document.createElement("span");
+      status.className = "live-subagent-status status-" + (fields.status || "done");
+      status.textContent = fields.statusText || msg.done || "完成";
+      head.append(name, status);
+      row.appendChild(head);
+      if (fields.task) {
+        const task = document.createElement("div");
+        task.className = "live-subagent-task";
+        task.textContent = fields.task;
+        row.appendChild(task);
+      }
+      if (fields.summary) {
+        const summary = document.createElement("div");
+        summary.className = "live-subagent-summary";
+        summary.textContent = fields.summary;
+        row.appendChild(summary);
+      }
+      panel.appendChild(row);
+    }
+
+    /**
+     * @param {Map} subById
+     * @param {Map} toolById
+     * @param {Map} commandByKey
+     * @param {{ open?: boolean, live?: boolean, emptyFallback?: boolean, events?: Array }} options
+     * @returns {HTMLElement|null}
+     */
+    function renderProcessPanel(subById, toolById, commandByKey, options = {}) {
+      const empty = isProcessBucketsEmpty({ subById, toolById, commandByKey });
+      if (empty) {
+        if (!options.emptyFallback) return null;
+        return renderEmptyProcessState(options.events || []);
+      }
+
+      const panel = document.createElement("div");
+      panel.className = "live-subagents live-subagents-final";
+
+      const subagentToolIds = new Set();
+      for (const [id, evt] of subById.entries()) {
+        if (evt.subagentId) subagentToolIds.add(String(evt.subagentId));
+        if (evt.toolId) subagentToolIds.add(String(evt.toolId));
+        const failed = evt.type === "subagent.failed";
+        const done = evt.type === "subagent.completed" || failed;
+        appendTraceRow(panel, {
+          name: evt.name || evt.toolName || "subagent",
+          status: failed ? "error" : done ? "done" : "running",
+          statusText: failed
+            ? msg.failed || "失败"
+            : done
+              ? msg.success || "成功"
+              : msg.running || "运行中",
+          task: truncateDisplay(evt.task || "", 100),
+          summary: processSummaryFromEvent(evt),
+          traceKind: evt._traceKind || "subagent",
+          traceId: evt._traceId || id,
+          eventNos: evt._eventNos,
+        });
+      }
+
+      for (const [id, evt] of toolById.entries()) {
+        if (isTaskLikeTool(evt)) continue;
+        if (evt.toolId && subagentToolIds.has(String(evt.toolId))) continue;
+        const detail = toolDetailFromEvent(evt);
+        const failed = evt.status === "error";
+        const done = evt.type === "tool.finished" || evt.result != null || evt.output != null;
+        appendTraceRow(panel, {
+          name: evt.toolName || "tool",
+          status: failed ? "error" : done ? "done" : "running",
+          statusText: failed
+            ? msg.failed || "失败"
+            : done
+              ? msg.done || "完成"
+              : msg.running || "运行中",
+          task: detail,
+          summary: failed ? processSummaryFromEvent(evt) : "",
+          traceKind: evt._traceKind || "tool",
+          traceId: evt._traceId || id,
+          eventNos: evt._eventNos,
+        });
+      }
+
+      const toolDetails = new Set(
+        [...toolById.values()].map((t) => toolDetailFromEvent(t)).filter(Boolean)
+      );
+      for (const [cmdKey, evt] of commandByKey.entries()) {
+        if (toolDetails.has(evt.command)) continue;
+        const failed = evt.exitCode !== undefined && evt.exitCode !== 0;
+        appendTraceRow(panel, {
+          name: "command",
+          status: failed ? "error" : "done",
+          statusText: failed ? msg.failed || "失败" : msg.done || "完成",
+          task: truncateDisplay(evt.command, 120),
+          summary: failed ? processSummaryFromEvent(evt) : "",
+          traceKind: evt._traceKind || "command",
+          traceId: evt._traceId || cmdKey,
+          eventNos: evt._eventNos,
+        });
+      }
+
+      if (!panel.childNodes.length) {
+        if (!options.emptyFallback) return null;
+        return renderEmptyProcessState(options.events || []);
+      }
+      const open = options.open === true;
+      const live = options.live === true;
+      return wrapProcessDetails(panel, { open, live });
+    }
+
+    function renderEmptyProcessState(events) {
+      const wrap = document.createElement("div");
+      wrap.className = "recall-process-empty";
+      const label = document.createElement("div");
+      label.className = "recall-process-empty-label";
+      label.textContent = msg.noTools || "无工具调用";
+      wrap.appendChild(label);
+      const summary = textDeltaSummary(events, 200);
+      if (summary) {
+        const snip = document.createElement("div");
+        snip.className = "recall-process-text-summary";
+        snip.textContent = summary;
+        wrap.appendChild(snip);
+      }
+      return wrap;
+    }
+
+    function fromBuckets(buckets, options = {}) {
+      const b = buckets || { subById: new Map(), toolById: new Map(), commandByKey: new Map() };
+      return renderProcessPanel(b.subById, b.toolById, b.commandByKey, options);
+    }
+
+    function fromEvents(events, options = {}) {
+      const buckets = aggregateProcessBuckets(events);
+      return fromBuckets(buckets, { ...options, events });
+    }
+
+    return {
+      appendTraceRow,
+      wrapProcessDetails,
+      updateProcessDetailsLabel,
+      countProcessSteps,
+      renderProcessPanel,
+      renderEmptyProcessState,
+      fromBuckets,
+      fromEvents,
+      aggregateProcessBuckets,
     };
   }
 
@@ -98,6 +335,13 @@
     const L = resolveMsgLocale();
     const msg = L.message || {};
     const badgeText = L.badge || {};
+    // Shared renderer: same DOM path as recall panel (locale injected).
+    const processPanel = createProcessPanelRenderer({ locale: L });
+    const {
+      wrapProcessDetails,
+      updateProcessDetailsLabel,
+      renderProcessPanel,
+    } = processPanel;
 
     function sessionRuntime(sessionId) {
       return runtimeStore.getOrCreate(sessionId || state.currentSessionId || "_pending");
@@ -430,51 +674,6 @@
         return active && active.text ? `进度: ${trimLiveStatus(active.text)}` : "";
       }
       return "";
-    }
-
-    function countProcessSteps(panel) {
-      if (!panel || !panel.children) return 0;
-      return panel.querySelectorAll
-        ? panel.querySelectorAll(".live-tool-row, .live-subagent").length
-        : panel.children.length;
-    }
-
-    function updateProcessDetailsLabel(details) {
-      if (!details) return;
-      const summary =
-        details.querySelector(":scope > .msg-process-summary") ||
-        details.querySelector(".msg-process-summary");
-      if (!summary) return;
-      const panel = details.querySelector(".live-subagents");
-      const n = countProcessSteps(panel);
-      summary.textContent = n > 0 ? `执行过程 · ${n} 步` : "执行过程";
-    }
-
-    /**
-     * Wrap a process-trace panel in <details>. Default collapsed when final;
-     * open while live so the user can watch steps without losing the answer below.
-     */
-    function wrapProcessDetails(panel, { open = false, live = false } = {}) {
-      if (!panel) return null;
-      if (panel.classList && panel.classList.contains("msg-process")) {
-        panel.open = open;
-        if (!live) panel.removeAttribute("data-live");
-        else panel.dataset.live = "true";
-        updateProcessDetailsLabel(panel);
-        return panel;
-      }
-      const details = document.createElement("details");
-      details.className = "msg-process";
-      details.open = open;
-      if (live) details.dataset.live = "true";
-      const summary = document.createElement("summary");
-      summary.className = "msg-process-summary";
-      summary.textContent = msg.process || "执行过程";
-      // Move existing panel inside details.
-      if (panel.parentNode) panel.parentNode.insertBefore(details, panel);
-      details.append(summary, panel);
-      updateProcessDetailsLabel(details);
-      return details;
     }
 
     function ensureSubagentPanel(liveItem) {
@@ -850,174 +1049,67 @@
       }
     }
 
-    function appendTraceRow(panel, fields) {
-      const row = document.createElement("div");
-      row.className = "live-subagent live-tool-row status-" + (fields.status || "done");
-      const head = document.createElement("div");
-      head.className = "live-subagent-head";
-      const name = document.createElement("span");
-      name.className = "live-subagent-name";
-      name.textContent = fields.name || "tool";
-      const status = document.createElement("span");
-      status.className = "live-subagent-status status-" + (fields.status || "done");
-      status.textContent = fields.statusText || msg.done || "完成";
-      head.append(name, status);
-      row.appendChild(head);
-      if (fields.task) {
-        const task = document.createElement("div");
-        task.className = "live-subagent-task";
-        task.textContent = fields.task;
-        row.appendChild(task);
-      }
-      if (fields.summary) {
-        const summary = document.createElement("div");
-        summary.className = "live-subagent-summary";
-        summary.textContent = fields.summary;
-        row.appendChild(summary);
-      }
-      panel.appendChild(row);
-    }
-
-    function renderProcessPanel(subById, toolById, commandByKey, options = {}) {
-      if (subById.size === 0 && toolById.size === 0 && commandByKey.size === 0) return null;
-
-      const panel = document.createElement("div");
-      panel.className = "live-subagents live-subagents-final";
-
-      const subagentToolIds = new Set();
-      for (const evt of subById.values()) {
-        if (evt.subagentId) subagentToolIds.add(String(evt.subagentId));
-        if (evt.toolId) subagentToolIds.add(String(evt.toolId));
-        const failed = evt.type === "subagent.failed";
-        const done = evt.type === "subagent.completed" || failed;
-        appendTraceRow(panel, {
-          name: evt.name || evt.toolName || "subagent",
-          status: failed ? "error" : done ? "done" : "running",
-          statusText: failed
-            ? msg.failed || "失败"
-            : done
-              ? msg.success || "成功"
-              : msg.running || "运行中",
-          task: truncateDisplay(evt.task || "", 100),
-          summary: processSummaryFromEvent(evt),
-        });
-      }
-
-      for (const evt of toolById.values()) {
-        if (isTaskLikeTool(evt)) continue;
-        if (evt.toolId && subagentToolIds.has(String(evt.toolId))) continue;
-        const detail = toolDetailFromEvent(evt);
-        const failed = evt.status === "error";
-        const done = evt.type === "tool.finished" || evt.result != null || evt.output != null;
-        appendTraceRow(panel, {
-          name: evt.toolName || "tool",
-          status: failed ? "error" : done ? "done" : "running",
-          statusText: failed
-            ? msg.failed || "失败"
-            : done
-              ? msg.done || "完成"
-              : msg.running || "运行中",
-          task: detail,
-          // Final cards stay compact: only errors get a summary line.
-          summary: failed ? processSummaryFromEvent(evt) : "",
-        });
-      }
-
-      const toolDetails = new Set(
-        [...toolById.values()].map((t) => toolDetailFromEvent(t)).filter(Boolean)
-      );
-      for (const evt of commandByKey.values()) {
-        if (toolDetails.has(evt.command)) continue;
-        const failed = evt.exitCode !== undefined && evt.exitCode !== 0;
-        appendTraceRow(panel, {
-          name: "command",
-          status: failed ? "error" : "done",
-          statusText: failed ? msg.failed || "失败" : msg.done || "完成",
-          task: truncateDisplay(evt.command, 120),
-          summary: failed ? processSummaryFromEvent(evt) : "",
-        });
-      }
-
-      if (!panel.childNodes.length) return null;
-      const open = options.open === true;
-      const live = options.live === true;
-      return wrapProcessDetails(panel, { open, live });
-    }
-
+    /**
+     * Live final panel: flatten run tools/subagents/commands into the same
+     * aggregateProcessBuckets path as history/recall (N1 / Phase B).
+     */
     function buildProcessTraceFromRun(agent, sid) {
       const rt = sessionRuntime(sid);
-      const subById = new Map();
-      const toolById = new Map();
-      const commandByKey = new Map();
+      const flat = [];
       for (const run of rt.liveRuns.values()) {
         if (!run || run.agent !== agent) continue;
         for (const evt of run.subagents || []) {
-          if (!evt) continue;
-          const id = String(evt.subagentId || evt.toolId || evt.name || subById.size);
-          subById.set(id, evt);
+          if (evt) flat.push(evt);
         }
         for (const evt of run.tools || []) {
-          if (!evt) continue;
-          const detail = toolDetailFromEvent(evt);
-          const id = String(evt.toolId || `${evt.toolName || "tool"}:${detail}`);
-          const prev = toolById.get(id) || {};
-          toolById.set(id, {
-            ...prev,
-            ...evt,
-            args: evt.args || prev.args,
-            toolName: evt.toolName || prev.toolName,
-          });
+          if (evt) flat.push(evt);
         }
         for (const evt of run.commands || []) {
-          if (!evt || !evt.command) continue;
-          commandByKey.set(evt.command, evt);
+          if (evt) flat.push(evt);
         }
       }
-      return renderProcessPanel(subById, toolById, commandByKey);
+      const aggregate =
+        typeof processHelpers.aggregateProcessBuckets === "function"
+          ? processHelpers.aggregateProcessBuckets
+          : processPanel.aggregateProcessBuckets;
+      const buckets = aggregate(flat);
+      return renderProcessPanel(buckets.subById, buckets.toolById, buckets.commandByKey);
     }
 
-    function buildProcessPanelFromTranscriptEvents(events) {
-      const subById = new Map();
-      const toolById = new Map();
-      const commandByKey = new Map();
+    /** History hydrate: same buckets + DOM path as recall (collapsed by default). */
+    function buildProcessPanelFromTranscriptEvents(events, options = {}) {
+      const stamped =
+        typeof processHelpers.stampEventNos === "function"
+          ? processHelpers.stampEventNos(events, options.from || 0)
+          : events;
+      return processPanel.fromEvents(stamped, { ...options, events: stamped });
+    }
 
-      for (const evt of events || []) {
-        const kind = evt.kind || evt.type || "";
-        const payload = evt.payload && typeof evt.payload === "object" ? evt.payload : {};
-        const data = payload.type ? payload : { ...payload, type: kind };
-        const type = data.type || kind;
-        if (!type) continue;
-
-        if (type.startsWith("subagent.")) {
-          const id = String(data.subagentId || data.toolId || data.name || subById.size);
-          subById.set(id, { ...data, type });
-          continue;
-        }
-        if (type === "tool.started" || type === "tool.finished") {
-          const detail = toolDetailFromEvent(data);
-          const id = String(data.toolId || `${data.toolName || "tool"}:${detail}`);
-          const prev = toolById.get(id) || {};
-          toolById.set(id, {
-            ...prev,
-            ...data,
-            type,
-            args: data.args || prev.args,
-            toolName: data.toolName || prev.toolName,
-            result: data.result !== undefined ? data.result : prev.result,
-            output: data.output !== undefined ? data.output : prev.output,
-            status: data.status || prev.status,
-          });
-          continue;
-        }
-        if (type === "command.started" || type === "command.finished") {
-          if (data.command) {
-            const prev = commandByKey.get(data.command) || {};
-            commandByKey.set(data.command, { ...prev, ...data, type });
-          }
-        }
+    /**
+     * Open + scroll to an already-hydrated process panel on a message wrapper.
+     * Used by Phase B "回忆" navigation anchor.
+     */
+    function focusProcessPanel(wrapper, options = {}) {
+      if (!wrapper) return false;
+      const process =
+        wrapper.querySelector(".msg-process") ||
+        wrapper.querySelector(".live-subagents");
+      if (!process) return false;
+      if (process.tagName === "DETAILS" || process.classList.contains("msg-process")) {
+        process.open = true;
       }
-
-      return renderProcessPanel(subById, toolById, commandByKey);
+      process.classList.add("is-recall-focus");
+      try {
+        process.scrollIntoView({
+          behavior: options.smooth === false ? "auto" : "smooth",
+          block: "nearest",
+        });
+      } catch {
+        /* ignore */
+      }
+      const clearMs = Number(options.clearMs) || 1600;
+      setTimeout(() => process.classList.remove("is-recall-focus"), clearMs);
+      return true;
     }
 
     async function hydrateProcessTrace(bubble, invocationId) {
@@ -1028,7 +1120,9 @@
         const page = await fetchInvocationEvents(invocationId);
         if (!page.events || page.events.length === 0) return;
         // History hydrate: always collapsed so the answer is primary.
-        const panel = buildProcessPanelFromTranscriptEvents(page.events);
+        const panel = buildProcessPanelFromTranscriptEvents(page.events, {
+          from: page.from || 0,
+        });
         if (!panel) return;
         if (bubble.querySelector(".msg-process, .live-subagents")) return;
         const content = bubble.querySelector(".msg-final-content");
@@ -1446,6 +1540,7 @@
       upsertLiveTool,
       buildProcessTraceFromRun,
       buildProcessPanelFromTranscriptEvents,
+      focusProcessPanel,
       hydrateProcessTrace,
       scheduleHydrateProcessTrace,
       updateThinkingPanel,
@@ -1458,7 +1553,11 @@
     };
   }
 
-  const api = { createMessageView, MESSAGE_VIRTUAL_THRESHOLD };
+  const api = {
+    createMessageView,
+    createProcessPanelRenderer,
+    MESSAGE_VIRTUAL_THRESHOLD,
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   globalScope.MessageView = api;
 })(typeof window !== "undefined" ? window : globalThis);

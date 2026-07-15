@@ -78,7 +78,12 @@ test("list/search/read helpers stay session-scoped", () => {
     endedAt: null,
     state: "active",
     events: [
-      { ts: "2026-01-01T00:00:01.000Z", kind: "stdout", payload: { text: "alpha result" } },
+      {
+        ts: "2026-01-01T00:00:01.000Z",
+        kind: "stdout",
+        payload: { text: "alpha result" },
+        eventNo: 0,
+      },
     ],
     total: 1,
     from: 0,

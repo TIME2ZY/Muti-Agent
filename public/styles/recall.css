@@ -79,7 +79,8 @@
   border-bottom: 1px solid var(--border-subtle);
   border-radius: 0;
   background: transparent;
-  overflow: hidden;
+  /* visible so nested <details> (原始事件) can expand without being clipped */
+  overflow: visible;
   flex-shrink: 0;
   padding-left: 14px;
   transition: background 0.12s;
@@ -337,4 +338,121 @@
 .msg-recall-panel::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--border) 85%, transparent);
   border-radius: 999px;
+}
+
+/* ── Shared process panel inside recall expand ── */
+
+.recall-process-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.recall-item-body .msg-process,
+.msg-recall-panel .msg-process,
+.recall-hit .msg-process {
+  margin: 0;
+  max-width: 100%;
+}
+
+.recall-item-body .live-subagents,
+.msg-recall-panel .live-subagents {
+  max-width: 100%;
+}
+
+.recall-process-empty {
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.recall-process-empty-label {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.recall-process-text-summary {
+  margin-top: var(--space-1);
+  color: var(--text-tertiary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.recall-raw-events {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-1);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  /* Keep interactive; parent list used to steal clicks via row handlers. */
+  position: relative;
+  z-index: 1;
+}
+
+.recall-raw-events-summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  padding: 6px 4px;
+  margin: 0 -4px;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  display: block;
+}
+
+.recall-raw-events-summary:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.recall-raw-events-summary::-webkit-details-marker {
+  display: none;
+}
+
+.recall-raw-events-summary::before {
+  content: "▸ ";
+  opacity: 0.7;
+}
+
+.recall-raw-events[open] > .recall-raw-events-summary::before {
+  content: "▾ ";
+}
+
+.recall-raw-events .recall-events {
+  margin-top: var(--space-1);
+  max-height: min(28vh, 240px);
+  overflow: auto;
+}
+
+/* ── Phase B: event / process focus flash ── */
+
+.live-tool-row.is-event-focus,
+.live-subagent.is-event-focus,
+.recall-event.is-event-focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 1px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
+  border-radius: var(--radius-sm);
+  transition: background 0.25s ease, outline-color 0.25s ease;
+}
+
+.msg-process.is-recall-focus,
+.live-subagents.is-recall-focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  transition: outline-color 0.3s ease;
+}
+
+.recall-hit-static {
+  cursor: default;
+  opacity: 0.92;
+}
+
+.recall-hit-static:hover {
+  background: transparent;
 }

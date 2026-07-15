@@ -2549,18 +2549,47 @@ test("frontend routes stderr SSE into a separate system stderr message", () => {
   assert.doesNotMatch(messageView, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
 });
 
-test("frontend app.js renders semantic recall event bodies for structured events", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
-  assert.match(js, /evt\.kind === "thinking\.delta"/);
-  assert.match(js, /evt\.kind === "tool\.started"/);
-  assert.match(js, /evt\.kind === "tool\.finished"/);
-  assert.match(js, /evt\.kind === "subagent\.started"/);
-  assert.match(js, /evt\.kind === "subagent\.completed"/);
-  assert.match(js, /evt\.kind === "subagent\.failed"/);
-  assert.match(js, /evt\.kind === "command\.started"/);
-  assert.match(js, /evt\.kind === "command\.finished"/);
-  assert.match(js, /evt\.kind === "file\.changed"/);
-  assert.match(js, /evt\.kind === "progress\.update"/);
+test("frontend recall expand uses shared process panel path not flat dump as primary", () => {
+  const recallJs = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
+  const helpersJs = fs.readFileSync(
+    path.join(__dirname, "../public", "message-process-helpers.js"),
+    "utf8"
+  );
+  const messageViewJs = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  // Pure buckets contract lives in helpers; DOM renderer is shared.
+  assert.match(helpersJs, /function aggregateProcessBuckets/);
+  assert.match(helpersJs, /function textDeltaSummary/);
+  assert.match(helpersJs, /function processAnchorFromEvent/);
+  assert.match(helpersJs, /function stampEventNos/);
+  assert.match(messageViewJs, /function createProcessPanelRenderer/);
+  assert.match(appJs, /createProcessPanelRenderer/);
+  assert.match(appJs, /buildProcessPanelFromEvents/);
+  // Recall primary UI is process panel; raw dump is secondary <details>.
+  assert.match(recallJs, /function renderInvocationTrace/);
+  assert.match(recallJs, /buildProcessPanelFromEvents/);
+  assert.match(recallJs, /emptyFallback:\s*true/);
+  assert.match(recallJs, /recall-raw-events/);
+  assert.match(recallJs, /rawEvents/);
+  // Debug dump helper may remain for raw details, but must not be the only path.
+  assert.match(recallJs, /function eventBodyText/);
+  // Recall copy is locale-driven (N2).
+  assert.match(recallJs, /resolveRecallLocale|locale\.recall|R\.toggle/);
+  // Phase B: eventNo focus + message anchor navigation.
+  assert.match(recallJs, /function focusEventInTrace/);
+  assert.match(recallJs, /focusEventNo/);
+  assert.match(recallJs, /focusInlineProcess|focusProcessPanel/);
+  assert.match(messageViewJs, /function focusProcessPanel/);
+  // N1: live final panel uses aggregateProcessBuckets.
+  assert.match(messageViewJs, /function buildProcessTraceFromRun/);
+  assert.match(messageViewJs, /aggregateProcessBuckets/);
+  // Nested <details> must not be toggled by parent row click (冒泡折叠 bug).
+  assert.match(recallJs, /bindBodyInteractionGuard|stopPropagation/);
+  assert.match(recallJs, /head\.addEventListener\("click"/);
+  assert.doesNotMatch(
+    recallJs,
+    /row\.addEventListener\("click",\s*\(\)\s*=>\s*toggleRecallItem/
+  );
 });
 
 test("frontend styles define live subagent cards", () => {
@@ -2572,8 +2601,11 @@ test("frontend styles define live subagent cards", () => {
 
 test("frontend caps recall page size and surfaces truncation state", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
+  const localeJs = fs.readFileSync(path.join(__dirname, "../public", "locale-zh-CN.js"), "utf8");
   assert.match(js, /readInvocation\(sid,\s*invocationId,\s*\{\s*from:\s*0,\s*limit:\s*200\s*\}\)/);
-  assert.match(js, /仅显示前/);
+  // Truncation copy lives in locale.recall.pageTruncated; panel calls it.
+  assert.match(js, /pageTruncated/);
+  assert.match(localeJs, /pageTruncated:\s*\(shown,\s*total\)/);
 });
 
 test("app.js stays an orchestrator under line budget after P0 split", () => {
