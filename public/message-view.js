@@ -338,10 +338,8 @@
     // Shared renderer: same DOM path as recall panel (locale injected).
     const processPanel = createProcessPanelRenderer({ locale: L });
     const {
-      appendTraceRow,
       wrapProcessDetails,
       updateProcessDetailsLabel,
-      countProcessSteps,
       renderProcessPanel,
     } = processPanel;
 
