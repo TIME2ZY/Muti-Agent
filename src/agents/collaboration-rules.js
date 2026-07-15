@@ -28,6 +28,27 @@ function buildRosterTable(agents) {
 }
 
 /**
+ * Pick any teammate other than the current agent for examples.
+ * Avoids "correct example: @Self" contradicting "do not @ yourself".
+ *
+ * @param {string} currentAgentId
+ * @param {Record<string, { id?: string, label?: string }>} agents
+ * @returns {{ id: string, label: string }}
+ */
+function pickExampleTarget(currentAgentId, agents) {
+  const selfId = String(currentAgentId || "").trim();
+  const entries = Object.entries(agents || {});
+  for (const [id, config] of entries) {
+    if (!config || typeof config !== "object") continue;
+    if (id === selfId) continue;
+    const label = String(config.label || id).trim() || id;
+    return { id, label };
+  }
+  // Solo catalog (or empty): fall back to a generic placeholder label.
+  return { id: "teammate", label: "Teammate" };
+}
+
+/**
  * Render the collaboration-rules block for prompt injection.
  *
  * @param {string} currentAgentId
@@ -38,6 +59,7 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS) {
   const selfId = String(currentAgentId || "").trim();
   const selfConfig = agents && selfId ? agents[selfId] : null;
   const selfLabel = selfConfig?.label || selfId || "（当前）";
+  const example = pickExampleTarget(selfId, agents);
   const roster = buildRosterTable(agents);
 
   return `<!-- Collaboration Rules -->
@@ -48,6 +70,7 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS) {
 ### 禁止
 - 不要使用 CLI 内嵌的 subagent / Task / Agent / spawn_subagent / 探索或计划子代理
 - 不要在后台黑盒派生子会话去做调研、review 或实现
+- 不要通过 shell、脚本或再次启动其他 Agent CLI 来绕过本规则
 - 这些路径在本平台不可见、不可路由、不可审计，视为绕路
 
 ### 正确做法
@@ -60,17 +83,18 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS) {
     方案已定，交给实现。
 
     \`\`\`handoff
-    to: Grok
+    to: ${example.label}
     what: 给登录按钮加 loading + disabled
     why: 防重复提交
     next_action: 改组件并补单测
     \`\`\`
 
-    @Grok
+    @${example.label}
 
 **错误示例：**
-- \`请 @Grok 帮忙实现\` ← 句中 @，不路由
+- \`请 @${example.label} 帮忙实现\` ← 句中 @，不路由
 - 使用 Task / spawn_subagent 开探索子代理 ← 隐式 subagent，禁止
+- 在 shell 里再次启动其他 Agent CLI ← 间接嵌套，禁止
 
 ### 传球三选一（本轮结束前必选其一）
 1. **自己能做完** → 直接做完，不 @
@@ -88,4 +112,5 @@ ${roster}
 module.exports = {
   renderCollaborationRules,
   buildRosterTable,
+  pickExampleTarget,
 };

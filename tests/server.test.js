@@ -282,6 +282,8 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       assert.ok(calls[0].args[3].includes("hello"), `Expected prompt to contain "hello", got: ${calls[0].args[3]?.slice(-50)}`);
       assert.ok(calls[0].args[3].includes("APPLICATION SKILL"), "Expected augmented prompt to contain APPLICATION SKILL marker");
       assert.ok(calls[0].args[3].includes("MCP 回调工具说明"), "Expected prompt to contain callback instructions");
+      // Soft collab rules must be present on the first (non-A2A) turn.
+      assert.match(calls[0].args[3], /<!-- Collaboration Rules -->/);
       assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"partial "\}/);
       assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"answer"\}/);
       // Verify session event is emitted
@@ -549,6 +551,9 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
       assert.equal(prompts.length, 2);
       assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"codex"[^\n]*"to":"gemini"/);
       assert.match(text, /event: handoff-parsed\ndata: \{[^\n]*"to":"gemini"/);
+      // Soft collab rules on first turn and A2A follow-up turn.
+      assert.match(prompts[0], /<!-- Collaboration Rules -->/);
+      assert.match(prompts[1], /<!-- Collaboration Rules -->/);
       assert.match(prompts[1], /任务交接/);
       assert.match(prompts[1], /codex result/);
       assert.match(prompts[1], /用户原始请求/);
