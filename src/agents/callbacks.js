@@ -234,7 +234,7 @@ curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/
 \`\`\`
 
 用法示例：
-- 发现需要别人处理的问题 → 发消息并 @ 对方
+- 发现需要别人处理的问题 → 发消息/回复，行首 @ 对方（不要 spawn 子代理）
 - 想主动汇报进度 → 直接发消息
 - 需要更多上下文 → 发消息询问
 - 想"回忆"之前做过的决策 → 用下面的 session-search / read-invocation
@@ -242,6 +242,8 @@ curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/
 注意：
 - @mention 必须单独出现在行首才会触发路由（例如 \`@Codex 请 review\`）
 - 代码块内的 @mention 不会被路由
+- 跨 Agent 协作只用行首 @mention；禁止使用 CLI 内嵌 subagent / Task / Agent / spawn_subagent
+- 需要别人做事：另起一行写 @对方，并尽量附 \`\`\`handoff 块
 - 不要 @ 自己
 - \`sessionId\` 必须使用 \`$SHIFT_THREAD_ID\`，不要伪造
 - callbackToken 有 TTL（默认 30 分钟），过期会 401

@@ -5,6 +5,7 @@ const {
   resolveCoalesceOptionsFromEnv,
 } = require("./stream-delta-coalescer");
 const { ENV } = require("../shared/brand");
+const { renderCollaborationRules } = require("../agents/collaboration-rules");
 
 const NOOP_DURABLE_RECORDER = Object.freeze({
   ensureWindow: () => null,
@@ -371,12 +372,14 @@ function createChatRoutes({
 
         // Prompt layout (top → bottom):
         //   1. Agent identity (every turn, including A2A)
-        //   2. Session bootstrap (first turn only: coords + digest + recall)
-        //   3. Light session header on later turns (correct agent label)
-        //   4. Task body (user/skills or structured handoff)
-        //   5. Callback instructions
+        //   2. Collaboration rules (every turn: soft ban nested subagents)
+        //   3. Session bootstrap (first turn only: coords + digest + recall)
+        //   4. Light session header on later turns (correct agent label)
+        //   5. Task body (user/skills or structured handoff)
+        //   6. Callback instructions
         const identityBlock = agentIdentity.renderIdentityBlock(agent, agentConfig);
-        const promptParts = [identityBlock];
+        const collaborationBlock = renderCollaborationRules(agent, AGENTS);
+        const promptParts = [identityBlock, collaborationBlock];
         if (i === 0) {
           promptParts.push(bootstrapPacket, augmentedPrompt);
         } else {

@@ -10,6 +10,7 @@ boundaries:
   - 架构与产品方向不确定时问用户或 @Codex
   - 需要灵感时 @Gemini
   - 写完必须 @OpenCode 做 review
+  - 禁止 CLI 内嵌 subagent；需要队友时用行首 @ 交接
 ---
 
 # 你是谁
