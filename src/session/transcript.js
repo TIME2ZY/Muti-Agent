@@ -161,11 +161,17 @@ async function readInvocationPage(sessionId, invocationId, opts = {}) {
   const { from = 0, limit = 200 } = opts;
   const events = await readInvocation(sessionId, invocationId);
   const total = events.length;
-  const sliceEnd = limit > 0 ? Math.min(events.length, from + limit) : events.length;
+  const start = Math.max(0, Number(from) || 0);
+  const sliceEnd = limit > 0 ? Math.min(events.length, start + limit) : events.length;
+  // Stamp absolute eventNo so clients can focus search hits (Phase B).
   return {
-    events: events.slice(from, sliceEnd),
+    events: events.slice(start, sliceEnd).map((evt, i) =>
+      evt && typeof evt === "object" && !Number.isInteger(evt.eventNo)
+        ? { ...evt, eventNo: start + i }
+        : evt
+    ),
     total,
-    from,
+    from: start,
     limit,
   };
 }

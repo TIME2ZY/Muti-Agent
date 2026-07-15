@@ -221,6 +221,12 @@
     onAfterDiscard: loadWorktreeStatus,
   });
 
+  // One process-panel renderer for message hydrate + recall expand (locale injected).
+  const processPanelRenderer = window.MessageView.createProcessPanelRenderer();
+
+  // Lazy bind: messageView.focusProcessPanel is available after createMessageView.
+  let focusProcessPanelRef = null;
+
   const recallPanel = window.RecallPanel.createRecallPanel({
     bodyEl: recallBodyEl,
     searchInputEl: recallSearchInputEl,
@@ -229,6 +235,10 @@
     agentLabel,
     fmtTime,
     escHtml,
+    locale: window.Locale || window.LocaleZhCN,
+    buildProcessPanelFromEvents: (events, opts) => processPanelRenderer.fromEvents(events, opts),
+    focusProcessPanel: (wrapper, opts) =>
+      typeof focusProcessPanelRef === "function" ? focusProcessPanelRef(wrapper, opts) : false,
   });
   recallPanel.bindSearch();
 
@@ -261,6 +271,7 @@
     getChatClient: () => chatClient,
     promptEl,
   });
+  focusProcessPanelRef = messageView.focusProcessPanel;
   messageView.bindCodeBlockDelegates(document);
 
   const {

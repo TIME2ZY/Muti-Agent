@@ -90,7 +90,11 @@ function readInvocationFromMap(map, sessionId, invocationId, from, limit) {
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     state: record.state,
-    events: record.events.slice(start, start + lim),
+    events: record.events.slice(start, start + lim).map((evt, i) =>
+      evt && typeof evt === "object" && !Number.isInteger(evt.eventNo)
+        ? { ...evt, eventNo: start + i }
+        : evt
+    ),
     total: record.events.length,
     from: start,
     limit: lim,

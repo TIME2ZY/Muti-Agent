@@ -40,6 +40,7 @@
       done: "完成",
       success: "成功",
       failed: "失败",
+      noTools: "无工具调用",
       progressDone: (n) => `进度 · ${n} 步已完成`,
       progressPartial: (done, total) => `进度 · ${done}/${total}`,
     },
@@ -75,6 +76,22 @@
       tabWorkspace: "工作区",
       tabRecall: "回忆",
       worktreeChip: "改代码",
+    },
+
+    recall: {
+      toggle: "回忆",
+      toggleTitle: "定位到本次调用的执行过程",
+      noEvents: "无事件记录",
+      noTools: "无工具调用",
+      rawEvents: (n) => `原始事件 · ${n}`,
+      pageTruncated: (shown, total) => `仅显示前 ${shown} 条事件，完整记录共 ${total} 条`,
+      loading: "加载中…",
+      loadFailed: (msg) => `加载失败: ${msg}`,
+      searching: "搜索中…",
+      searchFailed: (msg) => `搜索失败: ${msg}`,
+      noSession: "暂无会话",
+      emptyList: "本会话暂无调用记录",
+      noHits: "无匹配结果",
     },
   };
 

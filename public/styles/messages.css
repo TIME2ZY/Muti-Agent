@@ -893,6 +893,19 @@
   text-overflow: ellipsis;
 }
 
+/* Phase B: flash when message "回忆" navigates to process panel */
+.msg-process.is-recall-focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.msg-process .live-tool-row.is-event-focus,
+.msg-process .live-subagent.is-event-focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 1px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
+}
+
 .msg-process .live-subagent-summary:empty {
   display: none;
 }
