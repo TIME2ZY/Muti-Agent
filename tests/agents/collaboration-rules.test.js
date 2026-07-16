@@ -67,7 +67,7 @@ test("renderCollaborationRules accepts injected fake agents", () => {
   assert.doesNotMatch(text, /@Codex/);
   // Example should use Beta (not Alpha/self).
   assert.match(text, /@Beta/);
-  assert.doesNotMatch(text, /^    @Alpha$/m);
+  assert.doesNotMatch(text, /^ {4}@Alpha$/m);
 });
 
 test("buildRosterTable handles empty agents", () => {
