@@ -19,7 +19,28 @@ const SCALAR_FIELDS = new Set([
 ]);
 const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
 
-const DEFAULT_APPENDIX_CHARS = 2000;
+/** Structured pack: keep more of the prior narrative (reviews are often long). */
+const DEFAULT_APPENDIX_CHARS = 5000;
+/** No handoff fence: even more of the prior text is the only payload. */
+const DEGRADED_APPENDIX_CHARS = 8000;
+
+/** Prefer keeping windows that contain these review/handoff anchors. */
+const APPENDIX_ANCHORS = [
+  "request-changes",
+  "approve-with-nits",
+  "```handoff",
+  "结论:",
+  "结论：",
+  "P0",
+  "P1",
+  "## Review",
+  "## 评审",
+  "### P0",
+  "### P1",
+];
+
+const IMPLEMENTER_AGENT_IDS = new Set(["grok"]);
+const REVIEWER_AGENT_IDS = new Set(["opencode"]);
 
 /**
  * @typedef {object} Handoff
@@ -115,6 +136,13 @@ function parseHandoffBody(body) {
         }
         continue;
       }
+
+      // Unknown key (e.g. review-only verdict/nits): do NOT append to the
+      // previous scalar — that polluted `to` and broke routing checks.
+      flushScalar();
+      currentKey = null;
+      currentIsList = false;
+      continue;
     }
 
     // Continuation / list item under current key
@@ -135,6 +163,12 @@ function parseHandoffBody(body) {
     }
   }
   flushScalar();
+
+  // `to` is a single agent token — keep first line only if a model wrapped junk.
+  if (typeof handoff.to === "string") {
+    handoff.to = handoff.to.split(/\r?\n/)[0].trim();
+    if (!handoff.to) delete handoff.to;
+  }
 
   // Normalize empty arrays away
   for (const key of LIST_FIELDS) {
@@ -180,7 +214,9 @@ function extractPrimaryHandoff(text, opts = {}) {
 
 function normalizeTo(value) {
   if (!value) return "";
-  return String(value).trim().replace(/^@/, "").toLowerCase();
+  // First line only — models sometimes leak multi-line junk into `to`.
+  const firstLine = String(value).split(/\r?\n/)[0].trim();
+  return firstLine.replace(/^@/, "").toLowerCase();
 }
 
 /**
@@ -224,6 +260,98 @@ function hasValue(v) {
 }
 
 /**
+ * Compact handoff reminder for A2A turns (avoids re-injecting the full
+ * always-on a2a-handoff skill body — collaboration rules already cover basics).
+ * @returns {string}
+ */
+function renderA2AHandoffCard() {
+  return `<!-- A2A Handoff Card -->
+## 共用 handoff 提醒（精简）
+
+出站交接：行首 \`@队友\` + 同一套 fence；**可选字段可空**；禁止 \`verdict\`/\`nits\`/\`blocking\` 等私有顶层 key。
+
+\`\`\`handoff
+to: <agent>
+goal: <可空>
+what: <尽量填：交什么 / 审什么 / 结论: approve|approve-with-nits|request-changes + 分级列表>
+why: <尽量填>
+tradeoff: <可空>
+next_action: <尽量填：希望对方立刻做什么>
+open_questions:  # 可空
+files:           # 可空
+evidence:        # 可空
+\`\`\`
+
+入站：优先执行 Structured Handoff；缺项先补上下文，勿表演性附和。
+<!-- /A2A Handoff Card -->`;
+}
+
+/**
+ * Pick an appendix window: prefer the tail, but if review/handoff anchors would
+ * be cut off, start near the earliest anchor so P0/结论 stay visible.
+ *
+ * @param {string} text
+ * @param {number} maxChars
+ * @returns {string}
+ */
+function selectAppendix(text, maxChars) {
+  const s = String(text || "");
+  const limit = Math.max(0, Number(maxChars) || 0);
+  if (!s || limit === 0) return "";
+  if (s.length <= limit) return s.trim();
+
+  let earliestAnchor = -1;
+  for (const marker of APPENDIX_ANCHORS) {
+    const idx = s.indexOf(marker);
+    if (idx >= 0 && (earliestAnchor < 0 || idx < earliestAnchor)) {
+      earliestAnchor = idx;
+    }
+  }
+
+  const tailStart = s.length - limit;
+  if (earliestAnchor >= 0 && earliestAnchor < tailStart) {
+    const start = Math.max(0, earliestAnchor - 80);
+    return s.slice(start, start + limit).trim();
+  }
+  return s.slice(tailStart).trim();
+}
+
+/**
+ * Whether the A2A target should receive the receiving-review skill.
+ * Implementers fixing after a reviewer (or review-shaped handoff) need it.
+ *
+ * @param {{ targetAgentId?: string, fromAgentId?: string, handoff?: Handoff | null, text?: string }} opts
+ * @returns {boolean}
+ */
+function shouldInjectReceivingReview(opts = {}) {
+  const target = String(opts.targetAgentId || "")
+    .trim()
+    .toLowerCase();
+  if (!IMPLEMENTER_AGENT_IDS.has(target)) return false;
+
+  const from = String(opts.fromAgentId || "")
+    .trim()
+    .toLowerCase();
+  if (REVIEWER_AGENT_IDS.has(from)) return true;
+
+  const handoff = opts.handoff || null;
+  const blob = [
+    handoff && handoff.what,
+    handoff && handoff.why,
+    handoff && handoff.next_action,
+    handoff && handoff.goal,
+    opts.text,
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+
+  return /request-changes|approve-with-nits|\bp0\b|\bp1\b|review\s*意见|修改意见|请修|fix these|blocking/.test(
+    blob
+  );
+}
+
+/**
  * Render the task body for the next agent from a structured handoff.
  *
  * @param {object} opts
@@ -256,7 +384,10 @@ function renderHandoffTask(opts) {
       fromContent,
       userPrompt,
       missing: quality.missing,
-      appendixChars,
+      appendixChars:
+        appendixChars === DEFAULT_APPENDIX_CHARS
+          ? DEGRADED_APPENDIX_CHARS
+          : Math.max(appendixChars, DEGRADED_APPENDIX_CHARS),
     });
   }
 
@@ -288,7 +419,7 @@ function renderHandoffTask(opts) {
 
   lines.push("=== 用户原始请求 ===", userPrompt || "(无)", "");
 
-  const appendix = String(fromContent || "").slice(-appendixChars).trim();
+  const appendix = selectAppendix(fromContent, appendixChars);
   if (appendix) {
     lines.push(
       `=== ${label} 原文附录（截断） ===`,
@@ -313,10 +444,10 @@ function renderDegradedHandoff(opts) {
     fromContent = "",
     userPrompt = "",
     missing = REQUIRED_FIELDS.slice(),
-    appendixChars = DEFAULT_APPENDIX_CHARS,
+    appendixChars = DEGRADED_APPENDIX_CHARS,
   } = opts;
   const label = fromLabel || fromAgent || "previous agent";
-  const prevBlock = String(fromContent || "").slice(-Math.max(appendixChars, 4000));
+  const prevBlock = selectAppendix(fromContent, Math.max(appendixChars, DEGRADED_APPENDIX_CHARS));
 
   return [
     `[任务交接：由 ${label} 转交给你]`,
@@ -369,12 +500,18 @@ module.exports = {
   REQUIRED_FIELDS,
   RECOMMENDED_FIELDS,
   DEFAULT_APPENDIX_CHARS,
+  DEGRADED_APPENDIX_CHARS,
+  IMPLEMENTER_AGENT_IDS,
+  REVIEWER_AGENT_IDS,
   parseHandoffBlocks,
   parseHandoffBody,
   extractPrimaryHandoff,
   evaluateHandoff,
   renderHandoffTask,
   renderDegradedHandoff,
+  renderA2AHandoffCard,
+  selectAppendix,
+  shouldInjectReceivingReview,
   summarizeHandoff,
   normalizeTo,
 };

@@ -227,6 +227,35 @@ test("a2a-route paints system notice when session is active", () => {
   assert.equal(runtimeStore.get("s1").systemNotices.length, 1);
 });
 
+test("a2a-skipped paints system notice when session is active", () => {
+  const calls = [];
+  const runtimeStore = createRuntimeStore();
+  const deps = makeDeps({
+    runtimeStore,
+    state: {
+      currentSessionId: "s1",
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+    },
+    addSystem(text) { calls.push(text); },
+    agentLabel: (id) => id,
+  });
+  const client = chatClientModule.createChatClient(deps);
+
+  client.handleSseEvent(
+    "a2a-skipped",
+    { from: "opencode", to: "grok", reason: "max_depth", maxDepth: 15 },
+    { sessionId: "s1" }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /opencode.*grok/);
+  assert.match(calls[0], /深度上限|未入队/);
+  assert.equal(runtimeStore.get("s1").systemNotices[0].kind, "a2a-skipped");
+});
+
 test("agent-exit finalizes the agent so handoffs clear writing state", () => {
   const finalized = [];
   const runtimeStore = createRuntimeStore();

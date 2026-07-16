@@ -1,6 +1,6 @@
 ---
 name: a2a-handoff
-description: Agent 之间通过 @mention 自动路由 — 何时 @、怎么 @、必须附带 handoff 块
+description: Agent 之间通过 @mention 自动路由 — 全员共用 handoff 模板，可选字段可空
 triggers:
   - "@Codex"
   - "@Gemini"
@@ -14,7 +14,10 @@ always: true
 
 # Agent-to-Agent 路由规则
 
-你是多 Agent 协作系统中的一个 Agent。需要其他 Agent 介入时，通过行首 `@AgentName` 路由，并**必须**附带标准 `handoff` 块。
+你是多 Agent 协作系统中的一个 Agent。需要其他 Agent 介入时：
+
+1. **行首** `@AgentName`（触发路由）
+2. **同一条回复**附标准 ` ```handoff ` 块（全员同一套字段）
 
 ## 当前 Agent 阵容
 
@@ -22,39 +25,35 @@ always: true
 |-------|----|------|-----------|
 | **@Codex** | codex | 推理与讨论、方案权衡、与 Gemini 交叉验证 | 想清楚问题、要方案、要收敛 |
 | **@Gemini** | gemini | 想法发散、头脑风暴 | 要新鲜角度、多方案灵感 |
-| **@Grok** | grok | 写代码、改功能、跑测试 | 要落地实现 |
+| **@Grok** | grok | 写代码、改功能、跑测试 | 要落地实现 / 按 review 回修 |
 | **@OpenCode** | opencode | 代码评审与放行 | 实现完成或修复后确认 |
 
-> 路由写 `@名字` 或 `@id` 均可（现已对齐）。
+> 路由写 `@名字` 或 `@id` 均可。同一 agent 可在链路中再次入队（例如 Grok → OpenCode → Grok）。
 
 推荐链路：
 
-> `@Gemini` 发散 → `@Codex` 收敛/互证 → `@Grok` 实现 → `@OpenCode` review →（可选）`@Codex` 合入确认
+> `@Gemini` 发散 → `@Codex` 收敛 → `@Grok` 实现 → `@OpenCode` review →（需改则）`@Grok` 回修 → `@OpenCode` 再确认
 
-## 出口检查（发送前必须执行）
+## 出口检查
 
 ```
 回复前问自己："到我这里结束了吗？"
 ```
 
-- **如果还需要下一个 Agent 采取行动** → 行首 `@` + 完整 `handoff` 块
-- **如果不需要别人行动** → 再问对方是否需要知道 / 是否影响对方；两个都否 → 不 @
+- **还需要下一个 Agent 行动** → 行首 `@` + 完整 handoff 块
+- **不需要别人行动**（例如 approve 可合入）→ 不要 @
 
-## 格式要求（两段都要）
+## 全员共用 handoff 模板
 
-### 1) 行首 @mention（触发路由）
+**只允许下列顶层字段。** 没有的内容就空着（省略该行）；**禁止** `verdict` / `nits` / `blocking` / `status` 等私有 key。
 
-```
-@OpenCode
-```
-
-- 必须在**行首**（前面只能有空白）
-- 代码块内的 `@` **不会**触发路由
-- 不要 @ 自己
-
-### 2) 标准 handoff 块（机器可读，必填）
-
-在同一条回复中附上：
+| 字段 | 策略 |
+|------|------|
+| `to` | 推荐，与行首 @ 一致 |
+| `what` | 尽量填：交了什么 / 审了什么 / 结论 |
+| `why` | 尽量填：为什么交 / 为何要改 / 为何阻塞 |
+| `next_action` | 尽量填：希望对方立刻做什么 |
+| `goal` / `tradeoff` / `open_questions` / `files` / `evidence` | 可选，可空 |
 
 ````markdown
 ```handoff
@@ -73,3 +72,33 @@ evidence:
   - npm test -- tests/auth.test.js 通过
 ```
 ````
+
+### Review 结论也写进同一模板（不要第二套 schema）
+
+把评审结论映射进 `what` / `why` / `next_action`：
+
+````markdown
+```handoff
+to: grok
+goal: 按 review 修完再回审
+what: |
+  结论: request-changes
+  P0:
+  - src/foo.js: CAS 竞态（步骤 3-4 窗口）
+  P1:
+  - 缺并发单测
+why: P0 在并发下会丢更新，不能合入
+next_action: 修 P0，补并发单测，再 @OpenCode
+files:
+  - src/foo.js
+  - tests/foo.test.js
+```
+````
+
+放行且无需行动：写清 `what: 结论: approve`（或 approve-with-nits），**不要**行首 @。
+
+## 格式注意
+
+- `@` 必须在**行首**（前面只能有空白）
+- 代码块内的 `@` **不会**触发路由
+- 不要 @ 自己

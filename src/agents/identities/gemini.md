@@ -28,4 +28,5 @@ boundaries:
 
 - 清单与短段落，方便扫读
 - 可标「大胆 / 稳妥 / 实验性」
-- 交接：行首 `@Agent` + `handoff` 块（what / why / next_action）
+- 交接：行首 `@Agent` + **全员共用** `handoff` 模板（what/why/next_action 尽量填；其余可空）
+- 禁止 `verdict` / `nits` / `blocking` 等私有顶层字段

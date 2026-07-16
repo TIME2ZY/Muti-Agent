@@ -169,11 +169,8 @@ function postMessage(threadId, invocationId, content, { appendToSession, durable
   const maxDepth = getMaxA2ADepth();
   for (const target of mentions) {
     if (thread.controller && thread.controller.signal.aborted) break;
-    if (thread.a2aCount >= maxDepth) break;
-    if (!thread.worklist.includes(target)) {
-      thread.worklist.push(target);
-      thread.a2aCount += 1;
-      const routeText = `🔄 ${agent} → ${target}`;
+    if (thread.a2aCount >= maxDepth) {
+      const skipText = `⏭ ${agent} → ${target}（已达 A2A 深度上限 ${maxDepth}，未入队）`;
       if (appendToSession && thread.sessionsFile) {
         appendToSession(
           thread.sessionsFile,
@@ -181,26 +178,73 @@ function postMessage(threadId, invocationId, content, { appendToSession, durable
           {
             role: "system",
             agent: "system",
-            content: routeText,
-            kind: "a2a-route",
+            content: skipText,
+            kind: "a2a-skipped",
             from: agent,
             to: target,
+            reason: "max_depth",
+            maxDepth,
             source: "callback",
           },
           { allowCreate: false }
         );
       }
-      sendSse(thread.res, "a2a-route", { from: agent, to: target });
+      sendSse(thread.res, "a2a-skipped", {
+        from: agent,
+        to: target,
+        reason: "max_depth",
+        maxDepth,
+      });
       if (currentInvocationId) {
-        transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "a2a-route", {
+        transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "a2a-skipped", {
           from: agent,
           to: target,
+          reason: "max_depth",
+          maxDepth,
         });
-        durableRecorder?.appendInvocationEvent(currentInvocationId, "a2a-route", {
+        durableRecorder?.appendInvocationEvent(currentInvocationId, "a2a-skipped", {
           from: agent,
           to: target,
+          reason: "max_depth",
+          maxDepth,
         });
       }
+      continue;
+    }
+    // Re-entry allowed (same agent may run again after a teammate, e.g. fix loop).
+    thread.worklist.push(target);
+    thread.a2aCount += 1;
+    const reentry = thread.worklist.filter((id) => id === target).length > 1;
+    const routeText = `🔄 ${agent} → ${target}`;
+    if (appendToSession && thread.sessionsFile) {
+      appendToSession(
+        thread.sessionsFile,
+        thread.sessionId || threadId,
+        {
+          role: "system",
+          agent: "system",
+          content: routeText,
+          kind: "a2a-route",
+          from: agent,
+          to: target,
+          source: "callback",
+          reentry,
+        },
+        { allowCreate: false }
+      );
+    }
+    sendSse(thread.res, "a2a-route", { from: agent, to: target, reentry });
+    if (currentInvocationId) {
+      transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "a2a-route", {
+        from: agent,
+        to: target,
+        reentry,
+      });
+      durableRecorder?.appendInvocationEvent(currentInvocationId, "a2a-route", {
+        from: agent,
+        to: target,
+        reentry,
+      });
     }
   }
 

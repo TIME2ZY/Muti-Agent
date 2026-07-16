@@ -1617,10 +1617,19 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   assert.match(appended[1].msg.content, /codex.*gemini/);
   assert.equal(worklist.includes("gemini"), true);
   assert.equal(threadCtx.a2aCount, 1);
+  assert.deepEqual(worklist, ["codex", "gemini"]);
 
   const joined = sseEvents.join("");
   assert.match(joined, /event: message\ndata: \{"agent":"codex","role":"assistant","text":"@Gemini 请继续实现"\}/);
-  assert.match(joined, /event: a2a-route\ndata: \{"from":"codex","to":"gemini"\}/);
+  assert.match(joined, /event: a2a-route\ndata: \{"from":"codex","to":"gemini"/);
+
+  // Same target may re-enter via callback even if already on the worklist.
+  const ok2 = callbacks.postMessage(sessionId, invocationId, "@Gemini 请按补充意见继续", {
+    appendToSession: appendFn,
+  });
+  assert.equal(ok2, true);
+  assert.deepEqual(worklist, ["codex", "gemini", "gemini"]);
+  assert.equal(threadCtx.a2aCount, 2);
 
   callbacks.unregisterThread(sessionId);
 });
@@ -2913,6 +2922,93 @@ test("A2A-routed agents receive structured handoff fields when present", async (
   assert.match(prompts[1], /交接包完整度: ok/);
   assert.match(prompts[1], /做登录/);
   assert.doesNotMatch(prompts[1], /未提供标准/);
+  // A2A follow-up gets compact card (not full always-on a2a-handoff skill body).
+  assert.match(prompts[1], /A2A Handoff Card/);
+  assert.doesNotMatch(prompts[1], /APPLICATION SKILL: a2a-handoff/);
+});
+
+test("A2A allows the same agent to re-enter worklist (review → fix)", async () => {
+  const prompts = [];
+  const agentsSeen = [];
+  const grokOut1 = [
+    "@OpenCode",
+    "",
+    "```handoff",
+    "to: opencode",
+    "what: 实现了登录",
+    "why: 需要鉴权",
+    "next_action: 请 review",
+    "```",
+  ].join("\n");
+  const openCodeOut = [
+    "@Grok",
+    "",
+    "```handoff",
+    "to: grok",
+    "what: |",
+    "  结论: request-changes",
+    "  P0: 缺空指针检查",
+    "why: 可崩溃",
+    "next_action: 修 P0 后回审",
+    "```",
+  ].join("\n");
+
+  await withServer(
+    {
+      initialSessionIds: ["reentry-handoff-test"],
+      spawnRunner(command, args) {
+        const agent = args[2];
+        agentsSeen.push(agent);
+        prompts.push(args[args.length - 1]);
+        const child = createMockChild();
+        process.nextTick(() => {
+          let text = "done";
+          if (agent === "grok" && agentsSeen.filter((a) => a === "grok").length === 1) {
+            text = grokOut1;
+          } else if (agent === "opencode") {
+            text = openCodeOut;
+          } else if (agent === "grok") {
+            text = "fixed p0";
+          }
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent,
+              invocationId: `reentry-${agentsSeen.length}`,
+              text,
+            }) + "\n"
+          );
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agent: "grok",
+          prompt: "做登录并走 review",
+          sessionId: "reentry-handoff-test",
+        }),
+      });
+      const text = await response.text();
+      assert.equal(response.status, 200);
+      assert.deepEqual(agentsSeen, ["grok", "opencode", "grok"]);
+      assert.equal(prompts.length, 3);
+      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"grok"[^\n]*"to":"opencode"/);
+      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"opencode"[^\n]*"to":"grok"/);
+      assert.match(text, /"reentry":true/);
+      // Second Grok turn: structured handoff + compact card + receiving-review.
+      assert.match(prompts[2], /任务交接/);
+      assert.match(prompts[2], /request-changes|缺空指针/);
+      assert.match(prompts[2], /A2A Handoff Card/);
+      assert.match(prompts[2], /APPLICATION SKILL: receiving-review/);
+      assert.doesNotMatch(prompts[2], /APPLICATION SKILL: a2a-handoff/);
+      assert.match(prompts[2], /<!-- Agent Identity: grok/);
+    }
+  );
 });
 
 test("bootstrap digest lists prior invocations when chat is re-entered with same sessionId", async () => {

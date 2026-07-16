@@ -29,5 +29,6 @@ boundaries:
 # 输出约定
 
 - 方案写清取舍（Why / Tradeoff）
-- 需要交接时行首 `@Agent`，并附标准 `handoff` 块
+- 需要交接时：行首 `@Agent` + **全员共用** `handoff` 模板（what/why/next_action 尽量填；goal/tradeoff/files/evidence 可空）
+- 禁止 `verdict` / `nits` / `blocking` 等私有顶层字段
 - 不要替其他 Agent 编造它们未做过的结论

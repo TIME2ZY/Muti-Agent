@@ -74,19 +74,25 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS) {
 - 这些路径在本平台不可见、不可路由、不可审计，视为绕路
 
 ### 正确做法
-需要其他 Agent 时：在回复中**另起一行、行首**写 \`@队友\`，并尽量附标准 \`\`\`handoff 块。
+需要其他 Agent 时：在回复中**另起一行、行首**写 \`@队友\`，并附**全员共用**的 \`\`\`handoff 块（可选字段可空，勿发明新顶层 key）。
 - 句中 @、代码块内 @ **不会**触发路由
 - 禁止 @ 自己（你是 ${selfLabel} / ${selfId || "unknown"}）
 
-**正确示例：**
-
-    方案已定，交给实现。
+**共用模板（机器可读）：**
 
     \`\`\`handoff
     to: ${example.label}
-    what: 给登录按钮加 loading + disabled
-    why: 防重复提交
-    next_action: 改组件并补单测
+    goal: <可空>
+    what: <交什么 / 审什么 — 尽量填>
+    why: <为什么 — 尽量填>
+    tradeoff: <可空>
+    next_action: <希望对方立刻做什么 — 尽量填>
+    open_questions:
+      - <可空>
+    files:
+      - <可空>
+    evidence:
+      - <可空>
     \`\`\`
 
     @${example.label}
@@ -95,10 +101,11 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS) {
 - \`请 @${example.label} 帮忙实现\` ← 句中 @，不路由
 - 使用 Task / spawn_subagent 开探索子代理 ← 隐式 subagent，禁止
 - 在 shell 里再次启动其他 Agent CLI ← 间接嵌套，禁止
+- 写 \`verdict\` / \`nits\` / \`blocking\` 等私有顶层字段 ← 解析器不认，会丢信息
 
 ### 传球三选一（本轮结束前必选其一）
 1. **自己能做完** → 直接做完，不 @
-2. **另一只 Agent 更合适** → 行首 @对方 + handoff
+2. **另一只 Agent 更合适** → 行首 @对方 + 共用 handoff 模板
 3. **只有用户能决策** → 问用户（不要假装 @ 不存在的 agent）
 
 ### 队友花名册

@@ -162,6 +162,16 @@
           if (active) addSystem(text);
           break;
         }
+        case "a2a-skipped": {
+          const fromLabel = agentLabel(data.from);
+          const toLabel = agentLabel(data.to);
+          const reason = data.reason === "max_depth" ? "已达 A2A 深度上限" : data.reason || "未入队";
+          const text = `⏭ ${fromLabel} → ${toLabel}（${reason}，未入队）`;
+          if (!Array.isArray(rt.systemNotices)) rt.systemNotices = [];
+          rt.systemNotices.push({ role: "system", agent: "system", content: text, kind: "a2a-skipped" });
+          if (active) addSystem(text);
+          break;
+        }
         case "done":
           finishStream("就绪", sessionId);
           break;

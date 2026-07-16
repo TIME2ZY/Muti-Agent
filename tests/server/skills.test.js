@@ -72,3 +72,70 @@ body-x
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("augmentPrompt alwaysOnly injects only always-on skills", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skills-always-"));
+  fs.writeFileSync(
+    path.join(dir, "a.md"),
+    `---
+name: always-skill
+always: true
+triggers: []
+---
+always-body
+`
+  );
+  fs.writeFileSync(
+    path.join(dir, "t.md"),
+    `---
+name: trigger-skill
+triggers: [review]
+---
+trigger-body
+`
+  );
+  const service = createSkillsService({ skillsDir: dir });
+  const normal = service.augmentPrompt("please review", true);
+  assert.deepEqual(normal.skillNames.sort(), ["always-skill", "trigger-skill"]);
+
+  const a2a = service.augmentPrompt("handoff task body", true, { alwaysOnly: true });
+  assert.deepEqual(a2a.skillNames, ["always-skill"]);
+  assert.match(a2a.augmentedPrompt, /always-body/);
+  assert.doesNotMatch(a2a.augmentedPrompt, /trigger-body/);
+  assert.match(a2a.augmentedPrompt, /handoff task body/);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("augmentPrompt skillNames injects an explicit allow-list", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skills-names-"));
+  fs.writeFileSync(
+    path.join(dir, "r.md"),
+    `---
+name: receiving-review
+triggers: [review]
+---
+recv-body
+`
+  );
+  fs.writeFileSync(
+    path.join(dir, "o.md"),
+    `---
+name: other
+triggers: [x]
+---
+other-body
+`
+  );
+  const service = createSkillsService({ skillsDir: dir });
+  const none = service.augmentPrompt("task", true, { skillNames: [] });
+  assert.deepEqual(none.skillNames, []);
+  assert.equal(none.augmentedPrompt, "task");
+
+  const only = service.augmentPrompt("task", true, { skillNames: ["receiving-review"] });
+  assert.deepEqual(only.skillNames, ["receiving-review"]);
+  assert.match(only.augmentedPrompt, /recv-body/);
+  assert.doesNotMatch(only.augmentedPrompt, /other-body/);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});

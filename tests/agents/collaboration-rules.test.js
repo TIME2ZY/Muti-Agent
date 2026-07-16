@@ -21,6 +21,8 @@ test("renderCollaborationRules includes markers and soft subagent ban", () => {
   assert.match(text, /行首/);
   assert.match(text, /handoff/);
   assert.match(text, /传球三选一/);
+  assert.match(text, /全员共用|共用模板/);
+  assert.match(text, /verdict/);
 });
 
 test("renderCollaborationRules example target is never the current agent", () => {

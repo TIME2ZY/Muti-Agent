@@ -346,6 +346,8 @@ function createChatRoutes({
         sendSse(res, "agent-start", { agent, invocationId });
 
         let agentPrompt;
+        /** @type {string[]} */
+        let turnSkillNames = skillNames;
         if (i === 0) {
           agentPrompt = rawPrompt;
         } else {
@@ -360,7 +362,7 @@ function createChatRoutes({
             prev.handoffQualityByTarget && prev.handoffQualityByTarget[agent]
               ? prev.handoffQualityByTarget[agent]
               : prev.handoffQuality || agentHandoff.evaluateHandoff(handoff);
-          agentPrompt = agentHandoff.renderHandoffTask({
+          const handoffTask = agentHandoff.renderHandoffTask({
             handoff,
             quality,
             fromAgent: prev.agent,
@@ -368,6 +370,25 @@ function createChatRoutes({
             fromContent: prev.content,
             userPrompt: rawPrompt,
           });
+          // A2A: compact handoff card (not full always-on a2a-handoff body) +
+          // optional receiving-review when an implementer is fixing after review.
+          const a2aSkillNames = [];
+          if (
+            agentHandoff.shouldInjectReceivingReview({
+              targetAgentId: agent,
+              fromAgentId: prev.agent,
+              handoff,
+              text: handoffTask,
+            })
+          ) {
+            a2aSkillNames.push("receiving-review");
+          }
+          const a2aSkills = augmentPrompt(handoffTask, useWorktree, {
+            skillNames: a2aSkillNames,
+          });
+          const compactCard = agentHandoff.renderA2AHandoffCard();
+          agentPrompt = compactCard + "\n\n" + a2aSkills.augmentedPrompt;
+          turnSkillNames = ["a2a-handoff-card", ...a2aSkills.skillNames];
         }
 
         // Prompt layout (top → bottom):
@@ -375,7 +396,7 @@ function createChatRoutes({
         //   2. Collaboration rules (every turn: soft ban nested subagents)
         //   3. Session bootstrap (first turn only: coords + digest + recall)
         //   4. Light session header on later turns (correct agent label)
-        //   5. Task body (user/skills or structured handoff)
+        //   5. Task body (user/skills or compact card + handoff [+ receiving-review])
         //   6. Callback instructions
         const identityBlock = agentIdentity.renderIdentityBlock(agent, agentConfig);
         const collaborationBlock = renderCollaborationRules(agent, AGENTS);
@@ -392,6 +413,9 @@ function createChatRoutes({
             }),
             agentPrompt
           );
+          if (turnSkillNames.length > 0) {
+            sendSse(res, "skills-active", { skills: turnSkillNames, agent, a2a: true });
+          }
         }
         promptParts.push(callbackInstructions);
         const promptForAgent = promptParts.filter(Boolean).join("\n\n");
@@ -572,77 +596,112 @@ function createChatRoutes({
           break;
         }
 
-        if (threadCtx.a2aCount < maxDepth) {
-          const mentions = parseA2AMentions(assistantContent, agent);
-          for (const m of mentions) {
-            const targetHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
-              currentAgentId: agent,
-              routedTo: m,
-            });
-            const targetQuality = agentHandoff.evaluateHandoff(targetHandoff);
-            handoffByTarget[m] = targetHandoff;
-            handoffQualityByTarget[m] = targetQuality;
+        // Parse mentions every turn. Allow the same agent to re-enter the
+        // worklist (review → fix → re-review). Depth is the only hard cap.
+        const mentions = parseA2AMentions(assistantContent, agent);
+        for (const m of mentions) {
+          const targetHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
+            currentAgentId: agent,
+            routedTo: m,
+          });
+          const targetQuality = agentHandoff.evaluateHandoff(targetHandoff);
+          handoffByTarget[m] = targetHandoff;
+          handoffQualityByTarget[m] = targetQuality;
 
-            const summary = agentHandoff.summarizeHandoff(targetHandoff, targetQuality);
-            if (targetHandoff && targetHandoff.to) {
-              const toNorm = agentHandoff.normalizeTo(targetHandoff.to);
-              const targetNorm = String(m).toLowerCase();
-              const targetLabel = (AGENTS[m]?.label || "").toLowerCase();
-              if (toNorm && toNorm !== targetNorm && toNorm !== targetLabel) {
-                summary.toMismatch = true;
-              }
-            }
-
-            // Route target `m` wins over handoff.to (which may be missing/mismatched).
-            transcript.appendEvent(sessionId, invocationId, "handoff", {
-              ...summary,
-              from: agent,
-              to: m,
-            });
-            sendSse(res, "handoff-parsed", {
-              ...summary,
-              from: agent,
-              to: m,
-            });
-
-            if (!worklist.includes(m)) {
-              worklist.push(m);
-              threadCtx.a2aCount += 1;
-              const fromLabel = AGENTS[agent]?.label || agent;
-              const toLabel = AGENTS[m]?.label || m;
-              const routeText = targetQuality.degraded
-                ? `🔄 ${fromLabel} → ${toLabel}（交接包不完整）`
-                : `🔄 ${fromLabel} → ${toLabel}`;
-              // Persist so session switch / reload keeps the handoff marker.
-              appendToSession(
-                options.sessionsFile || undefined,
-                sessionId,
-                {
-                  role: "system",
-                  agent: "system",
-                  content: routeText,
-                  kind: "a2a-route",
-                  from: agent,
-                  to: m,
-                  handoffOk: targetQuality.ok,
-                  handoffDegraded: targetQuality.degraded,
-                },
-                { allowCreate: false }
-              );
-              sendSse(res, "a2a-route", {
-                from: agent,
-                to: m,
-                handoffOk: targetQuality.ok,
-                handoffDegraded: targetQuality.degraded,
-              });
-              transcript.appendEvent(sessionId, invocationId, "a2a-route", {
-                from: agent,
-                to: m,
-                handoffOk: targetQuality.ok,
-                handoffDegraded: targetQuality.degraded,
-              });
+          const summary = agentHandoff.summarizeHandoff(targetHandoff, targetQuality);
+          if (targetHandoff && targetHandoff.to) {
+            const toNorm = agentHandoff.normalizeTo(targetHandoff.to);
+            const targetNorm = String(m).toLowerCase();
+            const targetLabel = (AGENTS[m]?.label || "").toLowerCase();
+            if (toNorm && toNorm !== targetNorm && toNorm !== targetLabel) {
+              summary.toMismatch = true;
             }
           }
+
+          // Route target `m` wins over handoff.to (which may be missing/mismatched).
+          transcript.appendEvent(sessionId, invocationId, "handoff", {
+            ...summary,
+            from: agent,
+            to: m,
+          });
+          sendSse(res, "handoff-parsed", {
+            ...summary,
+            from: agent,
+            to: m,
+          });
+
+          const fromLabel = AGENTS[agent]?.label || agent;
+          const toLabel = AGENTS[m]?.label || m;
+
+          if (threadCtx.a2aCount >= maxDepth) {
+            const skipText = `⏭ ${fromLabel} → ${toLabel}（已达 A2A 深度上限 ${maxDepth}，未入队）`;
+            appendToSession(
+              options.sessionsFile || undefined,
+              sessionId,
+              {
+                role: "system",
+                agent: "system",
+                content: skipText,
+                kind: "a2a-skipped",
+                from: agent,
+                to: m,
+                reason: "max_depth",
+                maxDepth,
+              },
+              { allowCreate: false }
+            );
+            sendSse(res, "a2a-skipped", {
+              from: agent,
+              to: m,
+              reason: "max_depth",
+              maxDepth,
+            });
+            transcript.appendEvent(sessionId, invocationId, "a2a-skipped", {
+              from: agent,
+              to: m,
+              reason: "max_depth",
+              maxDepth,
+            });
+            continue;
+          }
+
+          // Re-entry allowed: push even if `m` already ran earlier in this request.
+          worklist.push(m);
+          threadCtx.a2aCount += 1;
+          const routeText = targetQuality.degraded
+            ? `🔄 ${fromLabel} → ${toLabel}（交接包不完整）`
+            : `🔄 ${fromLabel} → ${toLabel}`;
+          // Persist so session switch / reload keeps the handoff marker.
+          appendToSession(
+            options.sessionsFile || undefined,
+            sessionId,
+            {
+              role: "system",
+              agent: "system",
+              content: routeText,
+              kind: "a2a-route",
+              from: agent,
+              to: m,
+              handoffOk: targetQuality.ok,
+              handoffDegraded: targetQuality.degraded,
+              reentry: worklist.filter((id) => id === m).length > 1,
+            },
+            { allowCreate: false }
+          );
+          sendSse(res, "a2a-route", {
+            from: agent,
+            to: m,
+            handoffOk: targetQuality.ok,
+            handoffDegraded: targetQuality.degraded,
+            reentry: worklist.filter((id) => id === m).length > 1,
+          });
+          transcript.appendEvent(sessionId, invocationId, "a2a-route", {
+            from: agent,
+            to: m,
+            handoffOk: targetQuality.ok,
+            handoffDegraded: targetQuality.degraded,
+            reentry: worklist.filter((id) => id === m).length > 1,
+          });
         }
       }
     } finally {

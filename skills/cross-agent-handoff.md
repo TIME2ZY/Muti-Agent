@@ -1,6 +1,6 @@
 ---
 name: cross-agent-handoff
-description: 交接必须写 WHY — 标准 handoff 五件套（机器可读）
+description: 交接必须写 WHY — 全员共用 handoff 字段（可选可空）
 triggers:
   - "交给"
   - "handoff"
@@ -13,21 +13,22 @@ triggers:
 
 **针对的弱点**：AI 缺乏持久记忆 — 每次对话从零开始，接手方不知道为什么这样改。
 
-平台会解析 ` ```handoff ` 块；缺字段会标记 degraded，但不阻断路由。
+平台解析 ` ```handoff ` 块；缺软必填会标 degraded，但不阻断路由。
 
-## 核心规则：五件套
+## 全员共用字段（与 a2a-handoff 一致）
 
-| # | 字段 | 说明 | 为什么必须有 |
-|---|------|------|-------------|
-| 1 | **what** | 具体改了什么 / 交什么 | 接手方知道看什么 |
-| 2 | **why** | 为什么这样做 | **最重要**：没有 why = 无法判断对错 |
-| 3 | **tradeoff** | 放弃了什么方案 | 避免接手方重复调研 |
-| 4 | **open_questions** | 不确定的点 | 知道哪里需要特别关注 |
-| 5 | **next_action** | 希望对方做什么 | 明确期望，避免误解 |
+| 字段 | 说明 | 可空？ |
+|------|------|--------|
+| **what** | 具体交了什么 / 审了什么 | 尽量不空 |
+| **why** | 为什么这样做 / 为何阻塞 | 尽量不空（最重要） |
+| **next_action** | 希望对方做什么 | 尽量不空 |
+| to / goal / tradeoff | 目标与取舍 | 可空 |
+| open_questions / files / evidence | 列表补充 | 可空 |
 
-另建议写：`to`、`goal`、`files`、`evidence`。
+**禁止**私有顶层字段：`verdict`、`nits`、`blocking`、`status`、`action`。  
+Review 结论写进 `what`（如 `结论: request-changes` + P0 列表）。
 
-## 机器格式（与平台解析器一致）
+## 机器格式
 
 ````markdown
 ```handoff
@@ -50,19 +51,9 @@ files:
 BEFORE 发送交接消息:
   1. 行首 @目标Agent
   2. CHECK: handoff 是否包含 what / why / next_action？
-  3. BLOCK（自检）: 如果缺少 why，补齐后再发
-  4. PASS: 五项齐全（至少必填三项）才发送
+  3. 若缺 why，补齐后再发
+  4. 可选字段没有就省略，不要编造
 ```
-
-## 为什么 WHY 最重要
-
-只看 What 会导致：
-
-- Review 时不知道改动要解决什么问题
-- 提出与原始约束冲突的建议
-- 无法判断 tradeoff 是否合理
-
-没有 Why = 接手方无法判断 = 低效协作。
 
 ## 反例 / 正例
 
@@ -70,5 +61,8 @@ BEFORE 发送交接消息:
 ❌ "@OpenCode 我改了三个文件，帮我看看"
    → 无 handoff 块、无 Why
 
-✅ 行首 @OpenCode + handoff 含 what/why/next_action
+❌ handoff 里写 verdict / nits 顶层字段
+   → 解析器丢弃，接手方拿不到结构化意见
+
+✅ 行首 @OpenCode + what/why/next_action（其余可空）
 ```

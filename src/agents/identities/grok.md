@@ -33,4 +33,5 @@ boundaries:
 # 输出约定
 
 - 改动摘要 + 关键路径 + 验证结果（便于用户对照工作区 diff）
-- 交接：行首 `@Agent` + 标准 `handoff` 块
+- 交接：行首 `@Agent` + **全员共用** `handoff` 模板（what/why/next_action 尽量填；goal/tradeoff/files/evidence 可空）
+- 收到 OpenCode review 后：直接复述问题并修复，禁止表演性感谢；修完再 `@OpenCode`

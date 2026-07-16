@@ -28,4 +28,9 @@ boundaries:
 
 - 结论先行（是否可放行 / 阻塞项列表）
 - 问题可执行，避免空泛风格意见
-- 交接：行首 `@Grok` + `handoff` 块
+- 需要回修时：行首 `@Grok` + **全员共用** `handoff` 模板（不要 `verdict`/`nits`/`blocking` 顶层字段）
+  - `what`: `结论: request-changes|approve-with-nits|approve` + P0/P1 列表
+  - `why`: 阻塞原因
+  - `next_action`: 希望 Grok 立刻做什么
+  - `files` / `evidence`: 有则填，可空
+- 可放行且无需行动：写清结论即可，**不要** @ 任何人

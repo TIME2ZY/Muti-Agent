@@ -136,9 +136,24 @@ function createSkillsService(options = {}) {
     }));
   }
 
-  function augmentPrompt(rawPrompt, useWorktree = true) {
+  /**
+   * @param {string} rawPrompt
+   * @param {boolean} [useWorktree=true]
+   * @param {{ alwaysOnly?: boolean, skillNames?: string[] }} [options]
+   *   alwaysOnly: only always-on skills (legacy; A2A prefers compact card + skillNames).
+   *   skillNames: inject an explicit allow-list of skill names (e.g. receiving-review).
+   */
+  function augmentPrompt(rawPrompt, useWorktree = true, options = {}) {
     const skills = getSkills();
-    const matched = matchSkills(rawPrompt, skills);
+    let matched;
+    if (Array.isArray(options.skillNames)) {
+      const want = new Set(options.skillNames);
+      matched = skills.filter((s) => want.has(s.name));
+    } else if (options.alwaysOnly) {
+      matched = skills.filter((s) => s.always);
+    } else {
+      matched = matchSkills(rawPrompt, skills);
+    }
     const result = buildAugmentedPrompt(rawPrompt, matched);
     if (!useWorktree) {
       result.augmentedPrompt = READONLY_MODE_RULE + "\n" + result.augmentedPrompt;
