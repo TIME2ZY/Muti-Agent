@@ -77,16 +77,30 @@
           ensureSpacer();
           showEmpty();
         } else {
-          for (const msg of messages) {
-            createMessage({
-              role: msg.role,
-              agent: msg.agent,
-              content: msg.content || "",
-              variant: msg.exitCode && msg.exitCode !== 0 ? "error" : "",
-              invocationId: msg.invocationId || null,
-            });
+          // Bulk insert: skip per-message scroll/animation thrash; one jump at end.
+          if (messagesEl && messagesEl.classList) {
+            messagesEl.classList.add("is-bulk-insert");
+          }
+          try {
+            for (const msg of messages) {
+              createMessage({
+                role: msg.role,
+                agent: msg.agent,
+                content: msg.content || "",
+                variant: msg.exitCode && msg.exitCode !== 0 ? "error" : "",
+                invocationId: msg.invocationId || null,
+                scroll: false,
+              });
+            }
+          } finally {
+            if (messagesEl && messagesEl.classList) {
+              messagesEl.classList.remove("is-bulk-insert");
+            }
           }
           ensureSpacer();
+          if (typeof messagesEl.scrollTop === "number") {
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
         }
       } catch (error) {
         state.currentSessionId = previousSessionId;

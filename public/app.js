@@ -560,7 +560,6 @@
     hideMentionMenu: () => mentionComposer.hide(),
     fetchImpl: apiFetch,
     flushPendingLiveRender,
-    renderMd,
     sessionController,
     loadProjectDir,
     loadWorktreeStatus,

@@ -13,6 +13,9 @@
   background: var(--surface-canvas);
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+  /* Contain scroll chaining; stick-to-bottom is managed in message-view.js */
+  overscroll-behavior: contain;
+  overflow-anchor: none;
 }
 
 .messages-spacer {
@@ -28,6 +31,11 @@
   width: fit-content;
   max-width: 100%;
   animation: msg-in var(--duration) var(--ease-out);
+}
+
+/* Session history bulk load — skip entrance animation thrash */
+.messages.is-bulk-insert .message {
+  animation: none;
 }
 
 @keyframes msg-in {
@@ -507,6 +515,18 @@
 }
 .md-code .line-numbers .line-numbers-rows {
   border-right: 1px solid var(--border-subtle);
+}
+
+/* Deferred markdown paint (long finalize / history) */
+.msg-final-content.is-md-plain {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-ui);
+  line-height: 1.55;
+}
+.msg-final-content.is-md-pending-highlight .md-code code {
+  /* Structure is ready; Prism colors arrive on idle */
+  transition: none;
 }
 
 /* ── Headings ────────────────────────────────── */

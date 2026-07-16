@@ -85,6 +85,17 @@ test("parseSse supports CRLF frames and multi-line data payloads", () => {
   assert.equal(rest, "");
 });
 
+test("parseSse skips malformed JSON frames without throwing", () => {
+  const client = chatClientModule.createChatClient(makeDeps());
+  const seen = [];
+  const rest = client.parseSse(
+    "event: message\ndata: {not-json\n\nevent: done\ndata: {}\n\n",
+    (event, data) => seen.push({ event, data })
+  );
+  assert.deepEqual(seen, [{ event: "done", data: {} }]);
+  assert.equal(rest, "");
+});
+
 test("handleSseEvent session updates state and reloads session-scoped data", () => {
   const calls = [];
   const deps = makeDeps({
@@ -246,6 +257,50 @@ test("agent-exit finalizes the agent so handoffs clear writing state", () => {
   }, { sessionId: "s1" });
 
   assert.deepEqual(finalized, [["codex", "s1", { error: false }]]);
+});
+
+test("sendPrompt abort finalizes live agents instead of sync innerHTML wipe", async () => {
+  const finalized = [];
+  const runtimeStore = createRuntimeStore();
+  const deps = makeDeps({
+    runtimeStore,
+    promptEl: {
+      value: "long reply please",
+      disabled: false,
+      focused: 0,
+      focus() {},
+    },
+    state: {
+      currentSessionId: "s1",
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+      selectedAgent: "codex",
+      lastAgent: "codex",
+    },
+    resolvePromptAgent: () => ({ id: "codex", label: "codex" }),
+    finalizeLiveAgent(agent, sessionId, options) {
+      finalized.push([agent, sessionId, options]);
+    },
+    fetchImpl: async () => {
+      runtimeStore.getOrCreate("s1").liveMessages.set("codex", {
+        rawText: "partial",
+        setBadge() {},
+        bubble: { innerHTML: "LIVE" },
+      });
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      throw err;
+    },
+  });
+  const client = chatClientModule.createChatClient(deps);
+  await client.sendPrompt();
+
+  assert.equal(finalized.length, 1);
+  assert.equal(finalized[0][0], "codex");
+  assert.equal(finalized[0][1], "s1");
+  assert.deepEqual(finalized[0][2], { error: false });
 });
 
 test("sendPrompt rejects when no agent can be resolved", async () => {

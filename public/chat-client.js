@@ -15,7 +15,6 @@
       hideMentionMenu,
       fetchImpl,
       flushPendingLiveRender,
-      renderMd,
       sessionController,
       loadProjectDir,
       loadWorktreeStatus,
@@ -62,7 +61,12 @@
           .filter((line) => line.startsWith("data: "))
           .map((line) => line.slice(6));
         if (!eventLine || dataLines.length === 0) continue;
-        onEvent(eventLine.slice(7), JSON.parse(dataLines.join("\n")));
+        try {
+          onEvent(eventLine.slice(7), JSON.parse(dataLines.join("\n")));
+        } catch (error) {
+          // Malformed frame must not kill the whole stream reader.
+          console.warn("[chat-client] skip bad SSE frame:", error && error.message);
+        }
       }
       return rest;
     }
@@ -246,7 +250,8 @@
         }
       } catch (error) {
         flushPendingLiveRender(sid);
-        if (error.name === "AbortError") {
+        const aborted = error.name === "AbortError";
+        if (aborted) {
           store().endRun(sid, { controller, status: "idle", aborted: true });
           if (isActiveSession(sid)) {
             setStatus("已停止");
@@ -259,9 +264,16 @@
             addSystem(error.message || "连接中断", "error");
           }
         }
-        for (const [, item] of rt.liveMessages) {
-          if (item.setBadge) item.setBadge("done");
-          if (item.bubble) item.bubble.innerHTML = renderMd(item.rawText || "");
+        // Prefer full finalize (deferred MD for long text) over wiping bubble.innerHTML.
+        const agents = [...rt.liveMessages.keys()];
+        if (typeof finalizeLiveAgent === "function") {
+          for (const agent of agents) {
+            finalizeLiveAgent(agent, sid, { error: !aborted });
+          }
+        } else {
+          for (const [, item] of rt.liveMessages) {
+            if (item.setBadge) item.setBadge("done");
+          }
         }
         notifyStatus(sid);
       } finally {

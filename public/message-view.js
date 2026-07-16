@@ -1,16 +1,31 @@
 (function initMessageView(globalScope) {
   "use strict";
 
-  // When history has many assistant turns, defer process-trace hydrate
-  // so the first paint stays responsive. Full virtualization is future work.
+  // History process-trace hydrate always goes through an idle queue so
+  // session switches do not fan out dozens of parallel API calls.
+  // MESSAGE_VIRTUAL_THRESHOLD is retained for future list virtualization.
   const MESSAGE_VIRTUAL_THRESHOLD = 250;
   const HYDRATE_CHUNK_SIZE = 4;
+  /** px: user is "stuck to bottom" when within this distance of the end */
+  const STICK_BOTTOM_PX = 96;
 
   function resolveProcessHelpers() {
     if (globalScope.MessageProcessHelpers) return globalScope.MessageProcessHelpers;
     if (typeof module !== "undefined" && module.exports && typeof require === "function") {
       try {
         return require("./message-process-helpers.js");
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
+  }
+
+  function resolveMarkdownLite() {
+    if (globalScope.MarkdownLite) return globalScope.MarkdownLite;
+    if (typeof module !== "undefined" && module.exports && typeof require === "function") {
+      try {
+        return require("./markdown-lite.js");
       } catch {
         /* ignore */
       }
@@ -299,6 +314,49 @@
       shouldRenderThinking,
       shouldRenderTools,
     } = processHelpers;
+    const markdownLite = resolveMarkdownLite() || {};
+    const paintMarkdown =
+      typeof markdownLite.paintMarkdown === "function"
+        ? markdownLite.paintMarkdown
+        : null;
+
+    /**
+     * Final markdown paint with length-based deferral.
+     * Cancels any previous deferred job on the same content element.
+     * @param {HTMLElement} contentEl
+     * @param {string} text
+     * @param {{ copyBtn?: HTMLElement|null, host?: object|null }} [opts]
+     */
+    function paintFinalMarkdown(contentEl, text, opts = {}) {
+      if (!contentEl) return { cancel() {}, deferred: false, mode: "noop" };
+      if (contentEl._mdPaintCancel) {
+        try {
+          contentEl._mdPaintCancel();
+        } catch {
+          /* ignore */
+        }
+        contentEl._mdPaintCancel = null;
+      }
+      const copyBtn = opts.copyBtn || null;
+      const host = opts.host || null;
+      const onHtml = (html) => {
+        if (copyBtn && html) copyBtn.dataset.copyHtml = html;
+      };
+
+      if (typeof paintMarkdown === "function") {
+        const job = paintMarkdown(contentEl, text, { onHtml });
+        contentEl._mdPaintCancel = job && job.cancel ? job.cancel : null;
+        if (host) host._mdPaintCancel = contentEl._mdPaintCancel;
+        return job;
+      }
+
+      // Fallback when MarkdownLite.paintMarkdown is unavailable.
+      const html = typeof renderMd === "function" ? renderMd(text || "") : String(text || "");
+      contentEl.classList.remove("is-md-plain", "is-md-pending-highlight");
+      contentEl.innerHTML = html;
+      onHtml(html);
+      return { cancel() {}, deferred: false, mode: "sync" };
+    }
 
     function capabilitiesFor(agentId) {
       if (typeof findAgentCapabilities === "function") {
@@ -326,9 +384,68 @@
       return !state.currentSessionId || state.currentSessionId === sid;
     }
 
-    function scrollDown() {
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+    // Stick-to-bottom: only auto-scroll while the user is near the end.
+    // Streaming must not yank the viewport when they scroll up to read.
+    let _stickToBottom = true;
+    let _scrollRafId = null;
+    let _scrollForcePending = false;
+    let _scrollListening = false;
+
+    function distanceFromBottom() {
+      if (!messagesEl) return 0;
+      return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
     }
+
+    function isNearBottom(threshold = STICK_BOTTOM_PX) {
+      return distanceFromBottom() <= threshold;
+    }
+
+    function bindScrollTracking() {
+      if (!messagesEl || _scrollListening || typeof messagesEl.addEventListener !== "function") {
+        return;
+      }
+      _scrollListening = true;
+      messagesEl.addEventListener(
+        "scroll",
+        () => {
+          _stickToBottom = isNearBottom();
+        },
+        { passive: true }
+      );
+    }
+
+    /**
+     * @param {boolean} [force=false] jump even if user scrolled away
+     */
+    function scrollDown(force = false) {
+      if (!messagesEl) return;
+      if (!force && !_stickToBottom) return;
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      _stickToBottom = true;
+    }
+
+    /**
+     * Coalesce scroll into one rAF (stream + tool rows fire very frequently).
+     * Pending force flags survive re-entrant schedule calls in the same frame.
+     * @param {boolean} [force=false]
+     */
+    function scheduleScrollDown(force = false) {
+      if (force) {
+        _stickToBottom = true;
+        _scrollForcePending = true;
+      } else if (!_stickToBottom && !_scrollForcePending) {
+        return;
+      }
+      if (_scrollRafId != null) return;
+      _scrollRafId = requestAnimationFrame(() => {
+        _scrollRafId = null;
+        const forceNow = _scrollForcePending;
+        _scrollForcePending = false;
+        scrollDown(forceNow);
+      });
+    }
+
+    bindScrollTracking();
 
     function ensureSpacer() {
       if (!messagesEl.contains(spacerEl)) messagesEl.appendChild(spacerEl);
@@ -395,7 +512,14 @@
       };
     }
 
-    function createMessage({ role, agent, content = "", variant = "", invocationId = null }) {
+    function createMessage({
+      role,
+      agent,
+      content = "",
+      variant = "",
+      invocationId = null,
+      scroll = true,
+    }) {
       hideEmpty();
       ensureSpacer();
 
@@ -428,17 +552,17 @@
       badge.style.display = "none";
       meta.appendChild(badge);
 
+      let copyBtn = null;
       if (role === "assistant" && content) {
-        const copy = document.createElement("button");
-        copy.className = "msg-copy";
-        copy.textContent = "⎘";
-        copy.title = msg.copy || "复制消息";
-        copy.setAttribute("aria-label", msg.copy || "复制消息");
-        copy.dataset.copyHtml = renderMd(content);
-        copy.addEventListener("click", () => {
-          copyToClipboard(content, copy, "✓", msg.copyFail || "失败");
+        copyBtn = document.createElement("button");
+        copyBtn.className = "msg-copy";
+        copyBtn.textContent = "⎘";
+        copyBtn.title = msg.copy || "复制消息";
+        copyBtn.setAttribute("aria-label", msg.copy || "复制消息");
+        copyBtn.addEventListener("click", () => {
+          copyToClipboard(content, copyBtn, "✓", msg.copyFail || "失败");
         });
-        meta.appendChild(copy);
+        meta.appendChild(copyBtn);
       }
 
       const card = document.createElement("div");
@@ -455,7 +579,7 @@
         bubble.append(liveText);
         wrapper.append(meta, card);
         messagesEl.insertBefore(wrapper, spacerEl);
-        scrollDown();
+        if (scroll !== false) scheduleScrollDown(true);
 
         const setBadge = makeSetBadge(badge);
         return {
@@ -471,12 +595,13 @@
 
       const contentEl = document.createElement("div");
       contentEl.className = "msg-final-content";
-      contentEl.innerHTML = renderMd(content);
+      // Length-aware paint: short sync; long structure+idle Prism; super-long plain first.
+      paintFinalMarkdown(contentEl, content, { copyBtn });
       bubble.appendChild(contentEl);
 
       wrapper.append(meta, card);
       messagesEl.insertBefore(wrapper, spacerEl);
-      scrollDown();
+      if (scroll !== false) scheduleScrollDown(true);
 
       if (role === "assistant" && invocationId) {
         if (typeof attachRecallToggle === "function") attachRecallToggle(wrapper, invocationId);
@@ -484,7 +609,7 @@
       }
 
       const setBadge = makeSetBadge(badge);
-      return { wrapper, bubble, meta, setBadge };
+      return { wrapper, bubble, meta, setBadge, contentEl };
     }
 
     function ensureThinkingPanel(liveItem) {
@@ -505,18 +630,16 @@
       return details;
     }
 
-    function updateThinkingPanel(liveItem, text) {
-      if (!liveItem || !text) return;
-      liveItem.thinkingText = text;
-      if (!liveItem.bubble) return;
+    function paintThinkingPanel(liveItem, text) {
+      if (!liveItem || !liveItem.bubble) return;
       const details = ensureThinkingPanel(liveItem);
       if (!details) return;
       details.dataset.live = "true";
       const body = details.querySelector(".msg-thinking-body");
-      if (body) body.textContent = text;
+      if (body) body.textContent = text || "";
       const summary = details.querySelector(".msg-thinking-summary");
       if (summary) {
-        const chars = text.length;
+        const chars = (text || "").length;
         const base = msg.thinkingProcess || "思考过程";
         summary.textContent =
           chars > 0
@@ -524,6 +647,50 @@
               ? msg.thinkingProcessChars(chars)
               : `${base} · ${chars} 字`
             : base;
+      }
+    }
+
+    let _thinkingRafId = null;
+    /** @type {Map<string, object>} key → liveItem (text on item.thinkingText) */
+    let _thinkingPending = new Map();
+
+    function _flushThinkingRaf() {
+      for (const item of _thinkingPending.values()) {
+        if (item && item.bubble) paintThinkingPanel(item, item.thinkingText || "");
+      }
+      _thinkingPending.clear();
+      _thinkingRafId = null;
+      scheduleScrollDown();
+    }
+
+    function flushPendingThinkingRender() {
+      if (_thinkingRafId != null) {
+        cancelAnimationFrame(_thinkingRafId);
+        _thinkingRafId = null;
+        _flushThinkingRaf();
+      }
+    }
+
+    /**
+     * @param {object} liveItem
+     * @param {string} text
+     * @param {{ immediate?: boolean, key?: string }} [options]
+     */
+    function updateThinkingPanel(liveItem, text, options = {}) {
+      if (!liveItem || !text) return;
+      liveItem.thinkingText = text;
+      if (!liveItem.bubble) return;
+      if (options.immediate === true) {
+        paintThinkingPanel(liveItem, text);
+        return;
+      }
+      const key =
+        options.key ||
+        (liveItem.wrapper && liveItem.wrapper.dataset && liveItem.wrapper.dataset.agentId) ||
+        String(liveItem.thinkingText.length);
+      _thinkingPending.set(key, liveItem);
+      if (_thinkingRafId == null) {
+        _thinkingRafId = requestAnimationFrame(_flushThinkingRaf);
       }
     }
 
@@ -735,7 +902,7 @@
       summaryEl.textContent = fields.summary || "";
       const details = panel.closest && panel.closest(".msg-process");
       if (details) updateProcessDetailsLabel(details);
-      scrollDown();
+      scheduleScrollDown();
     }
 
     function upsertLiveTool(agent, event, sessionId) {
@@ -775,7 +942,7 @@
       if (!isViewingSession(sid)) return;
       if (item._liveTextEl && !item.rawText) {
         item._liveTextEl.textContent = text;
-        scrollDown();
+        scheduleScrollDown();
         return;
       }
       if (item.bubble) {
@@ -790,7 +957,7 @@
           }
         }
         statusEl.textContent = text;
-        scrollDown();
+        scheduleScrollDown();
       }
     }
 
@@ -809,14 +976,16 @@
       }
       _rafPending.clear();
       _rafId = null;
-      scrollDown();
+      scheduleScrollDown();
     }
 
     function flushPendingLiveRender(sessionId) {
       if (_rafId) {
         cancelAnimationFrame(_rafId);
+        _rafId = null;
         _flushRaf();
       }
+      flushPendingThinkingRender();
       void sessionId;
     }
 
@@ -853,9 +1022,9 @@
       if (item.bubble) item.bubble.classList.remove("msg-bubble-live-pending");
       if (item.setBadge) item.setBadge("writing");
 
+      // DOM text paint + scroll both coalesced to the next animation frame.
       _rafPending.set(`${sid}::${agent}`, item.rawText);
       if (!_rafId) _rafId = requestAnimationFrame(_flushRaf);
-      scrollDown();
     }
 
     function ensureLiveRun(event, sessionId) {
@@ -911,7 +1080,7 @@
         if (!rt.liveMessages.has(event.agent)) showThinking(event.agent, sid);
         const item = rt.liveMessages.get(event.agent);
         if (item && isViewingSession(sid)) {
-          updateThinkingPanel(item, run.thinking);
+          updateThinkingPanel(item, run.thinking, { key: `${sid}::${event.agent}` });
         } else if (item) {
           item.thinkingText = run.thinking;
         }
@@ -1144,14 +1313,8 @@
 
     function scheduleHydrateProcessTrace(bubble, invocationId) {
       if (!bubble || !invocationId) return;
-      // Short histories hydrate immediately for snappy UX.
-      const assistantCount = messagesEl
-        ? messagesEl.querySelectorAll(".message.assistant").length
-        : 0;
-      if (assistantCount <= MESSAGE_VIRTUAL_THRESHOLD) {
-        hydrateProcessTrace(bubble, invocationId);
-        return;
-      }
+      // Always idle-queue: bulk session switch must not open N parallel hydrates.
+      // Short histories still finish within one or two idle ticks.
       _hydrateQueue.push({ bubble, invocationId });
       drainHydrateQueue();
     }
@@ -1217,7 +1380,7 @@
 
       // Rebuild thinking from run state if panel was missing (detached remount).
       if (!preservedThinking && item.thinkingText) {
-        updateThinkingPanel(item, item.thinkingText);
+        updateThinkingPanel(item, item.thinkingText, { immediate: true });
       }
       const thinkingEl = preservedThinking || item.bubble.querySelector(".msg-thinking");
       if (thinkingEl) {
@@ -1230,11 +1393,6 @@
       }
       let progressEl = preservedProgress || item.bubble.querySelector(".msg-progress");
       if (progressEl) progressEl = collapseProgressIntoDetails(progressEl);
-
-      const rendered = renderMd(item.rawText || "");
-      const content = document.createElement("div");
-      content.className = "msg-final-content";
-      content.innerHTML = rendered;
 
       // Prefer a compact rebuilt process panel (collapsed) over the live expanded dump.
       let processEl = buildProcessTraceFromRun(agent, sid);
@@ -1258,6 +1416,10 @@
         updateProcessDetailsLabel(processEl);
       }
 
+      // Shell first (thinking / process / badge) so the card settles without waiting on MD.
+      const content = document.createElement("div");
+      content.className = "msg-final-content";
+
       item.bubble.replaceChildren();
       if (thinkingEl) item.bubble.appendChild(thinkingEl);
       if (progressEl) item.bubble.appendChild(progressEl);
@@ -1266,19 +1428,23 @@
       item.bubble.classList.remove("msg-bubble-live-pending");
       item.bubble.classList.remove("msg-bubble-live");
 
-      if (!item.wrapper.querySelector(".msg-copy")) {
-        const copy = document.createElement("button");
+      let copy = item.wrapper.querySelector(".msg-copy");
+      if (!copy) {
+        copy = document.createElement("button");
         copy.className = "msg-copy";
         copy.textContent = "⎘";
         copy.title = "复制消息";
         copy.setAttribute("aria-label", "复制消息");
-        copy.dataset.copyHtml = rendered;
         copy.addEventListener("click", () => {
           copyToClipboard(item.rawText || "", copy, "✓", msg.copyFail || "失败");
         });
         const meta = item.wrapper.querySelector(".msg-meta");
         if (meta) meta.appendChild(copy);
       }
+
+      // Deferred MD for long replies — keeps finalize off the critical path.
+      paintFinalMarkdown(content, item.rawText || "", { copyBtn: copy, host: item });
+
       if (item.invocationId && typeof attachRecallToggle === "function") {
         attachRecallToggle(item.wrapper, item.invocationId);
       }
@@ -1393,7 +1559,7 @@
         card.appendChild(bubble);
         wrapper.append(meta, card);
         messagesEl.insertBefore(wrapper, spacerEl);
-        scrollDown();
+        scheduleScrollDown(true);
       }
     }
 
@@ -1448,14 +1614,16 @@
             rebuilt._liveTextEl.textContent = rebuilt.pendingStatus;
           }
         }
-        if (rebuilt.thinkingText) updateThinkingPanel(rebuilt, rebuilt.thinkingText);
+        if (rebuilt.thinkingText) {
+          updateThinkingPanel(rebuilt, rebuilt.thinkingText, { immediate: true });
+        }
         if (rebuilt.progressItems.length) updateProgressList(rebuilt, rebuilt.progressItems);
 
         rt.liveMessages.set(agent, rebuilt);
       }
 
       ensureSpacer();
-      scrollDown();
+      scrollDown(true);
     }
 
     function bindCodeBlockDelegates(documentRef) {
@@ -1512,6 +1680,8 @@
       showEmpty,
       hideEmpty,
       scrollDown,
+      scheduleScrollDown,
+      isNearBottom,
       setLivePending,
       pendingTextForEvent,
       upsertLiveTool,
