@@ -119,10 +119,14 @@ function createCodexRuntime(cli) {
       }
 
       if (event.type === "item.started" && event.item && event.item.type === "command_execution") {
+        const command = event.item.command || "";
+        const toolId = toolItemId(event.item, "command_execution");
         return [
-          makeEvent("command.started", {
+          makeEvent("tool.started", {
             ...base,
-            command: event.item.command || "",
+            toolName: "command_execution",
+            toolId,
+            args: { command },
           }),
         ];
       }
@@ -132,12 +136,21 @@ function createCodexRuntime(cli) {
         event.item &&
         event.item.type === "command_execution"
       ) {
+        const command = event.item.command || "";
+        const toolId = toolItemId(event.item, "command_execution");
+        const exitCode = event.item.exit_code;
+        const failed =
+          typeof exitCode === "number" ? exitCode !== 0 : isFailedItem(event.item);
         return [
-          makeEvent("command.finished", {
+          makeEvent("tool.finished", {
             ...base,
-            command: event.item.command || "",
+            toolName: "command_execution",
+            toolId,
+            args: { command },
+            result: event.item.aggregated_output || "",
             output: event.item.aggregated_output || "",
-            exitCode: event.item.exit_code,
+            exitCode,
+            status: failed ? "error" : "ok",
           }),
         ];
       }
@@ -230,7 +243,26 @@ function createCodexRuntime(cli) {
         if (toolEvents.length) return toolEvents;
       }
 
-      // item.updated on tool-like items: no separate progress event type; ignore until finished.
+      // Intentionally silent provider noise (partial updates, etc.).
+      const silentTypes = new Set([
+        "item.updated",
+        "item.started",
+        "item.completed",
+        "turn.started",
+        "turn.completed",
+        "task_started",
+        "task_complete",
+      ]);
+      if (event && event.type && !silentTypes.has(String(event.type))) {
+        return [
+          makeEvent("diagnostic", {
+            ...base,
+            code: "unmapped_event",
+            rawType: String(event.type),
+            message: "Codex event type not mapped to canonical protocol",
+          }),
+        ];
+      }
       return [];
     },
   };
@@ -242,7 +274,6 @@ const codexProvider = {
     resume: true,
     thinking: true,
     tools: true,
-    subagents: false,
     reasoning: "levels",
   },
   allowedProviderOptions: ["sandbox", "approvalPolicy"],

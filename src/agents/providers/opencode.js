@@ -161,23 +161,20 @@ function createOpencodeRuntime(cli) {
       part.error != null;
 
     if (!prev.started && (looksRunning || looksDone)) {
+      // Prefer args.command for bash-like tools so UI shows the command string.
+      const command = commandFromArgs(toolName, args);
+      const startedArgs =
+        isBashLike(toolName) && command && !args.command
+          ? { ...args, command }
+          : args;
       events.push(
         makeEvent("tool.started", {
           ...base,
           toolName,
-          args,
+          args: startedArgs,
           toolId,
         })
       );
-      const command = commandFromArgs(toolName, args);
-      if (isBashLike(toolName) && command) {
-        events.push(
-          makeEvent("command.started", {
-            ...base,
-            command,
-          })
-        );
-      }
       prev.started = true;
     }
 
@@ -191,27 +188,27 @@ function createOpencodeRuntime(cli) {
     ) {
       const result = toolResultFromItem(part);
       const failed = isFailedItem(part) || status === "error" || status === "failed";
+      const command = commandFromArgs(toolName, args);
+      const finishedArgs =
+        isBashLike(toolName) && command && !args.command
+          ? { ...args, command }
+          : args;
       events.push(
         makeEvent("tool.finished", {
           ...base,
           toolName,
-          args,
+          args: finishedArgs,
           result,
           status: failed ? "error" : "ok",
           toolId,
+          ...(isBashLike(toolName)
+            ? {
+                output: typeof result === "string" ? result : summarizeResult(result),
+                exitCode: failed ? 1 : 0,
+              }
+            : {}),
         })
       );
-      const command = commandFromArgs(toolName, args);
-      if (isBashLike(toolName) && command) {
-        events.push(
-          makeEvent("command.finished", {
-            ...base,
-            command,
-            output: typeof result === "string" ? result : summarizeResult(result),
-            exitCode: failed ? 1 : 0,
-          })
-        );
-      }
       prev.finished = true;
     }
 
@@ -403,6 +400,35 @@ function createOpencodeRuntime(cli) {
         ];
       }
 
+      const silentTypes = new Set([
+        "message.part.updated",
+        "step_start",
+        "step.start",
+        "step_finish",
+        "step.finish",
+        "step-finish",
+        "loop",
+        "session.updated",
+        "assistant",
+        "text",
+        "reasoning",
+        "thinking",
+        "tool_use",
+        "tool-use",
+        "tool",
+        "tool_call",
+        "tool.updated",
+      ]);
+      if (event && event.type && !silentTypes.has(String(event.type))) {
+        return [
+          makeEvent("diagnostic", {
+            ...base,
+            code: "unmapped_event",
+            rawType: String(event.type),
+            message: "OpenCode event type not mapped to canonical protocol",
+          }),
+        ];
+      }
       return [];
     },
   };
@@ -426,7 +452,6 @@ const opencodeProvider = {
     resume: true,
     thinking: true,
     tools: true,
-    subagents: false,
     reasoning: "toggle",
   },
   allowedProviderOptions: ["thinking", "modelPrefix"],

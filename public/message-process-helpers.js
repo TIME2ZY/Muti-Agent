@@ -72,9 +72,7 @@
     }
     if (
       event.type === "tool.finished"
-      || event.type === "command.finished"
       || event.type === "tool.started"
-      || event.type === "command.started"
       || isContentDumpTool(event)
     ) {
       return "";
@@ -117,12 +115,10 @@
    * Explicit false → hide that surface.
    */
   function resolveCapabilities(agentOrCaps) {
-    // Nested CLI subagents are not a platform capability (see collaboration-rules).
     const defaults = {
       resume: true,
       thinking: true,
       tools: true,
-      subagents: false,
       reasoning: "none",
     };
     if (!agentOrCaps || typeof agentOrCaps !== "object") return { ...defaults };
@@ -131,7 +127,6 @@
         ? agentOrCaps.capabilities
         : agentOrCaps.thinking !== undefined ||
             agentOrCaps.tools !== undefined ||
-            agentOrCaps.subagents !== undefined ||
             agentOrCaps.resume !== undefined
           ? agentOrCaps
           : null;
@@ -140,8 +135,6 @@
       resume: raw.resume !== false,
       thinking: raw.thinking !== false,
       tools: raw.tools !== false,
-      // Only explicit true keeps subagent UI (legacy); default off.
-      subagents: raw.subagents === true,
       reasoning: raw.reasoning != null ? raw.reasoning : defaults.reasoning,
     };
   }
@@ -160,17 +153,12 @@
     return Boolean(resolveCapabilities(caps).tools);
   }
 
-  function shouldRenderSubagents(caps) {
-    return Boolean(resolveCapabilities(caps).subagents);
-  }
-
   /** Short UI tags for agent panel (capability-driven, not provider-name hardcoding). */
   function capabilityTagList(agentOrCaps) {
     const caps = resolveCapabilities(agentOrCaps);
     const tags = [];
     if (caps.thinking) tags.push("思考");
     if (caps.tools) tags.push("工具");
-    if (caps.subagents) tags.push("子代理");
     return tags;
   }
 
@@ -191,7 +179,7 @@
 
   /**
    * Map a single event to a process-row anchor (for focus/highlight).
-   * @returns {{ rowKind: "tool"|"command", rowId: string } | null}
+   * @returns {{ rowKind: "tool", rowId: string } | null}
    */
   function processAnchorFromEvent(evt) {
     if (!evt || typeof evt !== "object") return null;
@@ -205,20 +193,20 @@
     const type = data.type || kind;
     if (!type) return null;
 
-    // Legacy transcript kinds: fold old subagent.* into tool anchors.
+    // Legacy transcript: subagent.* / command.* fold into tool anchors.
     if (type.startsWith("subagent.")) {
       const id = String(data.subagentId || data.toolId || data.name || "");
       if (!id) return null;
       return { rowKind: "tool", rowId: id };
     }
+    if (type === "command.started" || type === "command.finished") {
+      if (!data.command) return null;
+      return { rowKind: "tool", rowId: String(data.command) };
+    }
     if (type === "tool.started" || type === "tool.finished") {
       const detail = toolDetailFromEvent(data);
       const id = String(data.toolId || `${data.toolName || "tool"}:${detail}`);
       return { rowKind: "tool", rowId: id };
-    }
-    if (type === "command.started" || type === "command.finished") {
-      if (!data.command) return null;
-      return { rowKind: "command", rowId: String(data.command) };
     }
     return null;
   }
@@ -237,6 +225,7 @@
    * @returns {{ subById: Map<string, object>, toolById: Map<string, object>, commandByKey: Map<string, object> }}
    */
   function aggregateProcessBuckets(events) {
+    // subById / commandByKey kept empty for caller API stability; everything is tools.
     const subById = new Map();
     const toolById = new Map();
     const commandByKey = new Map();
@@ -255,7 +244,6 @@
       if (!type) continue;
 
       if (type.startsWith("subagent.")) {
-        // Legacy only: surface as a tool row (name/task → tool fields).
         const id = String(data.subagentId || data.toolId || data.name || toolById.size);
         const prev = toolById.get(id) || {};
         const finished =
@@ -280,6 +268,30 @@
         });
         continue;
       }
+      // Legacy command.* → tool rows (command string as id / args.command).
+      if (type === "command.started" || type === "command.finished") {
+        if (!data.command) continue;
+        const id = String(data.command);
+        const prev = toolById.get(id) || {};
+        const finished = type === "command.finished";
+        const failed =
+          finished && data.exitCode !== undefined && data.exitCode !== 0;
+        toolById.set(id, {
+          ...prev,
+          ...data,
+          type: finished ? "tool.finished" : "tool.started",
+          toolName: "command_execution",
+          toolId: id,
+          args: { command: data.command, ...(data.args || prev.args || {}) },
+          result: data.output !== undefined ? data.output : data.result ?? prev.result,
+          output: data.output !== undefined ? data.output : prev.output,
+          status: failed ? "error" : finished ? "ok" : data.status || prev.status,
+          _eventNos: mergeEventNos(prev, evt),
+          _traceKind: "tool",
+          _traceId: id,
+        });
+        continue;
+      }
       if (type === "tool.started" || type === "tool.finished") {
         const detail = toolDetailFromEvent(data);
         const id = String(data.toolId || `${data.toolName || "tool"}:${detail}`);
@@ -297,20 +309,6 @@
           _traceKind: "tool",
           _traceId: id,
         });
-        continue;
-      }
-      if (type === "command.started" || type === "command.finished") {
-        if (data.command) {
-          const prev = commandByKey.get(data.command) || {};
-          commandByKey.set(data.command, {
-            ...prev,
-            ...data,
-            type,
-            _eventNos: mergeEventNos(prev, evt),
-            _traceKind: "command",
-            _traceId: String(data.command),
-          });
-        }
       }
     }
 
@@ -376,7 +374,6 @@
     findAgentCapabilities,
     shouldRenderThinking,
     shouldRenderTools,
-    shouldRenderSubagents,
     capabilityTagList,
     resolveEventNo,
     processAnchorFromEvent,

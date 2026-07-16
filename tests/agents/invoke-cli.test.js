@@ -579,17 +579,13 @@ test("opencode runtime maps read/bash tools and nests state.input", () => {
     true
   );
   assert.equal(
-    bashDone.some((e) => e.type === "command.started" && e.command === "npm test"),
-    true
+    bashDone.some((e) => e.type === "command.started"),
+    false
   );
-  assert.equal(
-    bashDone.some((e) => e.type === "command.finished" && e.exitCode === 0),
-    true
-  );
-  assert.equal(
-    bashDone.some((e) => e.type === "tool.finished"),
-    true
-  );
+  const bashTool = bashDone.find((e) => e.type === "tool.finished");
+  assert.ok(bashTool);
+  assert.equal(bashTool.exitCode, 0);
+  assert.equal(bashTool.args.command, "npm test");
 });
 
 test("opencode runtime emits a single run.started and step progress updates", () => {
@@ -724,27 +720,21 @@ test("codex runtime maps command, file, and transport errors into normalized eve
     ctx
   );
 
-  assert.deepEqual(
-    commandStarted.find((event) => event.type === "command.started"),
-    {
-      type: "command.started",
-      protocolVersion: 1,
-      agent: "codex",
-      invocationId: "inv-1b",
-      command: "Get-Content -Raw skill.md",
-    }
-  );
-  assert.deepEqual(commandFinished, [
-    {
-      type: "command.finished",
-      protocolVersion: 1,
-      agent: "codex",
-      invocationId: "inv-1b",
-      command: "Get-Content -Raw skill.md",
-      output: "skill body",
-      exitCode: 0,
-    },
-  ]);
+  const startedTool = commandStarted.find((event) => event.type === "tool.started");
+  assert.ok(startedTool);
+  assert.equal(startedTool.toolName, "command_execution");
+  assert.equal(startedTool.args.command, "Get-Content -Raw skill.md");
+  assert.equal(startedTool.state, "running");
+  assert.equal(commandStarted.some((e) => e.type === "command.started"), false);
+
+  assert.equal(commandFinished.length, 1);
+  assert.equal(commandFinished[0].type, "tool.finished");
+  assert.equal(commandFinished[0].toolName, "command_execution");
+  assert.equal(commandFinished[0].args.command, "Get-Content -Raw skill.md");
+  assert.equal(commandFinished[0].output, "skill body");
+  assert.equal(commandFinished[0].exitCode, 0);
+  assert.equal(commandFinished[0].status, "ok");
+  assert.equal(commandFinished[0].state, "completed");
   assert.deepEqual(fileChanged, [
     {
       type: "file.changed",

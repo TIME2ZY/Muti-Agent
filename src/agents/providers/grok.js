@@ -198,9 +198,20 @@ function createGrokRuntime(cli) {
           return out;
         }
 
-        default:
+        default: {
           ensureStarted(event.sessionId);
+          if (event.type) {
+            out.push(
+              makeEvent("diagnostic", {
+                ...base,
+                code: "unmapped_event",
+                rawType: String(event.type),
+                message: "Grok event type not mapped to canonical protocol",
+              })
+            );
+          }
           return out;
+        }
       }
     },
     finish(ctx) {
@@ -249,7 +260,6 @@ const grokProvider = {
     resume: true,
     thinking: true,
     tools: true,
-    subagents: false,
     reasoning: "levels",
   },
   allowedProviderOptions: ["alwaysApprove", "autoUpdate", "proxy"],

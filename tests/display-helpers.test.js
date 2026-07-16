@@ -38,7 +38,7 @@ test("agentMeta appends capability tags when capabilities are present", () => {
   const meta = agentMeta({
     providerId: "codex",
     model: "gpt-5.6-sol",
-    capabilities: { thinking: false, tools: true, subagents: false, resume: true },
+    capabilities: { thinking: false, tools: true, resume: true },
   });
   assert.match(meta, /工具/);
   assert.doesNotMatch(meta, /子代理/);

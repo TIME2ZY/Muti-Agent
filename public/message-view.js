@@ -304,7 +304,7 @@
       if (typeof findAgentCapabilities === "function") {
         return findAgentCapabilities(state.agents || [], agentId);
       }
-      return { resume: true, thinking: true, tools: true, subagents: false };
+      return { resume: true, thinking: true, tools: true };
     }
     const L = resolveMsgLocale();
     const msg = L.message || {};
@@ -611,10 +611,6 @@
 
       if (event.type === "run.started") return "正在执行…";
       if (event.type === "run.failed") return trimLiveStatus(event.error || "执行失败");
-      if (event.type === "command.started")
-        return `执行命令: ${trimLiveStatus(event.command || "")}`;
-      if (event.type === "command.finished")
-        return `命令完成: ${trimLiveStatus(event.command || "")}`;
       if (event.type === "file.changed") return `修改文件: ${trimLiveStatus(event.path || "")}`;
       if (event.type === "stderr") return trimLiveStatus(event.text || "");
       if (event.type === "tool.started") {
@@ -731,13 +727,13 @@
       const id = `tool:${event.toolId || event.toolName || detail || event.type}`;
       let status = "running";
       let statusText = msg.running || "运行中";
-      if (event.type === "tool.finished" || event.type === "command.finished") {
+      if (event.type === "tool.finished") {
         const failed =
           event.status === "error" || (event.exitCode !== undefined && event.exitCode !== 0);
         status = failed ? "error" : "done";
         statusText = failed ? msg.failed || "失败" : msg.done || "完成";
       }
-      const name = event.type.startsWith("command.") ? "command" : event.toolName || "tool";
+      const name = event.toolName || "tool";
       upsertProcessRow(
         agent,
         id,
@@ -860,8 +856,7 @@
           thinking: "",
           progressItems: [],
           tools: [],
-          subagents: [],
-          commands: [],
+          diagnostics: [],
           fileChanges: [],
           stderr: [],
           status: "thinking",
@@ -889,9 +884,9 @@
         return;
       }
 
-      if (event.type === "thinking.delta" || event.type === "thinking.final") {
+      if (event.type === "thinking.delta") {
         // Capability-driven: still record text for run state, but skip thinking UI
-        // when the provider does not advertise thinking streams (e.g. codex).
+        // when the provider does not advertise thinking streams.
         run.thinking += event.text || "";
         if (typeof shouldRenderThinking === "function" && !shouldRenderThinking(caps)) {
           return;
@@ -931,7 +926,7 @@
         return;
       }
 
-      // Legacy subagent.* (pre protocol drop): fold into tool UI if present in old streams.
+      // Legacy transcript kinds (subagent.* / command.*) fold into tool UI.
       if (
         event.type === "subagent.started" ||
         event.type === "subagent.progress" ||
@@ -961,8 +956,36 @@
       }
 
       if (event.type === "command.started" || event.type === "command.finished") {
-        run.commands.push(event);
-        setLivePending(event.agent, pendingTextForEvent(event), sid);
+        const folded = {
+          type: event.type === "command.finished" ? "tool.finished" : "tool.started",
+          agent: event.agent,
+          invocationId: event.invocationId,
+          toolName: "command_execution",
+          toolId: event.command || "legacy-command",
+          args: { command: event.command || "" },
+          result: event.output,
+          output: event.output,
+          exitCode: event.exitCode,
+          status:
+            event.type === "command.finished" &&
+            event.exitCode !== undefined &&
+            event.exitCode !== 0
+              ? "error"
+              : "ok",
+        };
+        run.tools.push(folded);
+        setLivePending(event.agent, pendingTextForEvent(folded), sid);
+        if (typeof shouldRenderTools === "function" && !shouldRenderTools(caps)) {
+          return;
+        }
+        upsertLiveTool(event.agent, folded, sid);
+        return;
+      }
+
+      if (event.type === "diagnostic") {
+        // Non-UI process surface; keep in run for optional debug consumers.
+        if (!Array.isArray(run.diagnostics)) run.diagnostics = [];
+        run.diagnostics.push(event);
         return;
       }
 
@@ -1004,9 +1027,6 @@
       for (const run of rt.liveRuns.values()) {
         if (!run || run.agent !== agent) continue;
         for (const evt of run.tools || []) {
-          if (evt) flat.push(evt);
-        }
-        for (const evt of run.commands || []) {
           if (evt) flat.push(evt);
         }
       }

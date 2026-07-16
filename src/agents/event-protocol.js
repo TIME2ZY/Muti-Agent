@@ -2,7 +2,7 @@
  *
  * Platform contract only. CLI-native nested subagents are NOT part of this
  * protocol — cross-agent work uses platform @ / handoff (see collaboration-rules).
- * Task-like CLI tools map to tool.* if they still appear in a stream.
+ * Shell/command executions map to tool.* (toolName often "command_execution" / "bash").
  */
 const PROTOCOL_VERSION = 1;
 
@@ -12,17 +12,19 @@ const CANONICAL_EVENT_FIELDS = {
   "run.failed": ["agent", "invocationId", "error"],
   "text.delta": ["agent", "invocationId", "text"],
   "thinking.delta": ["agent", "invocationId", "text"],
-  "thinking.final": ["agent", "invocationId", "text"],
   stderr: ["agent", "invocationId", "text"],
-  "command.started": ["agent", "invocationId", "command"],
-  "command.finished": ["agent", "invocationId", "command"],
   "file.changed": ["agent", "invocationId", "path"],
   "progress.update": ["agent", "invocationId", "items"],
   "tool.started": ["agent", "invocationId", "toolName", "toolId"],
   "tool.finished": ["agent", "invocationId", "toolName", "toolId"],
+  /** Unrecognized / non-UI diagnostics (debug & durable optional). */
+  diagnostic: ["agent", "invocationId", "code"],
 };
 
-/** Per-field type expectations for required (and common optional) fields. */
+/**
+ * Per-field type expectations for required and common optional fields.
+ * Optional fields are only checked when present on the event.
+ */
 const FIELD_TYPES = {
   agent: "string",
   invocationId: "string",
@@ -30,13 +32,21 @@ const FIELD_TYPES = {
   model: "string",
   text: "string",
   error: "string",
-  command: "string",
   path: "string",
   toolName: "string",
   toolId: "string",
   items: "array",
   exitCode: "numberOrNull",
   signal: "stringOrNull",
+  // Optional documented fields
+  sessionId: "string",
+  status: "string",
+  changeType: "string",
+  output: "string",
+  code: "string",
+  message: "string",
+  rawType: "string",
+  args: "object",
 };
 
 const CANONICAL_EVENT_TYPES = new Set(Object.keys(CANONICAL_EVENT_FIELDS));
@@ -47,10 +57,16 @@ const STRING_COERCE_FIELDS = [
   "model",
   "text",
   "error",
-  "command",
   "path",
   "toolName",
   "toolId",
+  "sessionId",
+  "status",
+  "changeType",
+  "output",
+  "code",
+  "message",
+  "rawType",
 ];
 
 function normalizeProgressItem(item, index) {
@@ -135,6 +151,12 @@ function checkFieldType(field, value) {
     if (!Array.isArray(value)) return typeError(field, "an array", value);
     return null;
   }
+  if (kind === "object") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return typeError(field, "a plain object", value);
+    }
+    return null;
+  }
   if (kind === "numberOrNull") {
     if (value !== null && (typeof value !== "number" || !Number.isFinite(value))) {
       return typeError(field, "a number or null", value);
@@ -176,7 +198,6 @@ function validateCanonicalEvent(event) {
 
   for (const field of CANONICAL_EVENT_FIELDS[event.type]) {
     if (event[field] === undefined || event[field] === null) {
-      // exitCode may be null on failure paths; only treat undefined as missing for numberOrNull required fields
       if (field === "exitCode" && event[field] === null) {
         // allowed
       } else {
@@ -188,7 +209,6 @@ function validateCanonicalEvent(event) {
     if (typeErr) errors.push(`${event.type}.${typeErr}`);
   }
 
-  // Optional typed fields when present
   for (const [field, value] of Object.entries(event)) {
     if (value === undefined || CANONICAL_EVENT_FIELDS[event.type].includes(field)) continue;
     if (!FIELD_TYPES[field]) continue;
@@ -243,7 +263,6 @@ function createRunLifecycle() {
         terminal = true;
         return true;
       }
-      // content
       if (terminal) return false;
       return true;
     },

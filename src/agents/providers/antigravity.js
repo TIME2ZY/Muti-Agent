@@ -149,7 +149,6 @@ const antigravityProvider = {
     // Print mode is plain text only — no structured thinking/tool stream.
     thinking: false,
     tools: false,
-    subagents: false,
     reasoning: "levels",
   },
   allowedProviderOptions: ["mode", "sandbox", "skipPermissions", "printTimeout", "addDirs"],

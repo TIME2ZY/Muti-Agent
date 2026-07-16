@@ -27,22 +27,21 @@ test("resolveCapabilities defaults optimistically when missing", () => {
   const caps = helpers.resolveCapabilities(null);
   assert.equal(caps.thinking, true);
   assert.equal(caps.tools, true);
-  assert.equal(caps.subagents, false);
+  assert.equal(caps.subagents, undefined);
 });
 
 test("resolveCapabilities respects explicit false flags", () => {
   const caps = helpers.resolveCapabilities({
-    capabilities: { thinking: false, tools: false, subagents: true, resume: true },
+    capabilities: { thinking: false, tools: false, resume: true },
   });
   assert.equal(helpers.shouldRenderThinking(caps), false);
   assert.equal(helpers.shouldRenderTools(caps), false);
-  assert.equal(helpers.shouldRenderSubagents(caps), true);
 });
 
 test("findAgentCapabilities looks up agent list by id", () => {
   const agents = [
-    { id: "codex", capabilities: { thinking: false, tools: true, subagents: true } },
-    { id: "grok", capabilities: { thinking: true, tools: false, subagents: false } },
+    { id: "codex", capabilities: { thinking: false, tools: true } },
+    { id: "grok", capabilities: { thinking: true, tools: false } },
   ];
   assert.equal(helpers.findAgentCapabilities(agents, "codex").thinking, false);
   assert.equal(helpers.findAgentCapabilities(agents, "grok").tools, false);
@@ -52,15 +51,15 @@ test("findAgentCapabilities looks up agent list by id", () => {
 test("capabilityTagList is capability-driven not provider-name hardcoding", () => {
   assert.deepEqual(
     helpers.capabilityTagList({
-      capabilities: { thinking: true, tools: false, subagents: false },
+      capabilities: { thinking: true, tools: false },
     }),
     ["思考"]
   );
   assert.deepEqual(
     helpers.capabilityTagList({
-      capabilities: { thinking: true, tools: true, subagents: true },
+      capabilities: { thinking: true, tools: true },
     }),
-    ["思考", "工具", "子代理"]
+    ["思考", "工具"]
   );
 });
 
@@ -96,21 +95,23 @@ test("aggregateProcessBuckets merges durable tool started/finished by toolId", (
     },
   ]);
 
-  // Legacy subagent.* folds into toolById (s1 + t1).
-  assert.equal(buckets.toolById.size, 2);
+  // Legacy subagent.* + command.* fold into toolById (s1 + t1 + npm test).
+  assert.equal(buckets.toolById.size, 3);
   const tool = buckets.toolById.get("t1");
   assert.equal(tool.toolName, "read");
   assert.equal(tool.result, "ok");
   assert.equal(tool.type, "tool.finished");
 
   assert.equal(buckets.subById.size, 0);
+  assert.equal(buckets.commandByKey.size, 0);
   const legacy = buckets.toolById.get("s1");
   assert.equal(legacy.type, "tool.finished");
   assert.equal(legacy.toolName, "explore");
   assert.equal(legacy.result, "done");
 
-  assert.equal(buckets.commandByKey.size, 1);
-  assert.equal(buckets.commandByKey.get("npm test").exitCode, 0);
+  const cmd = buckets.toolById.get("npm test");
+  assert.equal(cmd.toolName, "command_execution");
+  assert.equal(cmd.exitCode, 0);
   assert.equal(helpers.isProcessBucketsEmpty(buckets), false);
 });
 
@@ -177,7 +178,7 @@ test("processAnchorFromEvent maps tool/legacy-subagent/command", () => {
       kind: "command.finished",
       payload: { command: "npm test", exitCode: 0 },
     }),
-    { rowKind: "command", rowId: "npm test" }
+    { rowKind: "tool", rowId: "npm test" }
   );
   assert.equal(
     helpers.processAnchorFromEvent({ kind: "text.delta", payload: { text: "hi" } }),

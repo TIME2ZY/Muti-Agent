@@ -2529,7 +2529,6 @@ test("frontend app.js surfaces Codex progress before first text delta", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   assert.match(js, /function setLivePending\(agent,\s*text,\s*sessionId\)/);
   assert.match(js, /function pendingTextForEvent\(event\)/);
-  assert.match(js, /event\.type === "command\.started"/);
   assert.match(js, /event\.type === "file\.changed"/);
   assert.match(js, /event\.type === "stderr"/);
   assert.match(js, /event\.type === "tool\.started"/);

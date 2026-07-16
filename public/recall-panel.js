@@ -28,15 +28,18 @@
       return `${p.toolName || "tool"} ${JSON.stringify(p.args || {})}`;
     if (evt.kind === "tool.finished")
       return `${p.toolName || "tool"} -> ${JSON.stringify(p.result || {})}`;
+    // Legacy transcript kinds
     if (evt.kind === "subagent.started")
-      return `${p.name || p.toolName || "subagent"} · ${p.task || "started"}`;
-    if (evt.kind === "subagent.progress") return `${p.name || "subagent"} · ${p.text || "running"}`;
+      return `${p.name || p.toolName || "task"} · ${p.task || "started"}`;
+    if (evt.kind === "subagent.progress") return `${p.name || "task"} · ${p.text || "running"}`;
     if (evt.kind === "subagent.completed")
-      return `${p.name || "subagent"} · ${p.summary || "done"}`;
-    if (evt.kind === "subagent.failed") return `${p.name || "subagent"} · ${p.error || "failed"}`;
+      return `${p.name || "task"} · ${p.summary || "done"}`;
+    if (evt.kind === "subagent.failed") return `${p.name || "task"} · ${p.error || "failed"}`;
     if (evt.kind === "command.started") return p.command || "";
     if (evt.kind === "command.finished")
       return `${p.command || ""}${p.exitCode !== undefined ? ` -> exit ${p.exitCode}` : ""}${p.output ? `\n${p.output}` : ""}`;
+    if (evt.kind === "diagnostic")
+      return `${p.code || "diagnostic"}${p.rawType ? ` · ${p.rawType}` : ""}${p.message ? ` · ${p.message}` : ""}`;
     if (evt.kind === "file.changed") return `${p.changeType || "modified"} ${p.path || ""}`.trim();
     if (evt.kind === "progress.update") return JSON.stringify(p.items || [], null, 2);
     if (evt.kind === "invocation-start")

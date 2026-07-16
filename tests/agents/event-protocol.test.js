@@ -21,23 +21,68 @@ test("makeEvent stamps protocolVersion", () => {
   assert.equal(event.type, "text.delta");
 });
 
-test("canonical protocol rejects subagent.* event types", () => {
+test("canonical protocol rejects removed event types", () => {
   const { CANONICAL_EVENT_TYPES, validateCanonicalEvent } = require("../../src/agents/event-protocol");
   for (const type of [
     "subagent.started",
     "subagent.progress",
     "subagent.completed",
     "subagent.failed",
+    "thinking.final",
+    "command.started",
+    "command.finished",
   ]) {
     assert.equal(CANONICAL_EVENT_TYPES.has(type), false);
     const errors = validateCanonicalEvent({
       type,
       agent: "codex",
       invocationId: "i",
+      text: "x",
+      command: "x",
       subagentId: "s1",
     });
     assert.ok(errors.some((e) => /unsupported event type/.test(e)));
   }
+});
+
+test("diagnostic and optional fields validate", () => {
+  const diag = makeEvent("diagnostic", {
+    agent: "codex",
+    invocationId: "i",
+    code: "unmapped_event",
+    rawType: "foo",
+    message: "not mapped",
+  });
+  assert.doesNotThrow(() => assertCanonicalEvent(diag));
+
+  const started = makeEvent("run.started", {
+    agent: "codex",
+    invocationId: "i",
+    provider: "codex",
+    model: "m",
+    sessionId: "ses_1",
+  });
+  assert.equal(started.sessionId, "ses_1");
+  assert.doesNotThrow(() => assertCanonicalEvent(started));
+
+  const tool = makeEvent("tool.started", {
+    agent: "codex",
+    invocationId: "i",
+    toolName: "bash",
+    toolId: "t1",
+    args: { command: "ls" },
+  });
+  assert.deepEqual(tool.args, { command: "ls" });
+  assert.doesNotThrow(() => assertCanonicalEvent(tool));
+
+  const file = makeEvent("file.changed", {
+    agent: "codex",
+    invocationId: "i",
+    path: "a.js",
+    changeType: "add",
+  });
+  assert.equal(file.changeType, "add");
+  assert.doesNotThrow(() => assertCanonicalEvent(file));
 });
 
 test("normalize coerces loose field types before validation", () => {
