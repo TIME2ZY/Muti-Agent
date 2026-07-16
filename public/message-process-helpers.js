@@ -36,8 +36,20 @@
       return truncateDisplay(event.command, 140);
     }
     const args = event.args && typeof event.args === "object" ? event.args : {};
-    const preferred = args.title || args.description || args.command || args.cmd
-      || args.path || args.file || args.pattern || event.task || "";
+    // OpenCode uses filePath; Codex-style tools use path/file.
+    const preferred =
+      args.title ||
+      args.description ||
+      args.command ||
+      args.cmd ||
+      args.path ||
+      args.file ||
+      args.filePath ||
+      args.file_path ||
+      args.filepath ||
+      args.pattern ||
+      event.task ||
+      "";
     return truncateDisplay(preferred, 140);
   }
 

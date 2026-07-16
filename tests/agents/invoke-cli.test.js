@@ -232,7 +232,7 @@ test("uses opencode agent for qwen3.7-plus", () => {
   assert.match(
     parseOutputEvents(result.stdout)[1].text,
     new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/qwen3.7-plus hello:undefined`
+      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/qwen3.7-plus hello:undefined`
     )
   );
   assert.equal(result.stderr, "");
@@ -1019,7 +1019,7 @@ test("resumes remembered opencode session", () => {
   assert.match(
     text.text,
     new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --model opencode-go\\/qwen3.7-plus --session opencode-session-previous hello again`
+      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/qwen3.7-plus --session opencode-session-previous hello again`
     )
   );
   assert.equal(result.stderr, "");

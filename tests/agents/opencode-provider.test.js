@@ -1,0 +1,103 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {
+  createOpencodeRuntime,
+  opencodeProvider,
+  normalizeToolArgs,
+  sessionIdFromEvent,
+} = require("../../src/agents/providers/opencode");
+const { createProviderRuntime } = require("../../src/agents/providers");
+const { buildInvocation } = require("../../src/agents/invoke-cli");
+const { AGENTS } = require("../../src/agents/catalog");
+
+test("normalizeToolArgs maps filePath to path for UI", () => {
+  assert.deepEqual(normalizeToolArgs({ filePath: "a/b.js" }).path, "a/b.js");
+  assert.deepEqual(normalizeToolArgs({ file_path: "x" }).path, "x");
+  assert.equal(normalizeToolArgs({ path: "keep", filePath: "other" }).path, "keep");
+});
+
+test("sessionIdFromEvent reads sessionID on lines", () => {
+  assert.equal(sessionIdFromEvent({ sessionID: "ses_1" }), "ses_1");
+  assert.equal(sessionIdFromEvent({ part: { sessionID: "ses_2" } }), "ses_2");
+});
+
+test("opencode maps real tool_use with filePath to tool.* with path", () => {
+  const runtime = createProviderRuntime({
+    providerId: "opencode",
+    model: "qwen3.7-plus",
+  });
+  const ctx = { agent: "opencode", invocationId: "inv-fp" };
+  const events = runtime.transform(
+    {
+      type: "tool_use",
+      sessionID: "ses_real",
+      part: {
+        type: "tool",
+        tool: "read",
+        callID: "read_0",
+        state: {
+          status: "completed",
+          input: { filePath: "D:/HW/package.json" },
+          output: "ok",
+        },
+      },
+    },
+    ctx
+  );
+  assert.ok(events.some((e) => e.type === "run.started" && e.sessionId === "ses_real"));
+  const started = events.find((e) => e.type === "tool.started");
+  assert.ok(started);
+  assert.equal(started.toolName, "read");
+  assert.equal(started.toolId, "read_0");
+  assert.equal(started.args.path, "D:/HW/package.json");
+  assert.equal(started.args.filePath, "D:/HW/package.json");
+  assert.ok(events.some((e) => e.type === "tool.finished" && e.status === "ok"));
+});
+
+test("opencode maps reasoning + text sample shapes", () => {
+  const runtime = createOpencodeRuntime({ providerId: "opencode", model: "qwen3.7-plus" });
+  const ctx = { agent: "opencode", invocationId: "inv-rt" };
+  const think = runtime.transform(
+    {
+      type: "reasoning",
+      sessionID: "ses_a",
+      part: { type: "reasoning", id: "r1", text: "thinking hard" },
+    },
+    ctx
+  );
+  assert.ok(think.some((e) => e.type === "thinking.delta" && e.text.includes("thinking hard")));
+  const text = runtime.transform(
+    {
+      type: "text",
+      sessionID: "ses_a",
+      part: { type: "text", text: "hello from opencode" },
+    },
+    ctx
+  );
+  assert.ok(text.some((e) => e.type === "text.delta" && e.text === "hello from opencode"));
+});
+
+test("buildInvocation for opencode uses format json, thinking, and auto", () => {
+  const inv = buildInvocation(AGENTS.opencode, "review please");
+  assert.match(String(inv.command), /opencode/i);
+  assert.ok(inv.args.includes("run"));
+  assert.ok(inv.args.includes("--format"));
+  assert.ok(inv.args.includes("json"));
+  assert.ok(inv.args.includes("--thinking"));
+  assert.ok(inv.args.includes("--auto"));
+  assert.ok(inv.args.includes("--model"));
+  assert.ok(inv.args.some((a) => String(a).includes("qwen3.7-plus")));
+});
+
+test("buildInvocation can disable autoApprove", () => {
+  const inv = buildInvocation(
+    { ...AGENTS.opencode, providerOptions: { autoApprove: false } },
+    "x"
+  );
+  assert.ok(!inv.args.includes("--auto"));
+});
+
+test("opencode capabilities remain tools+thinking", () => {
+  assert.equal(opencodeProvider.capabilities.tools, true);
+  assert.equal(opencodeProvider.capabilities.thinking, true);
+});

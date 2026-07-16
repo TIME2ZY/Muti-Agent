@@ -7,6 +7,23 @@ test("truncateDisplay and collapseWs", () => {
   assert.equal(helpers.truncateDisplay("x".repeat(10), 5).length, 5);
 });
 
+test("toolDetailFromEvent prefers path aliases including filePath", () => {
+  assert.match(
+    helpers.toolDetailFromEvent({
+      toolName: "read",
+      args: { filePath: "src/app.js" },
+    }),
+    /src\/app\.js/
+  );
+  assert.match(
+    helpers.toolDetailFromEvent({
+      toolName: "bash",
+      args: { command: "npm test" },
+    }),
+    /npm test/
+  );
+});
+
 test("cleanProcessOutput strips task XML", () => {
   const out = helpers.cleanProcessOutput("<task_result>ok done</task_result>");
   assert.match(out, /ok done/);

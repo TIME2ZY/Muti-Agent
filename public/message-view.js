@@ -615,14 +615,30 @@
       if (event.type === "stderr") return trimLiveStatus(event.text || "");
       if (event.type === "tool.started") {
         const args = event.args && typeof event.args === "object" ? event.args : {};
-        const detail = args.path || args.file || args.pattern || args.command || args.cmd || "";
+        const detail =
+          args.path ||
+          args.file ||
+          args.filePath ||
+          args.file_path ||
+          args.pattern ||
+          args.command ||
+          args.cmd ||
+          "";
         const label = detail ? `${event.toolName || "tool"} ${detail}` : event.toolName || "tool";
         return `工具: ${trimLiveStatus(label)}`;
       }
       if (event.type === "tool.finished") {
         const status = event.status === "error" ? "失败" : "完成";
         const args = event.args && typeof event.args === "object" ? event.args : {};
-        const detail = args.path || args.file || args.pattern || args.command || args.cmd || "";
+        const detail =
+          args.path ||
+          args.file ||
+          args.filePath ||
+          args.file_path ||
+          args.pattern ||
+          args.command ||
+          args.cmd ||
+          "";
         const label = detail ? `${event.toolName || "tool"} ${detail}` : event.toolName || "tool";
         return `工具${status}: ${trimLiveStatus(label)}`;
       }

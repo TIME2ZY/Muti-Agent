@@ -11,6 +11,48 @@ const {
   toolItemId,
 } = require("../tool-classification");
 
+/**
+ * OpenCode CLI provider — one runtime for all models.
+ *
+ * Headless (verified opencode 1.17.x):
+ *   opencode run --format json --thinking --auto --model provider/model "prompt"
+ *
+ * Event shapes (model-agnostic; only -m changes which model runs):
+ *   step_start / step_finish  → progress.update (+ tokens/cost on finish, not mapped yet)
+ *   reasoning                 → thinking.delta  (needs --thinking)
+ *   text                      → text.delta      (often full part text, not micro-tokens)
+ *   tool_use                  → tool.started + tool.finished (often already completed)
+ *   sessionID on each line    → resume / run.started.sessionId
+ *
+ * Usage (part.tokens / part.cost on step_finish) is intentionally not mapped
+ * until a platform-wide usage protocol exists.
+ */
+
+function sessionIdFromEvent(event) {
+  if (!event || typeof event !== "object") return "";
+  if (typeof event.sessionID === "string" && event.sessionID) return event.sessionID;
+  if (typeof event.session_id === "string" && event.session_id) return event.session_id;
+  if (event.session && typeof event.session.id === "string") return event.session.id;
+  const part = event.part;
+  if (part && typeof part.sessionID === "string" && part.sessionID) return part.sessionID;
+  return "";
+}
+
+/** Normalize OpenCode path-like fields for UI toolDetailFromEvent (path/file). */
+function normalizeToolArgs(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return args || {};
+  const next = { ...args };
+  const pathLike =
+    (typeof next.path === "string" && next.path) ||
+    (typeof next.file === "string" && next.file) ||
+    (typeof next.filePath === "string" && next.filePath) ||
+    (typeof next.file_path === "string" && next.file_path) ||
+    (typeof next.filepath === "string" && next.filepath) ||
+    "";
+  if (pathLike && typeof next.path !== "string") next.path = pathLike;
+  return next;
+}
+
 function createOpencodeRuntime(cli) {
   const parts = new Map();
   const reasoningParts = new Map();
@@ -101,18 +143,27 @@ function createOpencodeRuntime(cli) {
   }
 
   function toolLabelArgs(toolName, args) {
-    if (!args || typeof args !== "object") return args || {};
+    const normalized = normalizeToolArgs(args);
+    if (!normalized || typeof normalized !== "object") return {};
     // Prefer compact labels for live UI / recall.
-    if (typeof args.path === "string") return { path: args.path, ...args };
-    if (typeof args.file === "string") return { path: args.file, ...args };
-    if (typeof args.pattern === "string" && !args.command)
-      return { pattern: args.pattern, ...args };
-    return args;
+    if (typeof normalized.path === "string") return { path: normalized.path, ...normalized };
+    if (typeof normalized.pattern === "string" && !normalized.command) {
+      return { pattern: normalized.pattern, ...normalized };
+    }
+    return normalized;
   }
 
   function isBashLike(toolName) {
     const name = String(toolName || "").toLowerCase();
-    return name === "bash" || name === "shell" || name === "exec" || name.endsWith(".bash");
+    return (
+      name === "bash" ||
+      name === "shell" ||
+      name === "exec" ||
+      name === "run_terminal_cmd" ||
+      name.endsWith(".bash") ||
+      name.includes("shell") ||
+      name.includes("terminal")
+    );
   }
 
   function toolEventsFromPart(part, base) {
@@ -244,29 +295,17 @@ function createOpencodeRuntime(cli) {
 
   return {
     extractSessionId(event) {
-      if (
-        event &&
-        event.type === "session.updated" &&
-        event.session &&
-        typeof event.session.id === "string"
-      ) {
-        return event.session.id;
-      }
-      if (event && typeof event.sessionID === "string") {
-        return event.sessionID;
-      }
-      if (event && typeof event.session_id === "string") {
-        return event.session_id;
-      }
-      return "";
+      return sessionIdFromEvent(event);
     },
     transform(event, ctx) {
       const base = {
         agent: ctx.agent,
         invocationId: ctx.invocationId,
       };
+      if (!event || typeof event !== "object") return [];
 
       const part = normalizePart(event);
+      const sessionId = sessionIdFromEvent(event);
 
       // Thinking / reasoning (requires `opencode run --thinking` on the CLI).
       if (
@@ -283,7 +322,9 @@ function createOpencodeRuntime(cli) {
                 text: reasoningTextFromPart(part) || reasoningTextFromPart(event),
               };
         const thinking = thinkingEventsFromPart(thinkingPart, base);
-        if (thinking.length) return thinking;
+        if (thinking.length) {
+          return [...maybeRunStarted(base, sessionId), ...thinking];
+        }
       }
 
       if (event.type === "message.part.updated" && part && part.type === "text") {
@@ -291,24 +332,28 @@ function createOpencodeRuntime(cli) {
         const next = typeof part.text === "string" ? part.text : "";
         const prev = parts.get(id) || "";
         parts.set(id, next);
+        let textEvents = [];
         if (!next.startsWith(prev)) {
-          return [makeEvent("text.delta", { ...base, text: next })];
+          textEvents = [makeEvent("text.delta", { ...base, text: next })];
+        } else {
+          const delta = next.slice(prev.length);
+          textEvents = delta ? [makeEvent("text.delta", { ...base, text: delta })] : [];
         }
-        const delta = next.slice(prev.length);
-        return delta ? [makeEvent("text.delta", { ...base, text: delta })] : [];
+        if (!textEvents.length) return [];
+        return [...maybeRunStarted(base, sessionId), ...textEvents];
       }
 
       if (event.type === "message.part.updated" && part && isReasoningPartType(part.type)) {
         const thinking = thinkingEventsFromPart(part, base);
-        if (thinking.length) return thinking;
+        if (thinking.length) return [...maybeRunStarted(base, sessionId), ...thinking];
       }
 
       if (event.type === "message.part.updated" && part) {
         const toolEvents = toolEventsFromPart(part, base);
-        if (toolEvents.length) return toolEvents;
+        if (toolEvents.length) return [...maybeRunStarted(base, sessionId), ...toolEvents];
       }
 
-      // OpenCode current schema: top-level type is "tool_use" with part.type="tool".
+      // Current CLI (1.17+): type "tool_use", part.type "tool", often status already completed.
       // Older builds may emit tool / tool_call / tool.updated instead.
       if (
         event.type === "tool_use" ||
@@ -327,21 +372,14 @@ function createOpencodeRuntime(cli) {
           },
           base
         );
-        if (toolEvents.length) return toolEvents;
+        if (toolEvents.length) return [...maybeRunStarted(base, sessionId), ...toolEvents];
       }
 
       if (event.type === "session.updated") {
-        const sessionId = event.session && event.session.id ? event.session.id : "";
         return maybeRunStarted(base, sessionId);
       }
 
       if (event.type === "step_start" || event.type === "step.start" || event.type === "loop") {
-        const sessionId =
-          typeof event.sessionID === "string"
-            ? event.sessionID
-            : typeof event.session_id === "string"
-              ? event.session_id
-              : "";
         const stepNumber = extractStepNumber(event, part);
         const out = [];
         out.push(...maybeRunStarted(base, sessionId));
@@ -354,6 +392,7 @@ function createOpencodeRuntime(cli) {
         event.type === "step.finish" ||
         event.type === "step-finish"
       ) {
+        // part.tokens / part.cost available here — reserved for future usage protocol.
         const reason = (part && part.reason) || event.reason || "";
         const label =
           reason === "tool-calls"
@@ -363,17 +402,19 @@ function createOpencodeRuntime(cli) {
               : reason
                 ? `步骤完成: ${reason}`
                 : "步骤完成";
-        return [
+        const out = [];
+        out.push(...maybeRunStarted(base, sessionId));
+        out.push(
           makeEvent("progress.update", {
             ...base,
             items: [{ text: label, done: true, reason }],
-          }),
-        ];
+          })
+        );
+        return out;
       }
 
       // part.type === "step-start" nested under other envelopes
       if (part && (part.type === "step-start" || part.type === "step_start")) {
-        const sessionId = typeof event.sessionID === "string" ? event.sessionID : "";
         const stepNumber = extractStepNumber(event, part);
         const out = [];
         out.push(...maybeRunStarted(base, sessionId));
@@ -388,11 +429,14 @@ function createOpencodeRuntime(cli) {
           .filter((item) => item.type === "text" && typeof item.text === "string")
           .map((item) => item.text)
           .join("");
-        return text ? [makeEvent("text.delta", { ...base, text })] : [];
+        if (!text) return [];
+        return [...maybeRunStarted(base, sessionId), makeEvent("text.delta", { ...base, text })];
       }
 
+      // Current CLI: top-level type "text" with part.type "text" and full part.text.
       if (event.type === "text" && part && part.type === "text" && typeof part.text === "string") {
         return [
+          ...maybeRunStarted(base, sessionId),
           makeEvent("text.delta", {
             ...base,
             text: part.text,
@@ -454,13 +498,17 @@ const opencodeProvider = {
     tools: true,
     reasoning: "toggle",
   },
-  allowedProviderOptions: ["thinking", "modelPrefix"],
+  // All OpenCode-backed models share this adapter; only --model changes.
+  allowedProviderOptions: ["thinking", "modelPrefix", "autoApprove"],
   createRuntime: createOpencodeRuntime,
   resolveProxy,
   buildInvocation(config, prompt) {
     const providerOptions = config.providerOptions || {};
     const args = ["run", "--format", "json"];
+    // Required for thinking.delta from `reasoning` events (CLI 1.17+).
     if (providerOptions.thinking !== false) args.push("--thinking");
+    // Headless: auto-approve tools that are not denied (otherwise may hang).
+    if (providerOptions.autoApprove !== false) args.push("--auto");
     if (config.model) {
       const modelPrefix = providerOptions.modelPrefix ?? OPENCODE_GO_MODEL_PREFIX;
       const fullModel = config.model.startsWith(OPENCODE_GO_MODEL_PREFIX)
@@ -479,4 +527,6 @@ module.exports = {
   opencodeProvider,
   OPENCODE_GO_MODEL_PREFIX,
   resolveOpencodeCommand,
+  normalizeToolArgs,
+  sessionIdFromEvent,
 };
