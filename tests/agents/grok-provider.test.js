@@ -39,6 +39,26 @@ test("buildInvocation for grok spawns local grok CLI headless", () => {
   assert.ok(inv.args.includes("--reasoning-effort"));
   assert.ok(inv.args.includes("high"));
   assert.ok(inv.args.includes("--always-approve"));
+  assert.ok(inv.args.includes("--no-subagents"));
+});
+
+test("grok capabilities: thinking yes, tools no (streaming-json has no tool stream)", () => {
+  const { getProviderAdapter } = require("../../src/agents/providers");
+  const caps = getProviderAdapter("grok").capabilities;
+  assert.equal(caps.thinking, true);
+  assert.equal(caps.tools, false);
+  assert.equal(caps.resume, true);
+});
+
+test("buildInvocation can re-enable subagents via providerOptions", () => {
+  const inv = buildInvocation(
+    {
+      ...AGENTS.grok,
+      providerOptions: { noSubagents: false },
+    },
+    "x"
+  );
+  assert.ok(!inv.args.includes("--no-subagents"));
 });
 
 test("buildInvocation for grok resumes with -r session id", () => {

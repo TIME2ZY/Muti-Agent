@@ -7,12 +7,20 @@ const { firstNonEmpty, resolveProxy } = require("../proxy");
  * Grok Build CLI provider.
  *
  * Child process is the local `grok` binary (same pattern as codex / opencode):
- *   grok -p "..." --output-format streaming-json -m grok-4.5 --reasoning-effort high ...
+ *   grok -p "..." --output-format streaming-json -m grok-4.5 \
+ *     --reasoning-effort high --always-approve --no-subagents ...
  *
- * Observed streaming-json lines (headless):
+ * Official / observed streaming-json (headless projector) event types:
  *   { "type": "thought", "data": "..." }   // often 1 word / few chars each
  *   { "type": "text", "data": "..." }
- *   { "type": "end", "stopReason": "EndTurn", "sessionId": "...", "requestId": "..." }
+ *   { "type": "end", "stopReason", "sessionId", "requestId", "usage", "num_turns", ... }
+ *   { "type": "error", "message": "..." }
+ * Plus rare edge types (max_turns_reached, auto_compact_*, …).
+ *
+ * Tools run inside the CLI agent loop (local write/shell/etc.) but are NOT
+ * emitted on streaming-json stdout — so capabilities.tools is false. File
+ * side-effects are visible via session worktree git status/diff, not tool.*.
+ * end.usage is left unmapped until a platform-wide usage protocol exists.
  *
  * Without coalescing, a short reply with high reasoning can emit 200+ NDJSON
  * lines → 200+ SSE/agent-events. We batch consecutive thought/text chunks.
@@ -135,6 +143,8 @@ function createGrokRuntime(cli) {
           return out;
         }
 
+        // Forward-compat only: current Grok headless streaming-json does not
+        // emit tool events (tools execute inside the CLI, invisible on stdout).
         case "tool":
         case "tool_use":
         case "tool_call": {
@@ -259,10 +269,11 @@ const grokProvider = {
   capabilities: {
     resume: true,
     thinking: true,
-    tools: true,
+    // streaming-json has no tool/file events; edits show via worktree git.
+    tools: false,
     reasoning: "levels",
   },
-  allowedProviderOptions: ["alwaysApprove", "autoUpdate", "proxy"],
+  allowedProviderOptions: ["alwaysApprove", "autoUpdate", "proxy", "noSubagents"],
   createRuntime: createGrokRuntime,
   resolveProxy(options = {}, env = process.env) {
     const providerOptions = options.providerOptions || {};
@@ -311,6 +322,8 @@ const grokProvider = {
     const args = ["-p", prompt, "--output-format", "streaming-json"];
     if (providerOptions.alwaysApprove !== false) args.push("--always-approve");
     if (providerOptions.autoUpdate !== true) args.push("--no-auto-update");
+    // Platform collaboration is @/handoff — block CLI-native nested agents.
+    if (providerOptions.noSubagents !== false) args.push("--no-subagents");
     if (config.model) args.push("-m", config.model);
     if (effort) args.push("--reasoning-effort", effort);
     if (config.resumeSessionId) args.push("-r", config.resumeSessionId);

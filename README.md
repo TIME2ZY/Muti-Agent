@@ -116,7 +116,8 @@ http://127.0.0.1:8787
 | `grok`     | Grok     | grok (Grok Build CLI) | grok-4.5         | 写代码、实现功能                                   |
 | `opencode` | OpenCode | opencode              | qwen3.7-plus     | 代码 Review                                        |
 
-> **Grok**：安装 [Grok Build CLI](https://x.ai/cli)，`grok login` 或设置 `XAI_API_KEY`。spawn：`grok -p ... --output-format streaming-json -m grok-4.5 --reasoning-effort high --always-approve`。直连超时可设 `GROK_PROXY`（仅注入 Grok 子进程）。  
+> **Grok**：安装 [Grok Build CLI](https://x.ai/cli)，`grok login` 或设置 `XAI_API_KEY`。spawn：`grok -p ... --output-format streaming-json -m grok-4.5 --reasoning-effort high --always-approve --no-subagents`。`streaming-json` 仅有思考/正文流（无工具事件）；文件改动看工作区 diff。直连超时可设 `GROK_PROXY`（仅注入 Grok 子进程）。  
+
 > **Gemini / Antigravity**：安装 [Antigravity CLI](https://antigravity.google/)（`agy`）。spawn：`agy -p "..." --model "Gemini 3.5 Flash (High)" --dangerously-skip-permissions --mode plan`。可用 `AGY_PATH` 覆盖路径。  
 > **OpenCode**：本机 `opencode` CLI + `qwen3.7-plus`。
 
@@ -190,7 +191,7 @@ http://127.0.0.1:8787
 - Skill 系统：`src/server/skills.js`（frontmatter / 匹配 / prompt 增强 / 只读规则）
 - Agent 身份：`src/agents/identities/*.md` + `src/agents/identity.js`；**每一轮** invoke（含 A2A）注入对应身份块
 - A2A 交接：`src/agents/handoff.js` 解析 ` ```handoff ` 块；软约束（缺字段 degraded 仍路由），结构化注入下一位 Agent
-- Grok provider：本地 `grok` CLI + `src/agents/providers/grok.js`（`streaming-json` → thinking/text）
+- Grok provider：本地 `grok` CLI + `src/agents/providers/grok.js`（`streaming-json` → thinking/text；`tools: false`；默认 `--no-subagents`）
 - 模型目录：`src/agents/catalog.js` 分离 Agent 角色、执行 provider 与模型厂商；上下文容量等模型元数据以该目录为准
 - Provider 契约：`src/agents/providers/index.js` 统一校验完整 adapter；每个 adapter 必须声明 `capabilities`、`allowedProviderOptions`，并实现 `buildInvocation` / `createRuntime`；可选 `resolveProxy` / `buildEnvironment` / `diagnostics`
 - CLI 入口：`invoke-cli.js` 只做参数解析与装配；进程监督、session 持久化、raw event log 分别在 `process-supervisor.js` / `session-persistence.js` / `raw-event-logger.js`
