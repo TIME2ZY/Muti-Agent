@@ -6,7 +6,8 @@ const test = require("node:test");
 const sessionBootstrap = require("../../src/session/bootstrap");
 const transcript = require("../../src/session/transcript");
 
-const { buildIdentity, buildDigest, buildBootstrapPacket, RECALL_RULE } = sessionBootstrap;
+const { buildIdentity, buildDigest, buildActiveMemoryCard, buildBootstrapPacket, RECALL_RULE } =
+  sessionBootstrap;
 
 function withTempDir(fn) {
   return async () => {
@@ -123,6 +124,54 @@ test("RECALL_RULE contains the three recall steps + key phrases", () => {
   assert.match(RECALL_RULE, /read-invocation/);
   assert.match(RECALL_RULE, /不要凭印象猜/);
   assert.match(RECALL_RULE, /不要凭印象猜/);
+  assert.match(RECALL_RULE, /Active Memories/);
+});
+
+test("buildActiveMemoryCard reads only the configured recency window", () => {
+  const calls = [];
+  const card = buildActiveMemoryCard({
+    threadId: "thread-memory",
+    recentLimit: 4,
+    memorySource: {
+      listActive(threadId, options) {
+        calls.push({ threadId, options });
+        return [
+          {
+            id: "decision-1",
+            status: "confirmed",
+            kind: "decision",
+            content: "Use SQLite",
+            createdBy: "user",
+            createdAt: "2026-07-16T00:00:00.000Z",
+          },
+        ];
+      },
+    },
+  });
+
+  assert.deepEqual(calls, [{ threadId: "thread-memory", options: { limit: 4 } }]);
+  assert.match(card, /\[confirmed\]\[decision\] id=decision-1/);
+  assert.match(card, /Use SQLite/);
+});
+
+test("buildActiveMemoryCard degrades to an empty card when SQLite read fails", () => {
+  const errors = [];
+  const card = buildActiveMemoryCard({
+    threadId: "thread-memory",
+    memorySource: {
+      listActive() {
+        throw new Error("database offline");
+      },
+    },
+    logger: {
+      error(message) {
+        errors.push(message);
+      },
+    },
+  });
+
+  assert.match(card, /Active Memories \(0\)/);
+  assert.match(errors[0], /listActive failed: database offline/);
 });
 
 // ── buildBootstrapPacket ───────────────────────────────────────
@@ -141,6 +190,9 @@ test(
     assert.match(packet, /Thread: t1/);
     assert.match(packet, /Agent: 小智/);
 
+    // Memory card
+    assert.match(packet, /<!-- Active Memories \(0\) -->/);
+
     // Digest
     assert.match(packet, /<!-- Digest -->/);
     assert.match(packet, /第一个 invocation/);
@@ -149,11 +201,13 @@ test(
     assert.match(packet, /<!-- 回忆铁律/);
     assert.match(packet, /不要凭印象猜/);
 
-    // Order matters: identity should come before digest, digest before recall rule
+    // Order matters: identity → memories → digest → recall rule
     const identityIdx = packet.indexOf("<!-- Session Identity -->");
+    const memoryIdx = packet.indexOf("<!-- Active Memories");
     const digestIdx = packet.indexOf("<!-- Digest -->");
     const recallIdx = packet.indexOf("<!-- 回忆铁律");
-    assert.ok(identityIdx < digestIdx, "identity should come before digest");
+    assert.ok(identityIdx < memoryIdx, "identity should come before memories");
+    assert.ok(memoryIdx < digestIdx, "memories should come before digest");
     assert.ok(digestIdx < recallIdx, "digest should come before recall rule");
   })
 );

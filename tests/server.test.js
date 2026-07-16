@@ -1634,6 +1634,60 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   callbacks.unregisterThread(sessionId);
 });
 
+test("callbacks.postMessage captures structured handoff only for an enqueued target", () => {
+  const sessionId = "session-cb-memory";
+  const invocationId = "invocation-cb-memory";
+  const captured = [];
+  const sse = [];
+  const threadCtx = {
+    res: {
+      destroyed: false,
+      writableEnded: false,
+      write(chunk) {
+        sse.push(chunk);
+        return true;
+      },
+    },
+    worklist: ["codex"],
+    controller: new AbortController(),
+    a2aCount: 0,
+    tokens: new Map([[invocationId, { agentId: "codex", callbackToken: "token" }]]),
+  };
+  callbacks.registerThread(sessionId, threadCtx);
+
+  try {
+    const content = [
+      "@Gemini 请继续实现",
+      "```handoff",
+      "to: gemini",
+      "goal: 完成登录流程",
+      "what: 接口设计已完成",
+      "why: 保持兼容",
+      "next_action: 实现并测试",
+      "```",
+    ].join("\n");
+    const ok = callbacks.postMessage(sessionId, invocationId, content, {
+      memoryCapture: {
+        captureHandoff(input) {
+          captured.push(input);
+          return { captured: true, event: { captureKey: "handoff-key" } };
+        },
+      },
+    });
+
+    assert.equal(ok, true);
+    assert.equal(captured.length, 1);
+    assert.equal(captured[0].fromAgent, "codex");
+    assert.equal(captured[0].toAgent, "gemini");
+    assert.equal(captured[0].blockIndex, 0);
+    assert.equal(captured[0].quality.ok, true);
+    assert.equal(captured[0].handoff.goal, "完成登录流程");
+    assert.match(sse.join(""), /event: memory-captured/);
+  } finally {
+    callbacks.unregisterThread(sessionId);
+  }
+});
+
 test("callbacks.validateToken accepts only exact matches", () => {
   const sessionId = "session-vt-1";
   const invocationId = "invocation-vt-1";

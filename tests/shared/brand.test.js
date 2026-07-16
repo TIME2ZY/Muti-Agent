@@ -20,5 +20,6 @@ describe("brand identifiers", () => {
     }
     assert.equal(brand.ENV.THREAD_ID, "SHIFT_THREAD_ID");
     assert.equal(brand.ENV.UI_TOKEN, "SHIFT_UI_TOKEN");
+    assert.equal(brand.ENV.RETRIEVE_BUDGET_CHARS, "SHIFT_RETRIEVE_BUDGET_CHARS");
   });
 });

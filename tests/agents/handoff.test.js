@@ -113,6 +113,31 @@ test("extractPrimaryHandoff prefers block matching routedTo", () => {
   assert.equal(h.what, "for grok");
 });
 
+test("extractPrimaryHandoffMatch retains the selected parsed block index", () => {
+  const text = [
+    "```handoff",
+    "to: grok",
+    "what: inspect logs",
+    "why: diagnose",
+    "next_action: report",
+    "```",
+    "```handoff",
+    "to: opencode",
+    "what: implement fix",
+    "why: resolve issue",
+    "next_action: patch files",
+    "```",
+  ].join("\n");
+
+  const match = handoff.extractPrimaryHandoffMatch(text, { routedTo: "grok" });
+  assert.equal(match.blockIndex, 0);
+  assert.equal(match.handoff.to, "grok");
+  assert.deepEqual(handoff.extractPrimaryHandoffMatch("no block"), {
+    handoff: null,
+    blockIndex: null,
+  });
+});
+
 test("evaluateHandoff marks complete packs ok", () => {
   const h = extractPrimaryHandoff(FULL_BLOCK);
   const q = evaluateHandoff(h);

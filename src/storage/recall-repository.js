@@ -283,19 +283,24 @@ function eventToRecall(row) {
 }
 
 function memoryToRecall(row) {
+  const memoryMetadata = parseJsonSafe(row.metadata_json);
   return {
     threadId: row.thread_id,
+    windowId: row.window_id,
     sourceKind: "memory-entry",
     sourceId: row.id,
     title: `${row.kind}:${row.status}`,
     content: row.content,
     createdAt: row.created_at,
     metadata: {
+      ...(memoryMetadata && typeof memoryMetadata === "object" ? memoryMetadata : {}),
       kind: row.kind,
       status: row.status,
       createdBy: row.created_by,
       sourceInvocationId: row.source_invocation_id,
       sourceMessageId: row.source_message_id,
+      captureKey: row.capture_key,
+      supersessionKey: row.supersession_key,
     },
   };
 }

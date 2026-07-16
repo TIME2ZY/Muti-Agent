@@ -28,6 +28,7 @@ function createCallbackRoutes({
   readJsonBody,
   durableRecorder,
   recallService,
+  memoryCapture,
 }) {
   const recall = recallService || transcript;
   return async function handleCallbackRoutes(req, res, url) {
@@ -56,6 +57,7 @@ function createCallbackRoutes({
 
       const postOptions = { appendToSession };
       if (durableRecorder) postOptions.durableRecorder = durableRecorder;
+      if (memoryCapture) postOptions.memoryCapture = memoryCapture;
       const ok = callbacks.postMessage(sessionId, invocationId, content, postOptions);
       if (!ok) {
         sendJson(res, 410, { error: "Thread no longer active; message was not delivered." });

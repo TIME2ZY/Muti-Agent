@@ -1,6 +1,7 @@
 const { openMemoryDatabase, withTransaction, checkpointMemoryDatabase } = require("./database");
 const { createInvocationRepository } = require("./invocation-repository");
 const { createMemoryRepository } = require("./memory-repository");
+const { createMemoryService } = require("./memory-service");
 const { createMessageRepository } = require("./message-repository");
 const { createRecallRepository } = require("./recall-repository");
 const { createThreadRepository } = require("./thread-repository");
@@ -9,7 +10,7 @@ const { createWindowRepository } = require("./window-repository");
 function createStorage(options = {}) {
   const db = options.db || openMemoryDatabase(options);
   const recall = createRecallRepository(db);
-  return {
+  const storage = {
     db,
     threads: createThreadRepository(db),
     windows: createWindowRepository(db),
@@ -27,6 +28,8 @@ function createStorage(options = {}) {
       if (db.open) db.close();
     },
   };
+  storage.memory = createMemoryService({ storage });
+  return storage;
 }
 
 module.exports = {
@@ -34,4 +37,5 @@ module.exports = {
   openMemoryDatabase,
   withTransaction,
   checkpointMemoryDatabase,
+  createMemoryService,
 };

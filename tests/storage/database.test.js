@@ -7,6 +7,7 @@ const {
   checkpointMemoryDatabase,
 } = require("../../src/storage/database");
 const { applyMigrations, validateMigrations } = require("../../src/storage/migrations");
+const { MIGRATIONS } = require("../../src/storage/schema");
 
 test("memory database applies schema and safety pragmas", () => {
   const db = openMemoryDatabase({ file: ":memory:" });
@@ -22,7 +23,7 @@ test("memory database applies schema and safety pragmas", () => {
     assert.equal(db.pragma("busy_timeout", { simple: true }), 5000);
     assert.equal(
       db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version,
-      2
+      3
     );
     for (const name of [
       "threads",
@@ -37,8 +38,17 @@ test("memory database applies schema and safety pragmas", () => {
       assert.ok(tables.has(name), `expected ${name} table`);
     }
 
-    assert.equal(applyMigrations(db), 2);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 2);
+    assert.equal(applyMigrations(db), 3);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 3);
+    const memoryColumns = new Set(
+      db
+        .prepare("PRAGMA table_info(memory_entries)")
+        .all()
+        .map((column) => column.name)
+    );
+    for (const column of ["metadata_json", "window_id", "capture_key", "supersession_key"]) {
+      assert.ok(memoryColumns.has(column), `expected memory_entries.${column}`);
+    }
   } finally {
     db.close();
   }
@@ -70,9 +80,37 @@ test("storage refuses a database created by newer code", () => {
   const db = openMemoryDatabase({ file: ":memory:" });
   try {
     db.prepare(
-      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (3, 'future', 'now')"
+      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (4, 'future', 'now')"
     ).run();
-    assert.throws(() => applyMigrations(db), /newer than supported version 2/);
+    assert.throws(() => applyMigrations(db), /newer than supported version 3/);
+  } finally {
+    db.close();
+  }
+});
+
+test("memory enrichment migration upgrades a version 2 database without losing rows", () => {
+  const db = openMemoryDatabase({ file: ":memory:", migrations: MIGRATIONS.slice(0, 2) });
+  try {
+    db.prepare(
+      "INSERT INTO threads (id, created_at, updated_at) VALUES ('thread-1', 'now', 'now')"
+    ).run();
+    db.prepare(
+      `
+      INSERT INTO memory_entries
+        (id, thread_id, kind, status, content, created_by, created_at)
+      VALUES ('memory-1', 'thread-1', 'decision', 'captured', 'keep me', 'test', 'now')
+    `
+    ).run();
+
+    assert.equal(applyMigrations(db), 3);
+    const memory = db.prepare("SELECT * FROM memory_entries WHERE id = 'memory-1'").get();
+    assert.equal(memory.content, "keep me");
+    assert.equal(memory.capture_key, null);
+    assert.equal(memory.supersession_key, null);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 3").get().count,
+      1
+    );
   } finally {
     db.close();
   }

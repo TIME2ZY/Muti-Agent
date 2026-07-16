@@ -1,4 +1,5 @@
 const { parseA2AMentions, getMaxA2ADepth } = require("./routing");
+const agentHandoff = require("./handoff");
 const transcript = require("../session/transcript");
 const { ENV } = require("../shared/brand");
 
@@ -120,7 +121,12 @@ function validateToken(threadId, invocationId, callbackToken) {
  *  - broadcast as an SSE message event
  *  - scanned for @mentions; any new target agents are appended to the worklist
  */
-function postMessage(threadId, invocationId, content, { appendToSession, durableRecorder } = {}) {
+function postMessage(
+  threadId,
+  invocationId,
+  content,
+  { appendToSession, durableRecorder, memoryCapture } = {}
+) {
   const thread = activeThreads.get(threadId);
   if (!thread) return false;
 
@@ -210,6 +216,24 @@ function postMessage(threadId, invocationId, content, { appendToSession, durable
         });
       }
       continue;
+    }
+    const handoffMatch = agentHandoff.extractPrimaryHandoffMatch(content, {
+      currentAgentId: agent,
+      routedTo: target,
+    });
+    const handoffQuality = agentHandoff.evaluateHandoff(handoffMatch.handoff);
+    const capture = memoryCapture?.captureHandoff({
+      threadId: thread.sessionId || threadId,
+      invocationId,
+      windowId: null,
+      fromAgent: agent,
+      toAgent: target,
+      handoff: handoffMatch.handoff,
+      quality: handoffQuality,
+      blockIndex: handoffMatch.blockIndex,
+    });
+    if (capture?.captured) {
+      sendSse(thread.res, "memory-captured", capture.event);
     }
     // Re-entry allowed (same agent may run again after a teammate, e.g. fix loop).
     thread.worklist.push(target);

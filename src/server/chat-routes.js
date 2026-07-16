@@ -18,6 +18,12 @@ const NOOP_DURABLE_RECORDER = Object.freeze({
   addWindowUsage: () => false,
 });
 
+const NOOP_MEMORY_CAPTURE = Object.freeze({
+  captureHandoff: () => ({ captured: false }),
+  captureWindowSeal: () => ({ captured: false }),
+  replayThread: async () => ({ replayed: 0, existing: 0, failed: 0, available: false }),
+});
+
 function createChatRoutes({
   rootDir,
   selfGitRoot,
@@ -31,6 +37,7 @@ function createChatRoutes({
   sessionSealer,
   sessionBootstrap,
   recallService,
+  memoryService,
   agentIdentity,
   agentHandoff,
   worktreeManager,
@@ -59,8 +66,10 @@ function createChatRoutes({
   finalizeInvocationEvent,
   persistInvocations,
   durableRecorder,
+  memoryCapture,
 }) {
   const durable = durableRecorder || NOOP_DURABLE_RECORDER;
+  const memories = memoryCapture || NOOP_MEMORY_CAPTURE;
   return async function handleChatRoutes(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/invoke") {
       let args;
@@ -218,6 +227,7 @@ function createChatRoutes({
       workspaceKey,
       capacityTokens: contextHealth.getAgentCapacity(requestedAgent),
     });
+    await memories.replayThread(sessionId);
 
     const existing = activeInvocations.get(sessionId);
     if (existing) existing.abort();
@@ -257,6 +267,7 @@ function createChatRoutes({
       agent: AGENTS[requestedAgent],
       generation: initialWindow?.generation || 1,
       invocationSource: recallService || transcript,
+      memorySource: memoryService || null,
     });
 
     res.writeHead(200, {
@@ -306,7 +317,7 @@ function createChatRoutes({
         let assistantContent = "";
         let contextWarned = false;
         let contextSealedSseSent = false;
-        let contextRotated = false;
+        let contextSealHandled = false;
 
         const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
         const startedAt = new Date().toISOString();
@@ -454,6 +465,43 @@ function createChatRoutes({
           ...resolveCoalesceOptionsFromEnv(),
           write: persistDurableEvent,
         });
+        const sealContextWindow = (ratio) => {
+          if (contextSealHandled) return;
+          contextSealHandled = true;
+          durableCoalescer.flushAll();
+          if (durableRun?.window?.id) {
+            const contextRotated = Boolean(
+              durable.sealAndRotateWindow({
+                session,
+                threadId: sessionId,
+                agentId: agent,
+                providerKey,
+                workspaceKey,
+                capacityTokens: durableRun.window.capacityTokens,
+                windowId: durableRun.window.id,
+                reason: "context overflow",
+              })
+            );
+            if (!contextRotated) {
+              durable.sealWindow(durableRun.window.id, "context overflow");
+            }
+          }
+          const capture = memories.captureWindowSeal({
+            threadId: sessionId,
+            invocationId,
+            windowId: durableRun?.window?.id || null,
+            agentId: agent,
+            generation: durableRun?.window?.generation || null,
+            ratio,
+            reason: "context overflow",
+            assistantContent,
+            invocationState: "sealed",
+          });
+          if (capture?.captured) {
+            sendSse(res, "memory-captured", capture.event);
+          }
+          abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+        };
 
         const { code, signal } = await runChildStream({
           spawnRunner,
@@ -488,29 +536,9 @@ function createChatRoutes({
               sendSse(res, "context-warning", { agent, ratio, threshold: sealer.thresholds.warn });
               contextWarned = true;
             } else if (state === sessionSealer.STATE.SEALED && !contextSealedSseSent) {
-              // Flush pending prose before seal side-effects so partial output
-              // is durable even when the child is about to be stopped.
-              durableCoalescer.flushAll();
               sendSse(res, "sealed", { agent, ratio, reason: "context overflow" });
               contextSealedSseSent = true;
-              if (durableRun?.window?.id) {
-                contextRotated = Boolean(
-                  durable.sealAndRotateWindow({
-                    session,
-                    threadId: sessionId,
-                    agentId: agent,
-                    providerKey,
-                    workspaceKey,
-                    capacityTokens: durableRun.window.capacityTokens,
-                    windowId: durableRun.window.id,
-                    reason: "context overflow",
-                  })
-                );
-                if (!contextRotated) {
-                  durable.sealWindow(durableRun.window.id, "context overflow");
-                }
-              }
-              abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+              sealContextWindow(ratio);
             }
           },
           shouldStop: () => sealer.isSealed(),
@@ -526,11 +554,7 @@ function createChatRoutes({
           });
         }
         if (sealer.isSealed()) {
-          // Session-map rotation is required even when SQLite mirroring is disabled or failed.
-          if (durableRun?.window?.id && !contextRotated) {
-            durable.sealWindow(durableRun.window.id, "context overflow");
-          }
-          abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+          sealContextWindow(healthTracker.getFillRatio());
         } else if (durableRun) {
           const updatedSessionMap = readSessionMap(sessionId, sessionMapRoot);
           const persistedProviderSessionId = resolveResumeSessionId(
@@ -600,10 +624,11 @@ function createChatRoutes({
         // worklist (review → fix → re-review). Depth is the only hard cap.
         const mentions = parseA2AMentions(assistantContent, agent);
         for (const m of mentions) {
-          const targetHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
+          const handoffMatch = agentHandoff.extractPrimaryHandoffMatch(assistantContent, {
             currentAgentId: agent,
             routedTo: m,
           });
+          const targetHandoff = handoffMatch.handoff;
           const targetQuality = agentHandoff.evaluateHandoff(targetHandoff);
           handoffByTarget[m] = targetHandoff;
           handoffQualityByTarget[m] = targetQuality;
@@ -663,6 +688,20 @@ function createChatRoutes({
               maxDepth,
             });
             continue;
+          }
+
+          const capture = memories.captureHandoff({
+            threadId: sessionId,
+            invocationId,
+            windowId: durableRun?.window?.id || null,
+            fromAgent: agent,
+            toAgent: m,
+            handoff: targetHandoff,
+            quality: targetQuality,
+            blockIndex: handoffMatch.blockIndex,
+          });
+          if (capture?.captured) {
+            sendSse(res, "memory-captured", capture.event);
           }
 
           // Re-entry allowed: push even if `m` already ran earlier in this request.

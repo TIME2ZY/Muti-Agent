@@ -28,6 +28,7 @@ const { createInvokeArgsBuilder } = require("./invoke-args");
 const { createInvocationRegistry } = require("./invocation-registry");
 const { runChildStream, filterBenignStderr } = require("./child-stream");
 const { createServerStorage } = require("../storage/server-storage");
+const { createMemoryCapture } = require("../storage/memory-capture");
 const { createRecallService } = require("../storage/recall-service");
 const { createSessionReadService } = require("../storage/session-read-service");
 const {
@@ -84,7 +85,6 @@ const SELF_GIT_ROOT = (() => {
   }
 })();
 
-// Track all worktree managers so preview servers can be cleaned up on exit.
 const _previewManagers = new Set();
 process.on("exit", () => {
   for (const mgr of _previewManagers) {
@@ -93,8 +93,6 @@ process.on("exit", () => {
     } catch {}
   }
 });
-// ── Public helpers ────────────────────────────────────────────
-
 function publicAgents() {
   return Object.values(AGENTS).map((agent) => {
     const identity = agentIdentity.getIdentity(agent.id);
@@ -134,10 +132,16 @@ function createServer(options = {}) {
   const logger = options.logger || console;
   const storageContext = createServerStorage(options, sessionsFile, logger);
   const durableRecorder = storageContext.recorder;
+  const memoryService = storageContext.storage?.memory || null;
   const recallService = createRecallService({
     storage: storageContext.storage,
     transcript,
     mode: storageContext.mode,
+    logger,
+  });
+  const memoryCapture = createMemoryCapture({
+    memoryService,
+    transcript,
     logger,
   });
   const sessionReader = createSessionReadService({
@@ -249,6 +253,7 @@ function createServer(options = {}) {
     readJsonBody,
     durableRecorder,
     recallService,
+    memoryCapture,
   });
   const handleChatRoutes = createChatRoutes({
     rootDir: ROOT,
@@ -263,6 +268,7 @@ function createServer(options = {}) {
     sessionSealer,
     sessionBootstrap,
     recallService,
+    memoryService,
     agentIdentity,
     agentHandoff,
     worktreeManager,
@@ -291,6 +297,7 @@ function createServer(options = {}) {
     finalizeInvocationEvent,
     persistInvocations: invocationRegistry.persist,
     durableRecorder,
+    memoryCapture,
   });
 
   const server = http.createServer(async (req, res) => {

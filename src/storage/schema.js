@@ -171,6 +171,27 @@ const MIGRATIONS = Object.freeze([
       ALTER TABLE recall_items ADD COLUMN metadata_json TEXT;
     `,
   },
+  {
+    version: 3,
+    name: "memory_enrichment",
+    sql: `
+      ALTER TABLE memory_entries ADD COLUMN metadata_json TEXT;
+      ALTER TABLE memory_entries ADD COLUMN window_id TEXT
+        REFERENCES context_windows(id) ON DELETE SET NULL;
+      ALTER TABLE memory_entries ADD COLUMN capture_key TEXT;
+      ALTER TABLE memory_entries ADD COLUMN supersession_key TEXT;
+
+      CREATE UNIQUE INDEX memory_entries_thread_capture_key
+        ON memory_entries(thread_id, capture_key)
+        WHERE capture_key IS NOT NULL;
+      CREATE INDEX memory_entries_thread_supersession_key
+        ON memory_entries(thread_id, supersession_key)
+        WHERE supersession_key IS NOT NULL;
+      CREATE INDEX memory_entries_thread_active
+        ON memory_entries(thread_id, created_at)
+        WHERE status IN ('captured', 'confirmed');
+    `,
+  },
 ]);
 
 module.exports = { PRAGMAS, MIGRATIONS };
