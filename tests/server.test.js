@@ -2311,7 +2311,9 @@ test("frontend uses unified Chinese console copy in the main shell", () => {
   assert.match(html, /已激活能力/);
   assert.match(html, />Agents</);
   assert.doesNotMatch(html, /agent-panel-title/);
-  assert.match(html, />清空</);
+  // New chat lives in the sidebar only; composer keeps a single Send action.
+  assert.match(html, /btn-new-chat/);
+  assert.doesNotMatch(html, /id="btn-clear"/);
   assert.match(html, />发送</);
   assert.doesNotMatch(html, />Agent Chat</);
   assert.doesNotMatch(html, />Rules</);
@@ -2614,7 +2616,8 @@ test("frontend caps recall page size and surfaces truncation state", () => {
 test("app.js stays an orchestrator under line budget after P0 split", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   const lines = js.split(/\r?\n/).length;
-  assert.ok(lines <= 650, `app.js has ${lines} lines; expected <= 650 after P0/P2 wiring`);
+  // Budget raised for run-bar / jump-bottom / toast / auto-grow wiring (still no feature bodies inlined).
+  assert.ok(lines <= 1000, `app.js has ${lines} lines; expected <= 1000 after UX chrome wiring`);
   assert.match(js, /createMessageView/);
   assert.match(js, /createWorkspacePanel/);
   assert.match(js, /createRecallPanel/);

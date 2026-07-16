@@ -12,6 +12,82 @@
   background: color-mix(in srgb, var(--surface-canvas) 88%, var(--surface-raised));
 }
 
+/* Active run strip above the input */
+.run-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-canvas));
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-ui);
+}
+
+.run-bar[hidden] {
+  display: none !important;
+}
+
+.run-bar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: run-bar-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes run-bar-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-bar-dot { animation: none; opacity: 0.85; }
+}
+
+.run-bar-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-bar-time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+.run-bar-stop {
+  flex-shrink: 0;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+
+.run-bar-stop:hover {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.run-bar-stop:focus-visible {
+  box-shadow: var(--focus-ring-danger);
+}
+
 .composer-shell {
   display: flex;
   flex-direction: column;
@@ -94,9 +170,10 @@
 
 .composer textarea {
   width: 100%;
-  min-height: 52px;
-  max-height: 34vh;
-  resize: vertical;
+  min-height: 44px;
+  max-height: min(34vh, 280px);
+  resize: none;
+  overflow-y: auto;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -107,6 +184,7 @@
   line-height: 1.65;
   outline: none;
   box-shadow: none;
+  field-sizing: content; /* progressive enhancement where supported */
 }
 
 .composer textarea:focus,
@@ -119,6 +197,14 @@
 .composer textarea:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.composer.is-running .composer-shell {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
+}
+
+.composer.is-running textarea::placeholder {
+  color: color-mix(in srgb, var(--accent) 35%, var(--text-tertiary));
 }
 
 .composer textarea::placeholder {

@@ -10,7 +10,6 @@
   const messagesEl = $("#messages");
   const promptEl = $("#prompt");
   const btnSend = $("#btn-send");
-  const btnClear = $("#btn-clear");
   const useWorktreeInput = $("#use-worktree");
   const skillsBarEl = $("#skills-bar");
   const statusEl = $("#status");
@@ -40,6 +39,14 @@
   const recallSearchInputEl = recallPanelInlineEl ? recallPanelInlineEl.querySelector(".recall-search input") : null;
   const currentAgentEl = $("#current-agent");
   const currentAgentNameEl = $("#current-agent-name");
+  const runBarEl = $("#run-bar");
+  const runBarLabelEl = $("#run-bar-label");
+  const runBarTimeEl = $("#run-bar-time");
+  const runBarStopEl = $("#run-bar-stop");
+  const jumpBottomEl = $("#jump-bottom");
+  const toastHostEl = $("#toast-host");
+  const workspaceTabBadgeEl = $("#workspace-tab-badge");
+  const composerSectionEl = document.querySelector("section.composer");
 
   const apiFetch = window.ApiClient.apiFetch;
   const sessionApi = window.SessionApi.createSessionApi(apiFetch);
@@ -125,15 +132,157 @@
     return state.sessions[sid];
   }
 
+  const localePack = window.Locale || window.LocaleZhCN;
+  const L = (localePack && localePack.locale) || {};
+
+  function formatElapsed(ms) {
+    const sec = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+    if (sec < 60) return `${sec}s`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  let runBarTimerId = null;
+
+  function clearRunBarTimer() {
+    if (runBarTimerId != null) {
+      clearInterval(runBarTimerId);
+      runBarTimerId = null;
+    }
+  }
+
+  function activeRunAgentNames(rt) {
+    if (!rt) return "";
+    const ids = [];
+    if (rt.liveMessages && typeof rt.liveMessages.keys === "function") {
+      for (const id of rt.liveMessages.keys()) ids.push(id);
+    }
+    if (ids.length === 0 && state.selectedAgent) ids.push(state.selectedAgent);
+    return ids.map((id) => agentLabel(id)).join(" · ");
+  }
+
+  function updateRunBar() {
+    if (!runBarEl) return;
+    const rt = runtimeStore.get(state.currentSessionId || "_pending");
+    const running = !!(rt && rt.controller);
+    if (!running) {
+      runBarEl.hidden = true;
+      clearRunBarTimer();
+      if (composerSectionEl) composerSectionEl.classList.remove("is-running");
+      return;
+    }
+    runBarEl.hidden = false;
+    if (composerSectionEl) composerSectionEl.classList.add("is-running");
+    const names = activeRunAgentNames(rt);
+    const labelFn = L.runBar && L.runBar.label;
+    if (runBarLabelEl) {
+      runBarLabelEl.textContent =
+        typeof labelFn === "function" ? labelFn(names) : names ? `${names} · 生成中` : "生成中…";
+    }
+    const started = rt.startedAt || rt.updatedAt || Date.now();
+    if (runBarTimeEl) runBarTimeEl.textContent = formatElapsed(Date.now() - started);
+    if (runBarTimerId == null) {
+      runBarTimerId = setInterval(() => {
+        const cur = runtimeStore.get(state.currentSessionId || "_pending");
+        if (!cur || !cur.controller) {
+          updateRunBar();
+          return;
+        }
+        const t0 = cur.startedAt || cur.updatedAt || Date.now();
+        if (runBarTimeEl) runBarTimeEl.textContent = formatElapsed(Date.now() - t0);
+      }, 1000);
+    }
+  }
+
+  function autoGrowPrompt() {
+    if (!promptEl) return;
+    promptEl.style.height = "auto";
+    const maxPx = Math.min(window.innerHeight * 0.34, 280);
+    const next = Math.min(Math.max(promptEl.scrollHeight, 44), maxPx);
+    promptEl.style.height = `${next}px`;
+  }
+
+  function showToast(message, options = {}) {
+    if (!toastHostEl || !message) return;
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "toast";
+    el.textContent = message;
+    if (options.actionLabel) {
+      const act = document.createElement("span");
+      act.className = "toast-action";
+      act.textContent = options.actionLabel;
+      el.appendChild(act);
+    }
+    const dismiss = () => {
+      el.remove();
+    };
+    el.addEventListener("click", () => {
+      if (typeof options.onClick === "function") options.onClick();
+      dismiss();
+    });
+    toastHostEl.appendChild(el);
+    const ttl = typeof options.ttl === "number" ? options.ttl : 5200;
+    setTimeout(dismiss, ttl);
+  }
+
+  function updateWorkspaceTabBadge() {
+    if (!workspaceTabBadgeEl) return;
+    const files = Array.isArray(state.workspace && state.workspace.files)
+      ? state.workspace.files.length
+      : 0;
+    const wt = state.worktreeStatus;
+    const dirty = files > 0 || (wt && wt.clean === false);
+    if (!dirty) {
+      workspaceTabBadgeEl.hidden = true;
+      workspaceTabBadgeEl.textContent = "";
+      return;
+    }
+    workspaceTabBadgeEl.hidden = false;
+    workspaceTabBadgeEl.textContent = files > 0 ? String(files) : "!";
+    workspaceTabBadgeEl.title = files > 0 ? `${files} 个文件有改动` : "工作区有未提交改动";
+  }
+
+  function updateJumpBottomVisibility() {
+    if (!jumpBottomEl || !messageView || typeof messageView.isNearBottom !== "function") return;
+    // Hide when empty state is showing or already near bottom.
+    const emptyVisible = emptyStateEl && emptyStateEl.parentNode === messagesEl;
+    if (emptyVisible) {
+      jumpBottomEl.hidden = true;
+      return;
+    }
+    jumpBottomEl.hidden = messageView.isNearBottom();
+  }
+
+  // Filled after messageView is created.
+  let messageView = null;
+
   function syncComposerControls() {
     const rt = runtimeStore.get(state.currentSessionId || "_pending");
     const running = !!(rt && rt.controller);
-    promptEl.disabled = running;
-    btnSend.textContent = running ? "停止" : "发送";
+    // Keep the textarea editable while generating so users can draft the next prompt.
+    promptEl.disabled = false;
+    const sendLabel = running
+      ? (L.composer && L.composer.stop) || "停止"
+      : (L.composer && L.composer.send) || "发送";
+    btnSend.textContent = sendLabel;
     btnSend.setAttribute("aria-busy", running ? "true" : "false");
-    btnSend.setAttribute("aria-label", running ? "停止生成" : "发送");
+    btnSend.setAttribute(
+      "aria-label",
+      running ? (L.composer && L.composer.stopGenerate) || "停止生成" : "发送"
+    );
     if (running) btnSend.classList.add("danger");
     else btnSend.classList.remove("danger");
+    if (running) {
+      promptEl.setAttribute(
+        "title",
+        (L.composer && L.composer.draftWhileRunning) || "生成中仍可编辑草稿"
+      );
+    } else {
+      promptEl.removeAttribute("title");
+    }
+    updateRunBar();
   }
 
   function setStatus(text, cls) {
@@ -208,7 +357,21 @@
     worktreeApi,
   });
   projectHeader.bindProjectDirEdit();
-  const { loadProjectDir, loadWorktreeStatus, renderWorktreeStatus } = projectHeader;
+  const {
+    loadProjectDir,
+    loadWorktreeStatus: loadWorktreeStatusCore,
+    renderWorktreeStatus,
+  } = projectHeader;
+
+  async function loadWorktreeStatus(sessionId) {
+    await loadWorktreeStatusCore(sessionId);
+    updateWorkspaceTabBadge();
+  }
+
+  async function loadWorkspaceState() {
+    await workspacePanel.loadWorkspaceState();
+    updateWorkspaceTabBadge();
+  }
 
   const workspacePanel = window.WorkspacePanel.createWorkspacePanel({
     panelEl: workspacePanelEl,
@@ -218,7 +381,10 @@
     WorkspaceDiff: window.WorkspaceDiff,
     VirtualList: window.VirtualList,
     confirmImpl,
-    onAfterDiscard: loadWorktreeStatus,
+    onAfterDiscard: async () => {
+      await loadWorktreeStatus();
+      updateWorkspaceTabBadge();
+    },
   });
 
   // One process-panel renderer for message hydrate + recall expand (locale injected).
@@ -247,7 +413,7 @@
   let renderAgentTabs = () => {};
   let renderCurrentAgent = () => {};
 
-  const messageView = window.MessageView.createMessageView({
+  messageView = window.MessageView.createMessageView({
     messagesEl,
     emptyStateEl,
     spacerEl,
@@ -264,7 +430,7 @@
     setStatus,
     getSessionController: () => sessionController,
     loadWorktreeStatus,
-    loadWorkspaceState: () => workspacePanel.loadWorkspaceState(),
+    loadWorkspaceState,
     syncComposerControls,
     getSessionSlot: sessionSlot,
     renderAgentTabs: () => renderAgentTabs(),
@@ -280,7 +446,7 @@
     appendLive,
     applyAgentEvent,
     flushPendingLiveRender,
-    finishStream,
+    finishStream: finishStreamCore,
     finalizeLiveAgent,
     remountLiveMessages,
     addSystem,
@@ -288,6 +454,42 @@
     ensureSpacer,
     showEmpty,
   } = messageView;
+
+  async function finishStream(statusText, sessionId) {
+    finishStreamCore(statusText, sessionId);
+    if (sessionId && state.currentSessionId && sessionId !== state.currentSessionId) {
+      updateRunBar();
+      return;
+    }
+    try {
+      await loadWorktreeStatus();
+      if (state.rightPanelTab === "workspace") {
+        await workspacePanel.loadWorkspaceState();
+      }
+      updateWorkspaceTabBadge();
+      const files = Array.isArray(state.workspace && state.workspace.files)
+        ? state.workspace.files.length
+        : 0;
+      const dirty = files > 0 || (state.worktreeStatus && state.worktreeStatus.clean === false);
+      if (dirty && state.rightPanelTab !== "workspace") {
+        const toastFn = L.toast && L.toast.workspaceDirty;
+        const text =
+          typeof toastFn === "function"
+            ? toastFn(files)
+            : files > 0
+              ? `${files} 个文件有改动 · 查看工作区`
+              : "工作区有改动 · 查看工作区";
+        showToast(text, {
+          actionLabel: "打开",
+          onClick: () => activateRightTab("workspace"),
+        });
+      }
+    } catch {
+      /* non-fatal UX hook */
+    }
+    updateRunBar();
+    updateJumpBottomVisibility();
+  }
 
   function onRuntimeStatusChange(sessionId) {
     const sid = sessionId || state.currentSessionId;
@@ -357,7 +559,7 @@
     closeSidebarIfMobile,
     loadProjectDir,
     loadWorktreeStatus,
-    loadWorkspaceState: () => workspacePanel.loadWorkspaceState(),
+    loadWorkspaceState,
     renderWorktreeStatus,
     renderWorkspacePanel: () => workspacePanel.renderWorkspacePanel(),
     emptyWorkspaceState: () => window.WorkspacePanel.emptyWorkspaceState(),
@@ -402,7 +604,7 @@
 
   async function activateRightTab(nextTab) {
     setRightPanelTab(nextTab);
-    if (nextTab === "workspace") await workspacePanel.loadWorkspaceState();
+    if (nextTab === "workspace") await loadWorkspaceState();
   }
 
   panelTabAgentsEl.addEventListener("click", () => activateRightTab("agents"));
@@ -563,7 +765,7 @@
     sessionController,
     loadProjectDir,
     loadWorktreeStatus,
-    loadWorkspaceState: () => workspacePanel.loadWorkspaceState(),
+    loadWorkspaceState,
     renderSkillTags,
     showThinking,
     appendLive,
@@ -580,21 +782,42 @@
      Event bindings + init
      ═══════════════════════════════════════════════════════════ */
 
+  function abortActiveRun() {
+    runtimeStore.abort(state.currentSessionId);
+  }
+
   btnNewChat.addEventListener("click", () => sessionController.newSession());
   btnSend.addEventListener("click", () => {
     const rt = runtimeStore.get(state.currentSessionId || "_pending");
     if (rt && rt.controller) {
-      runtimeStore.abort(state.currentSessionId);
+      abortActiveRun();
       return;
     }
     chatClient.sendPrompt();
+    autoGrowPrompt();
   });
-  btnClear.addEventListener("click", async () => {
-    await sessionController.newSession();
-    renderSkillTags([]);
-  });
+  if (runBarStopEl) {
+    runBarStopEl.addEventListener("click", () => abortActiveRun());
+  }
+
+  if (jumpBottomEl) {
+    jumpBottomEl.addEventListener("click", () => {
+      if (messageView && typeof messageView.scrollDown === "function") {
+        messageView.scrollDown(true);
+      }
+      jumpBottomEl.hidden = true;
+    });
+  }
+  messagesEl.addEventListener(
+    "scroll",
+    () => {
+      updateJumpBottomVisibility();
+    },
+    { passive: true }
+  );
 
   promptEl.addEventListener("input", () => {
+    autoGrowPrompt();
     updateActiveSkills(promptEl.value);
     mentionComposer.update();
   });
@@ -609,14 +832,45 @@
     if (mentionComposer.handleKeydown(e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      const rt = runtimeStore.get(state.currentSessionId || "_pending");
+      // While generating, Enter does not send (draft stays); use 停止 to abort.
+      if (rt && rt.controller) return;
       chatClient.sendPrompt();
+      autoGrowPrompt();
     }
+  });
+
+  // After send clears the textarea (chat-client), re-fit height.
+  const promptValueDesc = Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype,
+    "value"
+  );
+  if (promptValueDesc && promptValueDesc.set) {
+    const nativeSet = promptValueDesc.set;
+    Object.defineProperty(promptEl, "value", {
+      configurable: true,
+      enumerable: promptValueDesc.enumerable,
+      get: promptValueDesc.get,
+      set(v) {
+        nativeSet.call(this, v);
+        autoGrowPrompt();
+      },
+    });
+  }
+
+  bus.on("runtime:status", () => {
+    syncComposerControls();
+    updateJumpBottomVisibility();
   });
 
   setRightPanelTab("agents");
   loadProjectDir();
   workspacePanel.renderWorkspacePanel();
   renderSkillTags([]);
+  autoGrowPrompt();
+  updateRunBar();
+  updateWorkspaceTabBadge();
+  updateJumpBottomVisibility();
 
   const emptyChipsEl = $("#empty-state-chips");
   if (emptyChipsEl) {
@@ -627,6 +881,7 @@
       if (!text.trim()) return;
       promptEl.value = text.trim();
       promptEl.focus();
+      autoGrowPrompt();
       updateActiveSkills(promptEl.value);
       const len = promptEl.value.length;
       try { promptEl.setSelectionRange(len, len); } catch { /* ignore */ }

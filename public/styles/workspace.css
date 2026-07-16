@@ -46,6 +46,7 @@
 }
 
 .panel-tab {
+  position: relative;
   min-height: 36px;
   padding: 0 var(--space-2);
   border: none;

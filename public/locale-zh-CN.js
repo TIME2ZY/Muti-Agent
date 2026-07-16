@@ -64,9 +64,26 @@
 
     composer: {
       send: "发送",
-      stop: "停止生成",
-      clear: "清空",
+      stop: "停止",
+      stopGenerate: "停止生成",
       placeholder: "直接输入消息，或用 @Agent 单次指定模型…",
+      draftWhileRunning: "生成中仍可编辑草稿；完成后 Enter 发送",
+    },
+
+    runBar: {
+      generating: "生成中…",
+      label: (names) => (names ? `${names} · 生成中` : "生成中…"),
+      stop: "停止",
+    },
+
+    jumpBottom: {
+      label: "↓ 回到底部",
+    },
+
+    toast: {
+      workspaceDirty: (n) =>
+        n > 0 ? `${n} 个文件有改动 · 查看工作区` : "工作区有改动 · 查看工作区",
+      workspaceDirtyShort: "工作区有改动 · 查看工作区",
     },
 
     shell: {

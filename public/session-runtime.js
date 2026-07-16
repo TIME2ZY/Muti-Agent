@@ -15,6 +15,7 @@
       // Server also persists these; this buffer covers the live stream path.
       systemNotices: [],
       lastError: "",
+      startedAt: 0,
       updatedAt: Date.now(),
     };
   }
@@ -72,6 +73,7 @@
       rt.systemNotices = [];
       rt.lastError = "";
       rt.status = "running";
+      rt.startedAt = Date.now();
       touch(rt);
       emitStatus(sessionId, "running");
       return rt;

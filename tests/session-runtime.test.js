@@ -21,6 +21,15 @@ test("runtime store isolates controller and live maps per session", () => {
   assert.equal(store.getStatus("s2"), "running");
 });
 
+test("beginRun stamps startedAt for elapsed UI", () => {
+  const store = createRuntimeStore();
+  const before = Date.now();
+  store.beginRun("s1", {});
+  const rt = store.get("s1");
+  assert.ok(rt.startedAt >= before);
+  assert.ok(rt.startedAt <= Date.now());
+});
+
 test("beginRun aborts only the previous controller on the same session", () => {
   const store = createRuntimeStore();
   let aborted = 0;

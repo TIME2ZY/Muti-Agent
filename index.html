@@ -78,26 +78,32 @@
         <span class="skills-bar-label">已激活能力</span>
       </div>
 
-      <section class="messages" id="messages" aria-live="polite" aria-label="消息列表">
-        <div class="empty-state" id="empty-state">
-          <div class="empty-state-icon" aria-hidden="true">✦</div>
-          <p class="empty-state-title">选择默认 Agent 后直接发送，或用 @ 单次指定模型</p>
-          <p class="empty-state-hint">Enter 发送 · Shift + Enter 换行 · 右侧卡片切换默认 Agent</p>
-          <div class="empty-state-chips" id="empty-state-chips" role="group" aria-label="示例提示">
-            <button type="button" class="empty-chip" data-prompt="帮我梳理当前项目结构，并给出优先改进点。">梳理项目</button>
-            <button type="button" class="empty-chip" data-prompt="审查最近改动的 diff，指出风险与可改进处。">审查 diff</button>
-            <button type="button" class="empty-chip" data-prompt="把任务拆成可并行的子任务，并建议合适的 Agent 分工。">并行分工</button>
+      <div class="messages-column" id="messages-column">
+        <section class="messages" id="messages" aria-live="polite" aria-label="消息列表">
+          <div class="empty-state" id="empty-state">
+            <div class="empty-state-icon" aria-hidden="true">✦</div>
+            <p class="empty-state-title">选择默认 Agent 后直接发送，或用 @ 单次指定模型</p>
+            <p class="empty-state-hint">Enter 发送 · Shift + Enter 换行 · 右侧卡片切换默认 Agent</p>
+            <div class="empty-state-chips" id="empty-state-chips" role="group" aria-label="示例提示">
+              <button type="button" class="empty-chip" data-prompt="帮我梳理当前项目结构，并给出优先改进点。">梳理项目</button>
+              <button type="button" class="empty-chip" data-prompt="审查最近改动的 diff，指出风险与可改进处。">审查 diff</button>
+              <button type="button" class="empty-chip" data-prompt="把任务拆成可并行的子任务，并建议合适的 Agent 分工。">并行分工</button>
+            </div>
           </div>
-        </div>
-        <div class="messages-spacer"></div>
-      </section>
+          <div class="messages-spacer"></div>
+        </section>
+        <button type="button" class="jump-bottom" id="jump-bottom" hidden
+          aria-label="回到底部">↓ 回到底部</button>
+      </div>
 
       <aside class="side-panel" id="side-panel" aria-label="右侧面板">
         <div class="panel-tabs" role="tablist" aria-label="右侧面板标签">
           <button id="panel-tab-agents" class="panel-tab is-active" type="button" role="tab"
             aria-selected="true" aria-controls="agent-panel" tabindex="0">Agents</button>
           <button id="panel-tab-workspace" class="panel-tab" type="button" role="tab"
-            aria-selected="false" aria-controls="workspace-panel" tabindex="-1">工作区</button>
+            aria-selected="false" aria-controls="workspace-panel" tabindex="-1">
+            工作区<span class="tab-badge" id="workspace-tab-badge" hidden></span>
+          </button>
           <button id="panel-tab-recall" class="panel-tab" type="button" role="tab"
             aria-selected="false" aria-controls="recall-panel-inline" tabindex="-1">回忆</button>
         </div>
@@ -117,10 +123,16 @@
       </aside>
 
       <section class="composer">
+        <div class="run-bar" id="run-bar" hidden role="status" aria-live="polite">
+          <span class="run-bar-dot" aria-hidden="true"></span>
+          <span class="run-bar-label" id="run-bar-label">生成中…</span>
+          <span class="run-bar-time" id="run-bar-time"></span>
+          <button type="button" class="run-bar-stop" id="run-bar-stop">停止</button>
+        </div>
         <div class="composer-shell">
           <div class="composer-input">
             <div class="mention-menu" id="mention-menu" role="listbox" aria-label="Agent 提及" hidden></div>
-            <textarea id="prompt" placeholder="直接输入消息，或用 @Agent 单次指定模型…" rows="2"
+            <textarea id="prompt" placeholder="直接输入消息，或用 @Agent 单次指定模型…" rows="1"
               aria-autocomplete="list" aria-controls="mention-menu" aria-expanded="false"></textarea>
           </div>
           <div class="composer-actions">
@@ -129,7 +141,6 @@
               <span class="worktree-mode-chip">改代码</span>
             </label>
             <div class="composer-actions-right">
-              <button id="btn-clear" class="btn-cmd" type="button">清空</button>
               <button id="btn-send" class="btn-cmd primary" type="button" aria-label="发送" aria-busy="false">发送</button>
             </div>
           </div>
@@ -137,6 +148,8 @@
       </section>
     </main>
   </div>
+
+  <div class="toast-host" id="toast-host" aria-live="polite" aria-relevant="additions"></div>
 
   <!-- Recall now lives as the third tab inside the right-side panel;
        the legacy standalone drawer and overlay have been removed. -->
