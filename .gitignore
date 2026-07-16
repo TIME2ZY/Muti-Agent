@@ -45,3 +45,6 @@ desktop.ini
 dist/
 build/
 *.tsbuildinfo
+
+# Local / design docs (not tracked)
+docs/
