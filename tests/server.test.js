@@ -2533,15 +2533,14 @@ test("frontend app.js surfaces Codex progress before first text delta", () => {
   assert.match(js, /event\.type === "file\.changed"/);
   assert.match(js, /event\.type === "stderr"/);
   assert.match(js, /event\.type === "tool\.started"/);
-  assert.match(js, /event\.type === "subagent\.started"/);
-  assert.match(js, /function upsertLiveSubagent/);
   assert.match(js, /live-process-status/);
   assert.match(js, /function buildProcessTraceFromRun/);
   assert.match(js, /function buildProcessPanelFromTranscriptEvents/);
   assert.match(js, /function hydrateProcessTrace/);
   assert.match(js, /function upsertLiveTool/);
-  assert.match(js, /preservedSubagents/);
   assert.match(js, /setLivePending\(event\.agent,\s*pendingTextForEvent\(event\),\s*sid\)/);
+  // Nested CLI subagents are not a live protocol surface.
+  assert.doesNotMatch(js, /function upsertLiveSubagent/);
 });
 
 test("frontend routes stderr SSE into a separate system stderr message", () => {

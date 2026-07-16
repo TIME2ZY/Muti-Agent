@@ -146,8 +146,9 @@ const antigravityProvider = {
     // emits session ids on stdout, so the server cannot persist resume handles.
     // Advertise false until extractSessionId has a real source.
     resume: false,
+    // Print mode is plain text only — no structured thinking/tool stream.
     thinking: false,
-    tools: true,
+    tools: false,
     subagents: false,
     reasoning: "levels",
   },

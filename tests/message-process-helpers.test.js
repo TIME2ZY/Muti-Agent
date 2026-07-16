@@ -27,7 +27,7 @@ test("resolveCapabilities defaults optimistically when missing", () => {
   const caps = helpers.resolveCapabilities(null);
   assert.equal(caps.thinking, true);
   assert.equal(caps.tools, true);
-  assert.equal(caps.subagents, true);
+  assert.equal(caps.subagents, false);
 });
 
 test("resolveCapabilities respects explicit false flags", () => {
@@ -96,16 +96,18 @@ test("aggregateProcessBuckets merges durable tool started/finished by toolId", (
     },
   ]);
 
-  assert.equal(buckets.toolById.size, 1);
+  // Legacy subagent.* folds into toolById (s1 + t1).
+  assert.equal(buckets.toolById.size, 2);
   const tool = buckets.toolById.get("t1");
   assert.equal(tool.toolName, "read");
   assert.equal(tool.result, "ok");
   assert.equal(tool.type, "tool.finished");
 
-  assert.equal(buckets.subById.size, 1);
-  const sub = buckets.subById.get("s1");
-  assert.equal(sub.type, "subagent.completed");
-  assert.equal(sub.name, "explore");
+  assert.equal(buckets.subById.size, 0);
+  const legacy = buckets.toolById.get("s1");
+  assert.equal(legacy.type, "tool.finished");
+  assert.equal(legacy.toolName, "explore");
+  assert.equal(legacy.result, "done");
 
   assert.equal(buckets.commandByKey.size, 1);
   assert.equal(buckets.commandByKey.get("npm test").exitCode, 0);
@@ -155,7 +157,7 @@ test("aggregateProcessBuckets tracks _eventNos for Phase B focus", () => {
   assert.equal(tool._traceId, "t9");
 });
 
-test("processAnchorFromEvent maps tool/subagent/command", () => {
+test("processAnchorFromEvent maps tool/legacy-subagent/command", () => {
   assert.deepEqual(
     helpers.processAnchorFromEvent({
       kind: "tool.started",
@@ -168,7 +170,7 @@ test("processAnchorFromEvent maps tool/subagent/command", () => {
       kind: "subagent.completed",
       payload: { subagentId: "s2", name: "explore" },
     }),
-    { rowKind: "subagent", rowId: "s2" }
+    { rowKind: "tool", rowId: "s2" }
   );
   assert.deepEqual(
     helpers.processAnchorFromEvent({

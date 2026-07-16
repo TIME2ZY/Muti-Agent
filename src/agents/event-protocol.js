@@ -1,4 +1,9 @@
-/** Canonical agent event protocol (provider adapters → server → frontend). */
+/** Canonical agent event protocol (provider adapters → server → frontend).
+ *
+ * Platform contract only. CLI-native nested subagents are NOT part of this
+ * protocol — cross-agent work uses platform @ / handoff (see collaboration-rules).
+ * Task-like CLI tools map to tool.* if they still appear in a stream.
+ */
 const PROTOCOL_VERSION = 1;
 
 const CANONICAL_EVENT_FIELDS = {
@@ -15,10 +20,6 @@ const CANONICAL_EVENT_FIELDS = {
   "progress.update": ["agent", "invocationId", "items"],
   "tool.started": ["agent", "invocationId", "toolName", "toolId"],
   "tool.finished": ["agent", "invocationId", "toolName", "toolId"],
-  "subagent.started": ["agent", "invocationId", "subagentId"],
-  "subagent.progress": ["agent", "invocationId", "subagentId", "text"],
-  "subagent.completed": ["agent", "invocationId", "subagentId"],
-  "subagent.failed": ["agent", "invocationId", "subagentId", "error"],
 };
 
 /** Per-field type expectations for required (and common optional) fields. */
@@ -33,7 +34,6 @@ const FIELD_TYPES = {
   path: "string",
   toolName: "string",
   toolId: "string",
-  subagentId: "string",
   items: "array",
   exitCode: "numberOrNull",
   signal: "stringOrNull",
@@ -51,7 +51,6 @@ const STRING_COERCE_FIELDS = [
   "path",
   "toolName",
   "toolId",
-  "subagentId",
 ];
 
 function normalizeProgressItem(item, index) {

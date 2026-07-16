@@ -105,5 +105,7 @@ test("antigravity adapter declares expected capabilities", () => {
   assert.equal(antigravityProvider.id, "antigravity");
   assert.equal(antigravityProvider.capabilities.resume, false);
   assert.equal(antigravityProvider.capabilities.thinking, false);
+  assert.equal(antigravityProvider.capabilities.tools, false);
+  assert.equal(antigravityProvider.capabilities.subagents, false);
   assert.ok(antigravityProvider.allowedProviderOptions.includes("mode"));
 });

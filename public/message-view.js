@@ -70,8 +70,6 @@
       typeof helpers.processSummaryFromEvent === "function"
         ? helpers.processSummaryFromEvent
         : () => "";
-    const isTaskLikeTool =
-      typeof helpers.isTaskLikeTool === "function" ? helpers.isTaskLikeTool : () => false;
     const aggregateProcessBuckets =
       typeof helpers.aggregateProcessBuckets === "function"
         ? helpers.aggregateProcessBuckets
@@ -173,31 +171,10 @@
       const panel = document.createElement("div");
       panel.className = "live-subagents live-subagents-final";
 
-      const subagentToolIds = new Set();
-      for (const [id, evt] of subById.entries()) {
-        if (evt.subagentId) subagentToolIds.add(String(evt.subagentId));
-        if (evt.toolId) subagentToolIds.add(String(evt.toolId));
-        const failed = evt.type === "subagent.failed";
-        const done = evt.type === "subagent.completed" || failed;
-        appendTraceRow(panel, {
-          name: evt.name || evt.toolName || "subagent",
-          status: failed ? "error" : done ? "done" : "running",
-          statusText: failed
-            ? msg.failed || "失败"
-            : done
-              ? msg.success || "成功"
-              : msg.running || "运行中",
-          task: truncateDisplay(evt.task || "", 100),
-          summary: processSummaryFromEvent(evt),
-          traceKind: evt._traceKind || "subagent",
-          traceId: evt._traceId || id,
-          eventNos: evt._eventNos,
-        });
-      }
+      // subById is unused (protocol no longer emits subagent.*); tools include task-like tools.
+      void subById;
 
       for (const [id, evt] of toolById.entries()) {
-        if (isTaskLikeTool(evt)) continue;
-        if (evt.toolId && subagentToolIds.has(String(evt.toolId))) continue;
         const detail = toolDetailFromEvent(evt);
         const failed = evt.status === "error";
         const done = evt.type === "tool.finished" || evt.result != null || evt.output != null;
@@ -314,23 +291,20 @@
 
     const processHelpers = resolveProcessHelpers() || {};
     const {
-      truncateDisplay,
       toolDetailFromEvent,
       processSummaryFromEvent,
-      isTaskLikeTool,
       progressItemLabel,
       progressItemDone,
       findAgentCapabilities,
       shouldRenderThinking,
       shouldRenderTools,
-      shouldRenderSubagents,
     } = processHelpers;
 
     function capabilitiesFor(agentId) {
       if (typeof findAgentCapabilities === "function") {
         return findAgentCapabilities(state.agents || [], agentId);
       }
-      return { resume: true, thinking: true, tools: true, subagents: true };
+      return { resume: true, thinking: true, tools: true, subagents: false };
     }
     const L = resolveMsgLocale();
     const msg = L.message || {};
@@ -656,18 +630,6 @@
         const label = detail ? `${event.toolName || "tool"} ${detail}` : event.toolName || "tool";
         return `工具${status}: ${trimLiveStatus(label)}`;
       }
-      if (event.type === "subagent.started") {
-        return `子 Agent 启动: ${trimLiveStatus(event.name || event.toolName || "subagent")}`;
-      }
-      if (event.type === "subagent.progress") {
-        return `子 Agent: ${trimLiveStatus(event.text || event.name || "运行中")}`;
-      }
-      if (event.type === "subagent.completed") {
-        return `子 Agent 完成: ${trimLiveStatus(event.name || event.summary || "subagent")}`;
-      }
-      if (event.type === "subagent.failed") {
-        return `子 Agent 失败: ${trimLiveStatus(event.error || event.name || "subagent")}`;
-      }
       if (event.type === "progress.update") {
         const items = Array.isArray(event.items) ? event.items : [];
         const active = items.find((item) => item && item.done !== true) || items[items.length - 1];
@@ -764,37 +726,7 @@
       scrollDown();
     }
 
-    function upsertLiveSubagent(agent, event, sessionId) {
-      let status = "running";
-      let statusText = msg.running || "运行中";
-      if (event.type === "subagent.completed") {
-        status = "done";
-        statusText = msg.success || "成功";
-      } else if (event.type === "subagent.failed") {
-        status = "error";
-        statusText = msg.failed || "失败";
-      } else if (event.type === "subagent.started") {
-        status = "running";
-        statusText = msg.running || "运行中";
-      }
-      const key = `subagent:${event.subagentId || event.toolId || event.name || "subagent"}`;
-      upsertProcessRow(
-        agent,
-        key,
-        {
-          name: event.name || event.toolName || "subagent",
-          status,
-          statusText,
-          task: truncateDisplay(event.task || "", 120),
-          summary: processSummaryFromEvent(event),
-        },
-        sessionId
-      );
-    }
-
     function upsertLiveTool(agent, event, sessionId) {
-      if (isTaskLikeTool(event)) return;
-
       const detail = toolDetailFromEvent(event);
       const id = `tool:${event.toolId || event.toolName || detail || event.type}`;
       let status = "running";
@@ -999,19 +931,32 @@
         return;
       }
 
+      // Legacy subagent.* (pre protocol drop): fold into tool UI if present in old streams.
       if (
         event.type === "subagent.started" ||
         event.type === "subagent.progress" ||
         event.type === "subagent.completed" ||
         event.type === "subagent.failed"
       ) {
-        if (!Array.isArray(run.subagents)) run.subagents = [];
-        run.subagents.push(event);
-        setLivePending(event.agent, pendingTextForEvent(event), sid);
-        if (typeof shouldRenderSubagents === "function" && !shouldRenderSubagents(caps)) {
+        const folded = {
+          type:
+            event.type === "subagent.completed" || event.type === "subagent.failed"
+              ? "tool.finished"
+              : "tool.started",
+          agent: event.agent,
+          invocationId: event.invocationId,
+          toolName: event.toolName || event.name || "task",
+          toolId: event.subagentId || event.toolId || "legacy-task",
+          args: event.args || { task: event.task },
+          result: event.summary || event.error || event.text,
+          status: event.type === "subagent.failed" ? "error" : "ok",
+        };
+        run.tools.push(folded);
+        setLivePending(event.agent, pendingTextForEvent(folded), sid);
+        if (typeof shouldRenderTools === "function" && !shouldRenderTools(caps)) {
           return;
         }
-        upsertLiveSubagent(event.agent, event, sid);
+        upsertLiveTool(event.agent, folded, sid);
         return;
       }
 
@@ -1050,7 +995,7 @@
     }
 
     /**
-     * Live final panel: flatten run tools/subagents/commands into the same
+     * Live final panel: flatten run tools/commands into the same
      * aggregateProcessBuckets path as history/recall (N1 / Phase B).
      */
     function buildProcessTraceFromRun(agent, sid) {
@@ -1058,9 +1003,6 @@
       const flat = [];
       for (const run of rt.liveRuns.values()) {
         if (!run || run.agent !== agent) continue;
-        for (const evt of run.subagents || []) {
-          if (evt) flat.push(evt);
-        }
         for (const evt of run.tools || []) {
           if (evt) flat.push(evt);
         }
@@ -1536,7 +1478,6 @@
       scrollDown,
       setLivePending,
       pendingTextForEvent,
-      upsertLiveSubagent,
       upsertLiveTool,
       buildProcessTraceFromRun,
       buildProcessPanelFromTranscriptEvents,

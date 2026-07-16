@@ -5,10 +5,6 @@ const {
   toolArgsFromItem,
   toolResultFromItem,
   isFailedItem,
-  isSubagentTool,
-  subagentDisplayName,
-  summarizeTask,
-  summarizeResult,
   toolItemId,
 } = require("../tool-classification");
 
@@ -42,74 +38,52 @@ function createCodexRuntime(cli) {
     );
   }
 
+  function reasoningTextFromItem(item) {
+    if (!item || typeof item !== "object") return "";
+    if (typeof item.text === "string" && item.text) return item.text;
+    if (typeof item.content === "string" && item.content) return item.content;
+    if (typeof item.summary === "string" && item.summary) return item.summary;
+    if (Array.isArray(item.summary) && item.summary.length) {
+      return item.summary
+        .map((part) => {
+          if (typeof part === "string") return part;
+          if (part && typeof part.text === "string") return part.text;
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+    return "";
+  }
+
   function toolLifecycleEvents(base, item, phase) {
     if (!isToolLikeItem(item)) return [];
     const toolName = toolNameFromItem(item) || String(item.type || "tool");
     const args = toolArgsFromItem(item);
     const toolId = toolItemId(item, toolName);
-    const events = [];
 
     if (phase === "started") {
-      events.push(
+      return [
         makeEvent("tool.started", {
           ...base,
           toolName,
           args,
           toolId,
-        })
-      );
-      if (isSubagentTool(toolName, args)) {
-        events.push(
-          makeEvent("subagent.started", {
-            ...base,
-            subagentId: toolId,
-            name: subagentDisplayName(toolName, args),
-            task: summarizeTask(args),
-            toolName,
-          })
-        );
-      }
-      return events;
+        }),
+      ];
     }
 
-    // completed
     const result = toolResultFromItem(item);
     const failed = isFailedItem(item);
-    events.push(
+    return [
       makeEvent("tool.finished", {
         ...base,
         toolName,
         result,
         status: failed ? "error" : "ok",
         toolId,
-      })
-    );
-    if (isSubagentTool(toolName, args)) {
-      if (failed) {
-        events.push(
-          makeEvent("subagent.failed", {
-            ...base,
-            subagentId: toolId,
-            name: subagentDisplayName(toolName, args),
-            task: summarizeTask(args),
-            error: summarizeResult(result) || (item && item.message) || "subagent failed",
-            toolName,
-          })
-        );
-      } else {
-        events.push(
-          makeEvent("subagent.completed", {
-            ...base,
-            subagentId: toolId,
-            name: subagentDisplayName(toolName, args),
-            task: summarizeTask(args),
-            summary: summarizeResult(result),
-            toolName,
-          })
-        );
-      }
-    }
-    return events;
+      }),
+    ];
   }
 
   return {
@@ -190,6 +164,19 @@ function createCodexRuntime(cli) {
         ];
       }
 
+      // Reasoning / thinking (Codex item.type === "reasoning")
+      if (
+        (event.type === "item.completed" ||
+          event.type === "item.started" ||
+          event.type === "item.updated") &&
+        event.item &&
+        String(event.item.type || "").toLowerCase() === "reasoning"
+      ) {
+        const text = reasoningTextFromItem(event.item);
+        if (!text) return [];
+        return [makeEvent("thinking.delta", { ...base, text })];
+      }
+
       if (
         event.type === "item.completed" &&
         event.item &&
@@ -243,25 +230,7 @@ function createCodexRuntime(cli) {
         if (toolEvents.length) return toolEvents;
       }
 
-      // item.updated with progress-ish payloads on tool/subagent items
-      if (event.type === "item.updated" && event.item && isToolLikeItem(event.item)) {
-        const toolName = toolNameFromItem(event.item) || String(event.item.type || "tool");
-        const args = toolArgsFromItem(event.item);
-        if (isSubagentTool(toolName, args)) {
-          const progressText =
-            summarizeResult(toolResultFromItem(event.item)) || summarizeTask(args) || toolName;
-          return [
-            makeEvent("subagent.progress", {
-              ...base,
-              subagentId: toolItemId(event.item, toolName),
-              name: subagentDisplayName(toolName, args),
-              text: progressText,
-              toolName,
-            }),
-          ];
-        }
-      }
-
+      // item.updated on tool-like items: no separate progress event type; ignore until finished.
       return [];
     },
   };
@@ -271,9 +240,9 @@ const codexProvider = {
   id: "codex",
   capabilities: {
     resume: true,
-    thinking: false,
+    thinking: true,
     tools: true,
-    subagents: true,
+    subagents: false,
     reasoning: "levels",
   },
   allowedProviderOptions: ["sandbox", "approvalPolicy"],

@@ -147,3 +147,29 @@ test("identity file exists for grok and mentions CLI", () => {
   assert.match(body, /id: grok/);
   assert.match(body, /Grok Build CLI|本地/);
 });
+
+test("createGrokRuntime maps tool_use / tool_result to tool.*", () => {
+  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.5" });
+  const ctx = { agent: "grok", invocationId: "inv-tool" };
+  const started = runtime.transform(
+    {
+      type: "tool_use",
+      name: "bash",
+      id: "t1",
+      input: { command: "ls" },
+    },
+    ctx
+  );
+  assert.ok(started.some((e) => e.type === "tool.started" && e.toolName === "bash"));
+  const finished = runtime.transform(
+    {
+      type: "tool_result",
+      name: "bash",
+      id: "t1",
+      output: "ok",
+      status: "ok",
+    },
+    ctx
+  );
+  assert.ok(finished.some((e) => e.type === "tool.finished" && e.toolId === "t1"));
+});

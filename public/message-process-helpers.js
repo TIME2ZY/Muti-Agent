@@ -117,11 +117,12 @@
    * Explicit false → hide that surface.
    */
   function resolveCapabilities(agentOrCaps) {
+    // Nested CLI subagents are not a platform capability (see collaboration-rules).
     const defaults = {
       resume: true,
       thinking: true,
       tools: true,
-      subagents: true,
+      subagents: false,
       reasoning: "none",
     };
     if (!agentOrCaps || typeof agentOrCaps !== "object") return { ...defaults };
@@ -139,7 +140,8 @@
       resume: raw.resume !== false,
       thinking: raw.thinking !== false,
       tools: raw.tools !== false,
-      subagents: raw.subagents !== false,
+      // Only explicit true keeps subagent UI (legacy); default off.
+      subagents: raw.subagents === true,
       reasoning: raw.reasoning != null ? raw.reasoning : defaults.reasoning,
     };
   }
@@ -189,7 +191,7 @@
 
   /**
    * Map a single event to a process-row anchor (for focus/highlight).
-   * @returns {{ rowKind: "subagent"|"tool"|"command", rowId: string } | null}
+   * @returns {{ rowKind: "tool"|"command", rowId: string } | null}
    */
   function processAnchorFromEvent(evt) {
     if (!evt || typeof evt !== "object") return null;
@@ -203,10 +205,11 @@
     const type = data.type || kind;
     if (!type) return null;
 
+    // Legacy transcript kinds: fold old subagent.* into tool anchors.
     if (type.startsWith("subagent.")) {
       const id = String(data.subagentId || data.toolId || data.name || "");
       if (!id) return null;
-      return { rowKind: "subagent", rowId: id };
+      return { rowKind: "tool", rowId: id };
     }
     if (type === "tool.started" || type === "tool.finished") {
       const detail = toolDetailFromEvent(data);
@@ -225,6 +228,10 @@
    * Shared by message hydrate, live final panel, and recall (no DOM).
    * Accepts either durable { kind, payload } or live { type, ...fields }.
    * Each bucket value may include `_eventNos: number[]` for Phase B focus.
+   *
+   * Nested CLI subagents are not a live protocol surface. Legacy transcript
+   * kinds `subagent.*` fold into toolById for recall of old sessions.
+   * `subById` stays empty for API stability with existing callers.
    *
    * @param {Array<object>} events
    * @returns {{ subById: Map<string, object>, toolById: Map<string, object>, commandByKey: Map<string, object> }}
@@ -248,14 +255,27 @@
       if (!type) continue;
 
       if (type.startsWith("subagent.")) {
-        const id = String(data.subagentId || data.toolId || data.name || subById.size);
-        const prev = subById.get(id) || {};
-        subById.set(id, {
+        // Legacy only: surface as a tool row (name/task → tool fields).
+        const id = String(data.subagentId || data.toolId || data.name || toolById.size);
+        const prev = toolById.get(id) || {};
+        const finished =
+          type === "subagent.completed" || type === "subagent.failed";
+        toolById.set(id, {
           ...prev,
           ...data,
-          type,
+          type: finished ? "tool.finished" : "tool.started",
+          toolName: data.toolName || data.name || "task",
+          toolId: id,
+          args: data.args || prev.args || { task: data.task },
+          result: data.summary !== undefined ? data.summary : data.result ?? prev.result,
+          status:
+            type === "subagent.failed"
+              ? "error"
+              : finished
+                ? "ok"
+                : data.status || prev.status,
           _eventNos: mergeEventNos(prev, evt),
-          _traceKind: "subagent",
+          _traceKind: "tool",
           _traceId: id,
         });
         continue;

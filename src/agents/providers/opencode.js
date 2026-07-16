@@ -7,9 +7,6 @@ const {
   toolArgsFromItem,
   toolResultFromItem,
   isFailedItem,
-  isSubagentTool,
-  subagentDisplayName,
-  summarizeTask,
   summarizeResult,
   toolItemId,
 } = require("../tool-classification");
@@ -118,13 +115,6 @@ function createOpencodeRuntime(cli) {
     return name === "bash" || name === "shell" || name === "exec" || name.endsWith(".bash");
   }
 
-  function taskLabel(part, args) {
-    if (part && typeof part.title === "string" && part.title.trim()) {
-      return part.title.trim().slice(0, 120);
-    }
-    return summarizeTask(args);
-  }
-
   function toolEventsFromPart(part, base) {
     if (!part || typeof part !== "object") return [];
     const type = String(part.type || "").toLowerCase();
@@ -188,17 +178,6 @@ function createOpencodeRuntime(cli) {
           })
         );
       }
-      if (isSubagentTool(toolName, args) || type === "task") {
-        events.push(
-          makeEvent("subagent.started", {
-            ...base,
-            subagentId: toolId,
-            name: subagentDisplayName(toolName, args),
-            task: taskLabel(part, args),
-            toolName,
-          })
-        );
-      }
       prev.started = true;
     }
 
@@ -233,48 +212,7 @@ function createOpencodeRuntime(cli) {
           })
         );
       }
-      if (isSubagentTool(toolName, args) || type === "task") {
-        if (failed) {
-          events.push(
-            makeEvent("subagent.failed", {
-              ...base,
-              subagentId: toolId,
-              name: subagentDisplayName(toolName, args),
-              task: taskLabel(part, args),
-              error: summarizeResult(result) || "subagent failed",
-              toolName,
-            })
-          );
-        } else {
-          events.push(
-            makeEvent("subagent.completed", {
-              ...base,
-              subagentId: toolId,
-              name: subagentDisplayName(toolName, args),
-              task: taskLabel(part, args),
-              summary: summarizeResult(result),
-              toolName,
-            })
-          );
-        }
-      }
       prev.finished = true;
-    } else if (
-      prev.started &&
-      !prev.finished &&
-      (part.output || part.result || part.title || part.text)
-    ) {
-      if (isSubagentTool(toolName, args) || type === "task") {
-        events.push(
-          makeEvent("subagent.progress", {
-            ...base,
-            subagentId: toolId,
-            name: subagentDisplayName(toolName, args),
-            text: summarizeResult(part.output || part.result || part.title || part.text),
-            toolName,
-          })
-        );
-      }
     }
 
     toolStates.set(toolId, prev);
@@ -488,7 +426,7 @@ const opencodeProvider = {
     resume: true,
     thinking: true,
     tools: true,
-    subagents: true,
+    subagents: false,
     reasoning: "toggle",
   },
   allowedProviderOptions: ["thinking", "modelPrefix"],

@@ -137,10 +137,64 @@ function createGrokRuntime(cli) {
 
         case "tool":
         case "tool_use":
-        case "tool_result": {
+        case "tool_call": {
           ensureStarted(event.sessionId);
-          // Tools interrupt streaming prose — flush so UI stays ordered.
           flushAll();
+          const toolName = String(
+            event.name || event.tool || event.toolName || event.tool_name || "tool"
+          ).trim() || "tool";
+          const toolId = String(
+            event.id || event.toolId || event.callID || event.call_id || toolName
+          );
+          const args =
+            (event.input && typeof event.input === "object" && event.input) ||
+            (event.arguments && typeof event.arguments === "object" && event.arguments) ||
+            (event.args && typeof event.args === "object" && event.args) ||
+            {};
+          out.push(
+            makeEvent("tool.started", {
+              ...base,
+              toolName,
+              toolId,
+              args,
+            })
+          );
+          return out;
+        }
+
+        case "tool_result":
+        case "tool_end":
+        case "tool.finished": {
+          ensureStarted(event.sessionId);
+          flushAll();
+          const toolName = String(
+            event.name || event.tool || event.toolName || event.tool_name || "tool"
+          ).trim() || "tool";
+          const toolId = String(
+            event.id || event.toolId || event.callID || event.call_id || toolName
+          );
+          const failed =
+            event.status === "error" ||
+            event.status === "failed" ||
+            event.is_error === true ||
+            Boolean(event.error);
+          const result =
+            event.result !== undefined
+              ? event.result
+              : event.output !== undefined
+                ? event.output
+                : event.data !== undefined
+                  ? event.data
+                  : event.error || null;
+          out.push(
+            makeEvent("tool.finished", {
+              ...base,
+              toolName,
+              toolId,
+              result,
+              status: failed ? "error" : "ok",
+            })
+          );
           return out;
         }
 
@@ -194,7 +248,7 @@ const grokProvider = {
   capabilities: {
     resume: true,
     thinking: true,
-    tools: false,
+    tools: true,
     subagents: false,
     reasoning: "levels",
   },

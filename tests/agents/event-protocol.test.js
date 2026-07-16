@@ -21,6 +21,25 @@ test("makeEvent stamps protocolVersion", () => {
   assert.equal(event.type, "text.delta");
 });
 
+test("canonical protocol rejects subagent.* event types", () => {
+  const { CANONICAL_EVENT_TYPES, validateCanonicalEvent } = require("../../src/agents/event-protocol");
+  for (const type of [
+    "subagent.started",
+    "subagent.progress",
+    "subagent.completed",
+    "subagent.failed",
+  ]) {
+    assert.equal(CANONICAL_EVENT_TYPES.has(type), false);
+    const errors = validateCanonicalEvent({
+      type,
+      agent: "codex",
+      invocationId: "i",
+      subagentId: "s1",
+    });
+    assert.ok(errors.some((e) => /unsupported event type/.test(e)));
+  }
+});
+
 test("normalize coerces loose field types before validation", () => {
   const event = normalizeCanonicalEvent({
     type: "text.delta",

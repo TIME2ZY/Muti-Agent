@@ -330,7 +330,7 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
   assert.equal(text[0].text, "Hello from Codex");
 });
 
-test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
+test("codex runtime maps mcp tools as tool.* only (no subagent events)", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
   const ctx = { invocationId: "inv-tool", agent: "codex" };
@@ -349,7 +349,7 @@ test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
     ctx
   );
 
-  const subStarted = runtime.transform(
+  const taskStarted = runtime.transform(
     {
       type: "item.started",
       item: {
@@ -366,7 +366,7 @@ test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
     ctx
   );
 
-  const subDone = runtime.transform(
+  const taskDone = runtime.transform(
     {
       type: "item.completed",
       item: {
@@ -384,7 +384,7 @@ test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
     ctx
   );
 
-  const subFailed = runtime.transform(
+  const taskFailed = runtime.transform(
     {
       type: "item.completed",
       item: {
@@ -413,29 +413,35 @@ test("codex runtime maps mcp tools and subagent task lifecycle events", () => {
     }
   );
 
-  assert.equal(subStarted.length, 2);
-  assert.equal(subStarted[0].type, "tool.started");
-  assert.equal(subStarted[1].type, "subagent.started");
-  assert.equal(subStarted[1].name, "explore");
-  assert.match(subStarted[1].task, /session runtime/);
+  assert.equal(taskStarted.length, 1);
+  assert.equal(taskStarted[0].type, "tool.started");
+  assert.equal(taskStarted[0].toolName, "task");
+  assert.ok(!taskStarted.some((e) => String(e.type).startsWith("subagent.")));
 
-  assert.equal(
-    subDone.some((e) => e.type === "subagent.completed"),
-    true
-  );
-  assert.equal(
-    subDone.find((e) => e.type === "subagent.completed").summary.includes("session-runtime"),
-    true
-  );
+  assert.equal(taskDone.some((e) => e.type === "tool.finished"), true);
+  assert.match(String(taskDone.find((e) => e.type === "tool.finished").result.summary || ""), /session-runtime/);
+  assert.ok(!taskDone.some((e) => String(e.type).startsWith("subagent.")));
 
-  assert.equal(
-    subFailed.some((e) => e.type === "subagent.failed"),
-    true
-  );
-  assert.equal(subFailed.find((e) => e.type === "subagent.failed").error, "timeout");
+  assert.equal(taskFailed.some((e) => e.type === "tool.finished" && e.status === "error"), true);
+  assert.ok(!taskFailed.some((e) => String(e.type).startsWith("subagent.")));
 });
 
-test("opencode runtime maps tool/task parts into tool and subagent events", () => {
+test("codex runtime maps reasoning items to thinking.delta", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const ctx = { invocationId: "inv-think", agent: "codex" };
+  const events = runtime.transform(
+    {
+      type: "item.completed",
+      item: { type: "reasoning", text: "Considering trade-offs..." },
+    },
+    ctx
+  );
+  assert.ok(events.some((e) => e.type === "run.started"));
+  assert.ok(events.some((e) => e.type === "thinking.delta" && /trade-offs/.test(e.text)));
+});
+
+test("opencode runtime maps tool/task parts into tool events only", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({
     providerId: "opencode",
@@ -473,22 +479,10 @@ test("opencode runtime maps tool/task parts into tool and subagent events", () =
     ctx
   );
 
-  assert.equal(
-    started.some((e) => e.type === "tool.started"),
-    true
-  );
-  assert.equal(
-    started.some((e) => e.type === "subagent.started"),
-    true
-  );
-  assert.equal(
-    done.some((e) => e.type === "tool.finished"),
-    true
-  );
-  assert.equal(
-    done.some((e) => e.type === "subagent.completed"),
-    true
-  );
+  assert.equal(started.some((e) => e.type === "tool.started"), true);
+  assert.equal(started.some((e) => String(e.type).startsWith("subagent.")), false);
+  assert.equal(done.some((e) => e.type === "tool.finished"), true);
+  assert.equal(done.some((e) => String(e.type).startsWith("subagent.")), false);
 });
 
 test("opencode runtime maps real tool_use events from current CLI schema", () => {
@@ -528,27 +522,11 @@ test("opencode runtime maps real tool_use events from current CLI schema", () =>
     ctx
   );
 
-  assert.equal(
-    events.some((e) => e.type === "tool.started" && e.toolName === "task"),
-    true
-  );
-  assert.equal(
-    events.some((e) => e.type === "tool.finished" && e.status === "ok"),
-    true
-  );
-  assert.equal(
-    events.some((e) => e.type === "subagent.started" && e.name === "general"),
-    true
-  );
-  assert.equal(
-    events.some((e) => e.type === "subagent.completed"),
-    true
-  );
-  assert.equal(
-    events.find((e) => e.type === "tool.started").toolId,
-    "call_424f09b8b6e04590b7a594f5"
-  );
-  assert.match(events.find((e) => e.type === "subagent.completed").summary, /git status ok/);
+  assert.equal(events.some((e) => e.type === "tool.started" && e.toolName === "task"), true);
+  assert.equal(events.some((e) => e.type === "tool.finished" && e.status === "ok"), true);
+  assert.equal(events.some((e) => String(e.type).startsWith("subagent.")), false);
+  assert.equal(events.find((e) => e.type === "tool.started").toolId, "call_424f09b8b6e04590b7a594f5");
+  assert.match(String(events.find((e) => e.type === "tool.finished").result || ""), /git status ok/);
 });
 
 test("opencode runtime maps read/bash tools and nests state.input", () => {
