@@ -4,6 +4,8 @@ const {
   createAntigravityRuntime,
   resolveAgyModelLabel,
   resolveAgyCommand,
+  sessionIdFromEvent,
+  normalizeToolArgs,
   antigravityProvider,
 } = require("../../src/agents/providers/antigravity");
 const { AGENTS } = require("../../src/agents/catalog");
@@ -40,7 +42,7 @@ test("resolveAgyModelLabel embeds effort in CLI model name", () => {
   );
 });
 
-test("buildInvocation for gemini spawns agy print mode", () => {
+test("buildInvocation for gemini uses stream-json print mode", () => {
   const inv = buildInvocation(AGENTS.gemini, "brainstorm names");
   assert.match(String(inv.command), /agy(\.exe)?$/i);
   assert.ok(inv.args.includes("-p"));
@@ -50,6 +52,9 @@ test("buildInvocation for gemini spawns agy print mode", () => {
   assert.ok(inv.args.includes("--dangerously-skip-permissions"));
   assert.ok(inv.args.includes("--mode"));
   assert.ok(inv.args.includes("plan"));
+  const fmtIdx = inv.args.indexOf("--output-format");
+  assert.ok(fmtIdx >= 0);
+  assert.equal(inv.args[fmtIdx + 1], "stream-json");
 });
 
 test("buildInvocation resumes with --conversation", () => {
@@ -73,10 +78,41 @@ test("buildInvocation rejects unsupported effort", () => {
   );
 });
 
+test("buildInvocation honors outputFormat override", () => {
+  const inv = buildInvocation(
+    {
+      ...AGENTS.gemini,
+      providerOptions: { outputFormat: "text" },
+    },
+    "plain"
+  );
+  const fmtIdx = inv.args.indexOf("--output-format");
+  assert.ok(fmtIdx >= 0);
+  assert.equal(inv.args[fmtIdx + 1], "text");
+});
+
 test("resolveAgyCommand returns a string", () => {
   const cmd = resolveAgyCommand();
   assert.equal(typeof cmd, "string");
   assert.ok(cmd.length > 0);
+});
+
+test("normalizeToolArgs maps DirectoryPath and CommandLine", () => {
+  assert.equal(
+    normalizeToolArgs({ DirectoryPath: "D:\\HW\\Muti-Agent" }).path,
+    "D:\\HW\\Muti-Agent"
+  );
+  assert.equal(normalizeToolArgs({ CommandLine: "npm test" }).command, "npm test");
+});
+
+test("sessionIdFromEvent reads conversation_id from envelopes", () => {
+  assert.equal(sessionIdFromEvent({ conversation_id: "c1" }), "c1");
+  assert.equal(
+    sessionIdFromEvent({ step_update: { conversation_id: "c2", step_type: "tool" } }),
+    "c2"
+  );
+  assert.equal(sessionIdFromEvent({ result: { conversation_id: "c3" } }), "c3");
+  assert.equal(sessionIdFromEvent({}), "");
 });
 
 test("createAntigravityRuntime maps plain stdout lines to text.delta", () => {
@@ -101,11 +137,222 @@ test("createAntigravityRuntime maps plain stdout lines to text.delta", () => {
   assert.equal(more[0].text, "fresh idea two\n");
 });
 
-test("antigravity adapter declares expected capabilities", () => {
+test("stream-json init + text + tool + result maps to canonical events", () => {
+  const runtime = createAntigravityRuntime(AGENTS.gemini);
+  const ctx = { agent: "gemini", invocationId: "inv-stream" };
+  const conv = "f2995446-2a12-4008-a630-2b6776092d82";
+
+  const started = runtime.transform(
+    {
+      event: "init",
+      conversation_id: conv,
+      init: {
+        model: "Gemini 3.5 Flash (High)",
+        cwd: "D:\\HW\\Muti-Agent",
+        tools: ["list_dir"],
+        permission_mode: "always-proceed",
+      },
+    },
+    ctx
+  );
+  assert.equal(started.length, 1);
+  assert.equal(started[0].type, "run.started");
+  assert.equal(started[0].sessionId, conv);
+  assert.equal(started[0].model, "Gemini 3.5 Flash (High)");
+  assert.equal(runtime.extractSessionId({ event: "init", conversation_id: conv }), conv);
+
+  const text1 = runtime.transform(
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: conv,
+        step_index: 2,
+        state: "ACTIVE",
+        step_type: "agent_response",
+        text_delta: "I'll use list_dir. ",
+      },
+    },
+    ctx
+  );
+  assert.deepEqual(
+    text1.map((e) => e.type),
+    ["text.delta"]
+  );
+  assert.equal(text1[0].text, "I'll use list_dir. ");
+
+  const toolStart = runtime.transform(
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: conv,
+        step_index: 3,
+        state: "ACTIVE",
+        step_type: "tool",
+        tool_name: "list_dir",
+        tool_info: {
+          name: "list_dir",
+          parameters: { DirectoryPath: "D:\\HW\\Muti-Agent" },
+        },
+      },
+    },
+    ctx
+  );
+  assert.equal(toolStart[0].type, "tool.started");
+  assert.equal(toolStart[0].toolName, "list_dir");
+  assert.equal(toolStart[0].toolId, "agy-3-list_dir");
+  assert.equal(toolStart[0].args.path, "D:\\HW\\Muti-Agent");
+
+  const toolDone = runtime.transform(
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: conv,
+        step_index: 3,
+        state: "DONE",
+        step_type: "tool",
+        tool_name: "list_dir",
+        tool_info: {
+          name: "list_dir",
+          parameters: { DirectoryPath: "D:\\HW\\Muti-Agent" },
+          output: "src/\npublic/\n",
+        },
+      },
+    },
+    ctx
+  );
+  assert.equal(toolDone[0].type, "tool.finished");
+  assert.equal(toolDone[0].status, "ok");
+  assert.equal(toolDone[0].output, "src/\npublic/\n");
+
+  const toolErr = runtime.transform(
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: conv,
+        step_index: 4,
+        state: "ERROR",
+        step_type: "tool",
+        tool_name: "list_dir",
+        tool_info: {
+          name: "list_dir",
+          parameters: { DirectoryPath: "C:\\secret" },
+          error: { type: "TOOL_ERROR", message: "Permission denied" },
+        },
+      },
+    },
+    ctx
+  );
+  assert.equal(toolErr[0].type, "tool.finished");
+  assert.equal(toolErr[0].status, "error");
+  assert.match(toolErr[0].output, /Permission denied/);
+
+  const checkpoint = runtime.transform(
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: conv,
+        step_index: 5,
+        state: "DONE",
+        step_type: "checkpoint",
+      },
+    },
+    ctx
+  );
+  assert.equal(checkpoint[0].type, "progress.update");
+  assert.match(checkpoint[0].items[0].text, /检查点/);
+
+  // result.response must not duplicate streamed text
+  const result = runtime.transform(
+    {
+      event: "result",
+      result: {
+        conversation_id: conv,
+        status: "SUCCESS",
+        response: "I'll use list_dir. final summary\n",
+        usage: { thinking_tokens: 100 },
+      },
+    },
+    ctx
+  );
+  assert.deepEqual(result.map((e) => e.type), []);
+});
+
+test("result emits text when no agent_response deltas were seen", () => {
+  const runtime = createAntigravityRuntime(AGENTS.gemini);
+  const ctx = { agent: "gemini", invocationId: "inv-result-only" };
+  runtime.transform(
+    { event: "init", conversation_id: "c-result", init: { model: "Gemini 3.5 Flash (Low)" } },
+    ctx
+  );
+  const events = runtime.transform(
+    {
+      event: "result",
+      result: {
+        conversation_id: "c-result",
+        status: "SUCCESS",
+        response: "only final\n",
+      },
+    },
+    ctx
+  );
+  assert.equal(events[0].type, "text.delta");
+  assert.equal(events[0].text, "only final\n");
+});
+
+test("final json blob maps conversation_id and response", () => {
+  const runtime = createAntigravityRuntime(AGENTS.gemini);
+  const ctx = { agent: "gemini", invocationId: "inv-json" };
+  const events = runtime.transform(
+    {
+      conversation_id: "json-conv",
+      status: "SUCCESS",
+      response: "FMT_json\n",
+      usage: { thinking_tokens: 10 },
+    },
+    ctx
+  );
+  assert.equal(events[0].type, "run.started");
+  assert.equal(events[0].sessionId, "json-conv");
+  assert.equal(events[1].type, "text.delta");
+  assert.equal(events[1].text, "FMT_json\n");
+});
+
+test("user_input and unknown DONE steps are quiet", () => {
+  const runtime = createAntigravityRuntime(AGENTS.gemini);
+  const ctx = { agent: "gemini", invocationId: "inv-quiet" };
+  runtime.transform({ event: "init", conversation_id: "q1", init: {} }, ctx);
+  assert.deepEqual(
+    runtime
+      .transform(
+        {
+          event: "step_update",
+          step_update: { conversation_id: "q1", step_index: 0, state: "DONE", step_type: "user_input" },
+        },
+        ctx
+      )
+      .map((e) => e.type),
+    []
+  );
+  assert.deepEqual(
+    runtime
+      .transform(
+        {
+          event: "step_update",
+          step_update: { conversation_id: "q1", step_index: 1, state: "DONE", step_type: "unknown" },
+        },
+        ctx
+      )
+      .map((e) => e.type),
+    []
+  );
+});
+
+test("antigravity adapter declares stream-json capabilities", () => {
   assert.equal(antigravityProvider.id, "antigravity");
-  assert.equal(antigravityProvider.capabilities.resume, false);
+  assert.equal(antigravityProvider.capabilities.resume, true);
   assert.equal(antigravityProvider.capabilities.thinking, false);
-  assert.equal(antigravityProvider.capabilities.tools, false);
+  assert.equal(antigravityProvider.capabilities.tools, true);
   assert.equal(antigravityProvider.capabilities.subagents, undefined);
   assert.ok(antigravityProvider.allowedProviderOptions.includes("mode"));
+  assert.ok(antigravityProvider.allowedProviderOptions.includes("outputFormat"));
 });
