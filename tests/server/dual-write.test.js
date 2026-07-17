@@ -33,6 +33,20 @@ function successfulSpawn() {
   return child;
 }
 
+function spawnText(text) {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  process.nextTick(() => {
+    child.stdout.write(`${JSON.stringify({ type: "text.delta", text })}\n`);
+    child.stdout.end();
+    child.stderr.end();
+    child.emit("close", 0, null);
+  });
+  return child;
+}
+
 function worktreeManager() {
   return {
     getStatus() {
@@ -137,6 +151,69 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
   }
 });
 
+test("routed structured handoff is captured in SQLite and announced over SSE", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-memory-server-"));
+  const storage = createStorage({ file: ":memory:" });
+  let run = 0;
+  const server = createServer({
+    sessionsFile: path.join(tmpDir, "sessions.json"),
+    invocationsFile: path.join(tmpDir, "invocations.json"),
+    sessionMapRoot: path.join(tmpDir, "session-maps"),
+    storage,
+    spawnRunner() {
+      run += 1;
+      if (run === 1) {
+        return spawnText(
+          [
+            "@OpenCode 请继续实现\n",
+            "```handoff\n",
+            "to: opencode\n",
+            "goal: 完成登录流程\n",
+            "what: 接口设计已完成\n",
+            "why: 保持兼容\n",
+            "next_action: 实现并测试\n",
+            "```",
+          ].join("")
+        );
+      }
+      return spawnText("已完成");
+    },
+    worktreeManager: worktreeManager(),
+    uiToken: UI_TOKEN,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: "{}",
+    }).then((response) => response.json());
+    const stream = await apiFetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "start" }),
+    }).then((response) => response.text());
+    const memories = storage.memories.listForThread(session.id);
+
+    assert.equal(run, 2);
+    assert.equal(memories.length, 1);
+    assert.equal(memories[0].kind, "handoff");
+    assert.match(memories[0].captureKey, /^handoff:.*:opencode:0$/);
+    assert.equal(memories[0].metadata.quality.ok, true);
+    assert.match(stream, /event: memory-captured/);
+    const search = await apiFetch(
+      `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=${encodeURIComponent("登录流程")}`
+    ).then((response) => response.json());
+    const memoryHit = search.hits.find((hit) => hit.sourceKind === "memory-entry");
+    assert.ok(memoryHit);
+    assert.equal(memoryHit.kind, "memory.handoff");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    storage.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("chat seals from cumulative window usage and starts the next generation", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "window-runtime-server-"));
   const mapRoot = path.join(tmpDir, "session-maps");
@@ -194,6 +271,13 @@ test("chat seals from cumulative window usage and starts the next generation", a
     assert.equal(rotatedWindows[1].generation, 2);
     assert.equal(rotatedWindows[1].state, "active");
     assert.ok(storage.windows.get(firstWindow.id).outputChars > firstWindow.outputChars);
+    const sealMemories = storage.memories
+      .listForThread(session.id)
+      .filter((memory) => memory.kind === "window-seal");
+    assert.equal(sealMemories.length, 1);
+    assert.equal(sealMemories[0].captureKey, `window-seal:${firstWindow.id}`);
+    assert.equal(sealMemories[0].metadata.partial, true);
+    assert.match(sealedStream, /event: memory-captured/);
 
     await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
@@ -203,6 +287,9 @@ test("chat seals from cumulative window usage and starts the next generation", a
     assert.equal(windows.length, 2);
     assert.equal(windows[1].generation, 2);
     assert.match(prompts[2], /Generation: 2/);
+    assert.match(prompts[2], /<!-- Active Memories \(1\) -->/);
+    assert.match(prompts[2], /\[captured\]\[window-seal\]/);
+    assert.match(prompts[2], /partial=true/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     storage.close();

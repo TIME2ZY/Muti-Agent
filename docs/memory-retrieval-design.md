@@ -81,7 +81,7 @@ hits[] 扁平列表（先 SQLite 再 file 去重截断）
 | T1 | 存在 active `memory-entry` 且 query 命中其 content 时，hit[0] 的 `layer=memory`（或 sourceKind=memory-entry 且 score 最高档） |
 | T2 | 同 query 下，在 memory 未满配额前，不得被 invocation-event 占满 limit |
 | T3 | `status=superseded\|invalidated` 默认不出现在 search / retrieveForTurn |
-| T4 | `retrieveForTurn(prompt)` 在无 agent curl 时仍能为 bootstrap 产出 ≤ budget 的注入块 |
+| T4 | `retrieveForTurn(prompt)` 在无 agent curl 时仍能为 bootstrap 产出 ≤ budget 的注入块；中文自然语言“继续完成…”类 query 能召回相关 memory |
 | T5 | 事件索引文本不含无意义的 JSON 键噪声（至少 text.delta 只索引 text） |
 | T6 | files mode 或 SQLite 失败时 search 返回 [] 或 file-only，不抛 500 |
 
@@ -179,7 +179,7 @@ GET /api/callbacks/session-search
 // 默认数字与 design-alignment.md §2.4 一致
 retrieveForTurn({
   threadId,
-  prompt,                 // 本轮用户原文或 handoff task 摘要
+  prompt,                 // 本轮用户原文或 handoff task 摘要；内部先提取检索词
   budgetChars: 4000,      // SHIFT_RETRIEVE_BUDGET_CHARS；A2A 调用传 2000
   recentLimit: 6,         // SHIFT_RETRIEVE_RECENT_LIMIT
   relatedLimit: 5,        // SHIFT_RETRIEVE_RELATED_LIMIT
@@ -240,16 +240,20 @@ Evidence 仍：`search` → `read-invocation(target, from=eventNo-ε)`。
 
 **禁止**再使用「单一 flat search 先塞满 limit」作为唯一策略（现状 R5）。
 
-### 5.2 Query 规范化
+### 5.2 Query 规范化与中文召回
+
+不能把整段 prompt 截断后直接拼成 `"token" AND "token"`。当前 token 抽取对中文长句和中英混合 prompt 过严，例如 memory 含“JWT 过期时间”，query 为“请继续完成 JWT 过期处理并检查错误码”时，整句 AND/contains 都可能为 0 命中。
 
 | 步骤 | 规则 |
 |------|------|
 | trim | 去首尾空白 |
-| 长度 | 注入用 prompt 截断至 ~500 字作 query；主动 search 用用户原串，上限 200 字 |
-| FTS | 沿用 token 抽取 + `"token" AND "token"`（多词收紧） |
-| 空 query | `search` → `[]`；`retrieveForTurn` → **仅 recency 通道**（仍可注入最近记忆） |
+| 长度 | 主动 search 原串上限 200 字；注入 prompt 最多读取 500 字，但不直接作为最终 FTS query |
+| term extraction | 提取 3～8 个高信息词；保留标识符、路径、错误码、英文词；中文生成词/字符 bigram 或 trigram 候选 |
+| candidate query | 先用 OR / 任一词召回候选；词数很少时可追加严格 AND 通道，但不能只做 AND |
+| fallback | FTS 无命中时，对提取词逐项有限 contains；禁止用整段 prompt 做唯一 contains 条件 |
+| 空/弱 query | `search` → `[]`；`retrieveForTurn` → **仅 recency 通道**（仍可注入最近记忆） |
 
-空 query 的 recency 注入很重要：seal 后用户只说「继续」时，相关维可能很弱，时间维要托底。
+实现可选择 FTS5 trigram tokenizer，或保持现表并在应用层生成中文 n-gram 查询；无论采用哪种方案，都必须用真实中文 prompt 建集成测试。seal 后用户只说“继续”时，related 通道允许为空，由 recency 托底。
 
 ### 5.3 索引文本规范化（治 R4）
 
@@ -288,31 +292,26 @@ tool.*                       → 短摘要 name + 截断 output
 
 ```text
 score =
-  source_boost
-  + status_boost
-  + match_boost
-  + recency_boost
+  normalized_match
+  status_boost
+  recency_boost
+  quality_adjustment
   - noise_penalty
 ```
 
 | 因子 | 建议值（起点，可调） |
 |------|----------------------|
-| source_boost memory | +100 |
-| source_boost message.user | +40 |
-| source_boost message.other | +20 |
-| source_boost evidence.text.delta | +10 |
-| source_boost evidence.handoff 事件 | +15 |
-| source_boost evidence.thinking/tool/stderr | +2 / 0 |
-| status_boost confirmed | +20 |
-| status_boost captured | +10 |
+| normalized_match | exact / FTS / contains 分别归一到 0..50，或用 RRF 合并不同召回通道 |
+| status_boost confirmed | +10；只表示已验证，不等于 system authority |
+| status_boost captured | +0 |
 | status_boost retired | 不参与（已滤） |
-| match_boost exact id/title | +50 |
-| match_boost FTS（用 -bm25 映射到 0..30） | 高相关更高 |
-| match_boost contains only | +5 |
 | recency_boost | 近 24h +5 … 衰减到 0 |
+| quality_adjustment | handoff quality.ok +2；partial window-seal -2（仅小幅调整） |
 | noise_penalty | 超短 snippet、纯标点等 -5 |
 
-**层内**按 score 排序；**层间**靠配额保证 memory 不被淹没，而不是只靠绝对分（双保险）。
+exact、FTS `bm25` 与 contains 的原始 rank 不在同一量纲，禁止直接相加。推荐先做各通道 rank，再用 Reciprocal Rank Fusion（RRF）或显式归一化合并。
+
+**层内**按 score 排序；**层间**主要靠配额保证 memory 不被淹没。不要再给 memory 固定 `+100` 让弱相关记忆压过强相关用户消息或 evidence；被动注入默认只查 memory，已经天然隔离。
 
 ### 5.6 层配额（治 R3 / R9）
 
@@ -320,11 +319,11 @@ score =
 
 | Layer | 默认配额 | 说明 |
 |-------|----------|------|
-| memory | min(8, limit) | 先填 |
+| memory | min(8, limit) | 先填相关候选；没有 query 命中的 memory 时不硬塞配额 |
 | message | min(4, remaining) | 次填 |
 | evidence | remaining | 最后填证据 |
 
-若 memory 不足，名额顺延给 message，再顺延 evidence。  
+若 memory 不足，名额顺延给 message，再顺延 evidence。配额是上限/保留位，不是要求把低相关候选强行填满。
 **禁止** evidence 先占满导致 memory 被截断——这是相对现状最重要的行为纠正。
 
 `retrieveForTurn` 配额示例：
@@ -492,20 +491,23 @@ Agent：教其优先读 `layer=memory` 的 snippet/content。
 
 | 类型 | 用例 |
 |------|------|
-| unit | score 单调性：confirmed memory > user message > text.delta |
+| unit | 同等相关度下 confirmed memory > captured memory；强相关 user message 可高于弱相关 memory |
 | unit | 配额：8 memory 候选 + 50 evidence → limit 20 时 memory≥min(8,available) |
 | unit | retired 过滤 |
 | unit | eventPlainText 不落整包 JSON |
 | unit | retrieveForTurn 去重与 budget 截断 |
+| unit | exact / FTS / contains rank 经归一化或 RRF 后稳定，不直接混用原始 bm25 |
 | integration | 写入 handoff memory 后 search 置顶 |
 | integration | bootstrap 含 Memory Card 且无 evidence 长文 |
+| integration | memory 含“JWT 过期时间”，中文长 prompt“请继续完成 JWT 过期处理并检查错误码”可命中 |
+| integration | “继续”或空 query 只走 recency，不抛错、不扫 evidence |
 | integration | sqlite down → file/limited 降级 |
 
 ---
 
 ## 13. 决策摘要
 
-1. **检索不是「一个 FTS 表扫到底」**，而是 **分层召回 + 统一打分 + 配额合并**。  
+1. **检索不是「一个 FTS 表扫到底」**，而是 **分层召回 + 中文/中英 query 提取 + 归一化打分 + 配额合并**。
 2. **被动 `retrieveForTurn` 与主动 `search` 必须拆分产品语义**，共享核心实现。  
 3. **Memory 层是一等公民**；evidence 只服务下钻，默认不进 bootstrap。  
 4. **先有 Wave M 写入，再做本篇**；无货时管道可测但产品 ROI 低。  
@@ -530,4 +532,4 @@ Agent：教其优先读 `layer=memory` 的 snippet/content。
 |------|------|
 | 2026-07-16 | 首版 |
 | 2026-07-16 | 对齐：Wave R 前置 M；注入归属与 4000/2000；取消「与写入并行」主路径表述 |
-| 2026-07-16 | 对齐：Wave R 前置 M；注入归属与 4000/2000；取消「与写入并行」主路径表述 |
+| 2026-07-16 | 审查修订：中文/中英 query 提取、OR 候选、RRF/归一化排序、相关性测试 |

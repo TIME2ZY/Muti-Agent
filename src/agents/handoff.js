@@ -9,14 +9,7 @@
 const REQUIRED_FIELDS = ["what", "why", "next_action"];
 const RECOMMENDED_FIELDS = ["to", "goal", "tradeoff", "open_questions"];
 const LIST_FIELDS = new Set(["open_questions", "files", "evidence"]);
-const SCALAR_FIELDS = new Set([
-  "to",
-  "goal",
-  "what",
-  "why",
-  "tradeoff",
-  "next_action",
-]);
+const SCALAR_FIELDS = new Set(["to", "goal", "what", "why", "tradeoff", "next_action"]);
 const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
 
 /** Structured pack: keep more of the prior narrative (reviews are often long). */
@@ -196,20 +189,30 @@ function parseHandoffBody(body) {
  * @returns {Handoff | null}
  */
 function extractPrimaryHandoff(text, opts = {}) {
+  return extractPrimaryHandoffMatch(text, opts).handoff;
+}
+
+/**
+ * Pick the primary handoff and retain its parsed block index for stable capture keys.
+ * @param {string} text
+ * @param {{ currentAgentId?: string, routedTo?: string }} [opts]
+ * @returns {{ handoff: Handoff | null, blockIndex: number | null }}
+ */
+function extractPrimaryHandoffMatch(text, opts = {}) {
   const blocks = parseHandoffBlocks(text);
-  if (blocks.length === 0) return null;
+  if (blocks.length === 0) return { handoff: null, blockIndex: null };
 
   const routedTo = opts.routedTo ? String(opts.routedTo).toLowerCase() : "";
   if (routedTo) {
     for (let i = blocks.length - 1; i >= 0; i--) {
       const to = normalizeTo(blocks[i].to);
       if (to && (to === routedTo || to.includes(routedTo))) {
-        return blocks[i];
+        return { handoff: blocks[i], blockIndex: i };
       }
     }
   }
 
-  return blocks[blocks.length - 1];
+  return { handoff: blocks[blocks.length - 1], blockIndex: blocks.length - 1 };
 }
 
 function normalizeTo(value) {
@@ -391,11 +394,7 @@ function renderHandoffTask(opts) {
     });
   }
 
-  const lines = [
-    `[任务交接：由 ${label} 转交给你]`,
-    "",
-    "<!-- Structured Handoff -->",
-  ];
+  const lines = [`[任务交接：由 ${label} 转交给你]`, "", "<!-- Structured Handoff -->"];
 
   if (quality.degraded) {
     lines.push(
@@ -506,6 +505,7 @@ module.exports = {
   parseHandoffBlocks,
   parseHandoffBody,
   extractPrimaryHandoff,
+  extractPrimaryHandoffMatch,
   evaluateHandoff,
   renderHandoffTask,
   renderDegradedHandoff,
