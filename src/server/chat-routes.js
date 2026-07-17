@@ -6,6 +6,7 @@ const {
 } = require("./stream-delta-coalescer");
 const { ENV } = require("../shared/brand");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
+const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
 
 const NOOP_DURABLE_RECORDER = Object.freeze({
   ensureWindow: () => null,
@@ -297,6 +298,7 @@ function createChatRoutes({
       currentInvocationId: null,
       windowId: null,
       sealer: null,
+      useWorktree: Boolean(useWorktree),
     };
     callbacks.registerThread(sessionId, threadCtx);
 
@@ -642,128 +644,35 @@ function createChatRoutes({
           break;
         }
 
-        // Parse mentions every turn. Allow the same agent to re-enter the
-        // worklist (review → fix → re-review). Depth is the only hard cap.
-        const mentions = parseA2AMentions(assistantContent, agent);
-        for (const m of mentions) {
-          const handoffMatch = agentHandoff.extractPrimaryHandoffMatch(assistantContent, {
-            currentAgentId: agent,
-            routedTo: m,
-            mentionCount: mentions.length,
-          });
-          const targetHandoff = handoffMatch.handoff;
-          const targetQuality = agentHandoff.evaluateHandoff(targetHandoff, {
-            routedTo: m,
-            toAgentId: m,
-            fromAgentId: agent,
-            useWorktree: Boolean(useWorktree),
-            riskFlags: mentions.length > 1 ? ["multi_target"] : [],
-          });
-          handoffByTarget[m] = targetHandoff;
-          handoffQualityByTarget[m] = targetQuality;
-
-          const summary = agentHandoff.summarizeHandoff(targetHandoff, targetQuality);
-
-          // Route target `m` wins over handoff.to (which may be missing/mismatched).
-          transcript.appendEvent(sessionId, invocationId, "handoff", {
-            ...summary,
-            from: agent,
-            to: m,
-          });
-          sendSse(res, "handoff-parsed", {
-            ...summary,
-            from: agent,
-            to: m,
-          });
-
-          const fromLabel = AGENTS[agent]?.label || agent;
-          const toLabel = AGENTS[m]?.label || m;
-
-          // Capture before routing decisions: max_depth soft-skips enqueue only.
-          const capture = memories.captureHandoff({
-            threadId: sessionId,
-            invocationId,
-            windowId: durableRun?.window?.id || null,
-            fromAgent: agent,
-            toAgent: m,
-            handoff: targetHandoff,
-            quality: targetQuality,
-            blockIndex: handoffMatch.blockIndex,
-          });
-          if (capture?.captured) {
-            sendSse(res, "memory-captured", capture.event);
-          }
-
-          if (threadCtx.a2aCount >= maxDepth) {
-            const skipText = `⏭ ${fromLabel} → ${toLabel}（已达 A2A 深度上限 ${maxDepth}，未入队）`;
-            appendToSession(
-              options.sessionsFile || undefined,
-              sessionId,
-              {
-                role: "system",
-                agent: "system",
-                content: skipText,
-                kind: "a2a-skipped",
-                from: agent,
-                to: m,
-                reason: "max_depth",
-                maxDepth,
-              },
-              { allowCreate: false }
-            );
-            sendSse(res, "a2a-skipped", {
-              from: agent,
-              to: m,
-              reason: "max_depth",
-              maxDepth,
-            });
-            transcript.appendEvent(sessionId, invocationId, "a2a-skipped", {
-              from: agent,
-              to: m,
-              reason: "max_depth",
-              maxDepth,
-            });
-            continue;
-          }
-
-          // Re-entry allowed: push even if `m` already ran earlier in this request.
-          worklist.push(m);
-          threadCtx.a2aCount += 1;
-          const routeText = targetQuality.degraded
-            ? `🔄 ${fromLabel} → ${toLabel}（交接包不完整）`
-            : `🔄 ${fromLabel} → ${toLabel}`;
-          // Persist so session switch / reload keeps the handoff marker.
-          appendToSession(
-            options.sessionsFile || undefined,
-            sessionId,
-            {
-              role: "system",
-              agent: "system",
-              content: routeText,
-              kind: "a2a-route",
-              from: agent,
-              to: m,
-              handoffOk: targetQuality.ok,
-              handoffDegraded: targetQuality.degraded,
-              reentry: worklist.filter((id) => id === m).length > 1,
-            },
-            { allowCreate: false }
-          );
-          sendSse(res, "a2a-route", {
-            from: agent,
-            to: m,
-            handoffOk: targetQuality.ok,
-            handoffDegraded: targetQuality.degraded,
-            reentry: worklist.filter((id) => id === m).length > 1,
-          });
-          transcript.appendEvent(sessionId, invocationId, "a2a-route", {
-            from: agent,
-            to: m,
-            handoffOk: targetQuality.ok,
-            handoffDegraded: targetQuality.degraded,
-            reentry: worklist.filter((id) => id === m).length > 1,
-          });
-        }
+        // Wave H2/H3: unified finalize (policy + capture + enqueue/repair).
+        const agentLabels = Object.fromEntries(
+          Object.entries(AGENTS).map(([id, config]) => [id, config.label || id])
+        );
+        const finalized = finalizeA2ARoutes({
+          text: assistantContent,
+          fromAgent: agent,
+          threadId: sessionId,
+          sessionId,
+          invocationId,
+          windowId: durableRun?.window?.id || null,
+          useWorktree: Boolean(useWorktree),
+          worklist,
+          a2aCount: threadCtx.a2aCount,
+          maxDepth,
+          memoryCapture: memories,
+          transcript,
+          sendSse: (event, payload) => sendSse(res, event, payload),
+          appendToSession,
+          sessionsFile: options.sessionsFile,
+          agentLabels,
+          source: "chat",
+          parseMentions: parseA2AMentions,
+          controller: invocationController,
+          a2aState: threadCtx,
+        });
+        Object.assign(handoffByTarget, finalized.handoffByTarget);
+        Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
+        threadCtx.a2aCount = finalized.a2aCount;
       }
     } finally {
       if (activeInvocations.get(sessionId) === invocationController) {

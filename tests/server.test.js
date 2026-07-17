@@ -1614,7 +1614,9 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   assert.equal(appended[1].msg.kind, "a2a-route");
   assert.equal(appended[1].msg.from, "codex");
   assert.equal(appended[1].msg.to, "gemini");
-  assert.match(appended[1].msg.content, /codex.*gemini/);
+  // Route text uses agent labels; payload still uses agent ids.
+  assert.match(appended[1].msg.content, /Codex.*Gemini|codex.*gemini/i);
+  assert.equal(appended[1].msg.handoffPolicy, "allow_degraded");
   assert.equal(worklist.includes("gemini"), true);
   assert.equal(threadCtx.a2aCount, 1);
   assert.deepEqual(worklist, ["codex", "gemini"]);

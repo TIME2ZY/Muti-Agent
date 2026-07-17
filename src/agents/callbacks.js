@@ -1,7 +1,8 @@
-const { parseA2AMentions, getMaxA2ADepth } = require("./routing");
-const agentHandoff = require("./handoff");
+const { getMaxA2ADepth } = require("./routing");
 const transcript = require("../session/transcript");
 const { ENV } = require("../shared/brand");
+const { finalizeA2ARoutes } = require("./a2a-finalize");
+const { AGENTS } = require("./catalog");
 
 // Default token TTL: 30 minutes. Long enough for most invocations, short
 // enough to prevent stale tokens from accumulating after the worklist exits.
@@ -171,113 +172,33 @@ function postMessage(
 
   sendSse(thread.res, "message", { agent, role: "assistant", text: content });
 
-  const mentions = parseA2AMentions(content, agent);
-  const maxDepth = getMaxA2ADepth();
-  for (const target of mentions) {
-    if (thread.controller && thread.controller.signal.aborted) break;
-    const handoffMatch = agentHandoff.extractPrimaryHandoffMatch(content, {
-      currentAgentId: agent,
-      routedTo: target,
-      mentionCount: mentions.length,
-    });
-    const handoffQuality = agentHandoff.evaluateHandoff(handoffMatch.handoff, {
-      routedTo: target,
-      toAgentId: target,
-      fromAgentId: agent,
-      riskFlags: mentions.length > 1 ? ["multi_target"] : [],
-    });
-    // Capture before routing decisions: max_depth soft-skips enqueue only.
-    const capture = memoryCapture?.captureHandoff({
-      threadId: thread.sessionId || threadId,
-      invocationId,
-      windowId: typeof thread.windowId === "string" ? thread.windowId : null,
-      fromAgent: agent,
-      toAgent: target,
-      handoff: handoffMatch.handoff,
-      quality: handoffQuality,
-      blockIndex: handoffMatch.blockIndex,
-    });
-    if (capture?.captured) {
-      sendSse(thread.res, "memory-captured", capture.event);
-    }
-    if (thread.a2aCount >= maxDepth) {
-      const skipText = `⏭ ${agent} → ${target}（已达 A2A 深度上限 ${maxDepth}，未入队）`;
-      if (appendToSession && thread.sessionsFile) {
-        appendToSession(
-          thread.sessionsFile,
-          thread.sessionId || threadId,
-          {
-            role: "system",
-            agent: "system",
-            content: skipText,
-            kind: "a2a-skipped",
-            from: agent,
-            to: target,
-            reason: "max_depth",
-            maxDepth,
-            source: "callback",
-          },
-          { allowCreate: false }
-        );
-      }
-      sendSse(thread.res, "a2a-skipped", {
-        from: agent,
-        to: target,
-        reason: "max_depth",
-        maxDepth,
-      });
-      if (currentInvocationId) {
-        transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "a2a-skipped", {
-          from: agent,
-          to: target,
-          reason: "max_depth",
-          maxDepth,
-        });
-        durableRecorder?.appendInvocationEvent(currentInvocationId, "a2a-skipped", {
-          from: agent,
-          to: target,
-          reason: "max_depth",
-          maxDepth,
-        });
-      }
-      continue;
-    }
-    // Re-entry allowed (same agent may run again after a teammate, e.g. fix loop).
-    thread.worklist.push(target);
-    thread.a2aCount += 1;
-    const reentry = thread.worklist.filter((id) => id === target).length > 1;
-    const routeText = `🔄 ${agent} → ${target}`;
-    if (appendToSession && thread.sessionsFile) {
-      appendToSession(
-        thread.sessionsFile,
-        thread.sessionId || threadId,
-        {
-          role: "system",
-          agent: "system",
-          content: routeText,
-          kind: "a2a-route",
-          from: agent,
-          to: target,
-          source: "callback",
-          reentry,
-        },
-        { allowCreate: false }
-      );
-    }
-    sendSse(thread.res, "a2a-route", { from: agent, to: target, reentry });
-    if (currentInvocationId) {
-      transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "a2a-route", {
-        from: agent,
-        to: target,
-        reentry,
-      });
-      durableRecorder?.appendInvocationEvent(currentInvocationId, "a2a-route", {
-        from: agent,
-        to: target,
-        reentry,
-      });
-    }
-  }
+  // Wave H2/H3: same finalize path as chat turn-end (policy + capture + enqueue).
+  const agentLabels = Object.fromEntries(
+    Object.entries(AGENTS).map(([id, config]) => [id, config.label || id])
+  );
+  const routeInvocationId = currentInvocationId || invocationId;
+  finalizeA2ARoutes({
+    text: content,
+    fromAgent: agent,
+    threadId: thread.sessionId || threadId,
+    sessionId: thread.sessionId || threadId,
+    invocationId: routeInvocationId,
+    windowId: typeof thread.windowId === "string" ? thread.windowId : null,
+    useWorktree: Boolean(thread.useWorktree),
+    worklist: thread.worklist,
+    a2aCount: thread.a2aCount || 0,
+    maxDepth: getMaxA2ADepth(),
+    memoryCapture,
+    transcript,
+    durableRecorder,
+    sendSse: (event, payload) => sendSse(thread.res, event, payload),
+    appendToSession,
+    sessionsFile: thread.sessionsFile,
+    agentLabels,
+    source: "callback",
+    controller: thread.controller,
+    a2aState: thread,
+  });
 
   return true;
 }
