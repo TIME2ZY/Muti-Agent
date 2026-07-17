@@ -56,6 +56,18 @@ test("renderCollaborationRules roster lists teammates from catalog", () => {
   assert.match(text, /Grok/);
 });
 
+test("renderCollaborationRules compact mode is short for A2A turns", () => {
+  const full = renderCollaborationRules("grok", AGENTS);
+  const compact = renderCollaborationRules("grok", AGENTS, { compact: true });
+  assert.match(compact, /<!-- Collaboration Rules -->/);
+  assert.match(compact, /A2A 精简/);
+  assert.match(compact, /handoff/);
+  assert.match(compact, /subagent/i);
+  assert.doesNotMatch(compact, /传球三选一/);
+  assert.ok(compact.length < full.length);
+  assert.ok(compact.length < 800);
+});
+
 test("renderCollaborationRules accepts injected fake agents", () => {
   const fake = {
     alpha: { label: "Alpha", description: "First mate" },

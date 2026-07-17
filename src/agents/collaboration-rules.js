@@ -53,14 +53,29 @@ function pickExampleTarget(currentAgentId, agents) {
  *
  * @param {string} currentAgentId
  * @param {Record<string, { id?: string, label?: string, description?: string }>} [agents]
+ * @param {{ compact?: boolean }} [options] Wave H1: A2A turns use compact to avoid skill bloat
  * @returns {string}
  */
-function renderCollaborationRules(currentAgentId, agents = AGENTS) {
+function renderCollaborationRules(currentAgentId, agents = AGENTS, options = {}) {
   const selfId = String(currentAgentId || "").trim();
   const selfConfig = agents && selfId ? agents[selfId] : null;
   const selfLabel = selfConfig?.label || selfId || "（当前）";
   const example = pickExampleTarget(selfId, agents);
   const roster = buildRosterTable(agents);
+
+  if (options && options.compact) {
+    // Keep the same HTML comment markers as full mode so clients/tests can
+    // locate the block; body is shortened for A2A token budget (Wave H1).
+    return `<!-- Collaboration Rules -->
+## 协作铁律（A2A 精简）
+
+- 跨 Agent **只用**行首 \`@队友\` + 共用 \`\`\`handoff\`\`\`；禁止 CLI 内嵌 subagent / Task / Agent / spawn
+- 禁止 @ 自己（你是 ${selfLabel} / ${selfId || "unknown"}）
+- 入站：优先 Structured Handoff + Active Memories；缺项先 session-search，勿表演性附和
+- 出站示例目标：@${example.label}
+
+<!-- /Collaboration Rules -->`;
+  }
 
   return `<!-- Collaboration Rules -->
 ## 协作铁律（平台纪律）

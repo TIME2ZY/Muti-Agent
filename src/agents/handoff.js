@@ -16,6 +16,14 @@ const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
 const DEFAULT_APPENDIX_CHARS = 5000;
 /** No handoff fence: even more of the prior text is the only payload. */
 const DEGRADED_APPENDIX_CHARS = 8000;
+/** Wave H1 controlled appendix budgets (handoff-design §6.3). */
+const APPENDIX_OK_FULL = 2000;
+const APPENDIX_OK_THIN = 4000;
+const APPENDIX_OK_DEFAULT = 3000;
+const APPENDIX_DEGRADED = 5000;
+const APPENDIX_EMPTY = 7000;
+/** User prompt window inside Receive Bundle. */
+const USER_PROMPT_MAX_CHARS = 2000;
 
 /** Prefer keeping windows that contain these review/handoff anchors. */
 const APPENDIX_ANCHORS = [
@@ -447,6 +455,11 @@ function shouldInjectReceivingReview(opts = {}) {
     .toLowerCase();
   if (REVIEWER_AGENT_IDS.has(from)) return true;
 
+  const quality = opts.quality || null;
+  if (quality && (quality.intent === "fix" || quality.degraded || quality.emptyPacket)) {
+    return true;
+  }
+
   const handoff = opts.handoff || null;
   const blob = [
     handoff && handoff.what,
@@ -462,6 +475,120 @@ function shouldInjectReceivingReview(opts = {}) {
   return /request-changes|approve-with-nits|\bp0\b|\bp1\b|review\s*意见|修改意见|请修|fix these|blocking/.test(
     blob
   );
+}
+
+/**
+ * Controlled appendix budget for Receive Bundle (Wave H1).
+ * @param {HandoffQuality | null | undefined} quality
+ * @param {Handoff | null | undefined} handoff
+ * @param {{ hasMemoryCard?: boolean }} [options]
+ * @returns {number}
+ */
+function resolveAppendixChars(quality, handoff, options = {}) {
+  let limit;
+  if (!quality || quality.emptyPacket || !quality.hasBlock) {
+    limit = APPENDIX_EMPTY;
+  } else if (quality.degraded || !quality.ok) {
+    limit = APPENDIX_DEGRADED;
+  } else {
+    const hasFiles = Array.isArray(handoff?.files) && handoff.files.length > 0;
+    const hasNext = hasValue(handoff?.next_action);
+    if (hasFiles && hasNext) {
+      limit = APPENDIX_OK_FULL;
+    } else if (quality.intent === "review" || quality.intent === "fix") {
+      limit = APPENDIX_OK_THIN;
+    } else {
+      limit = APPENDIX_OK_DEFAULT;
+    }
+  }
+  if (options.hasMemoryCard) {
+    limit = Math.max(1000, Math.floor(limit * 0.7));
+  }
+  return limit;
+}
+
+function truncateUserPrompt(value, maxChars = USER_PROMPT_MAX_CHARS) {
+  const text = typeof value === "string" ? value : "";
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
+/**
+ * Policy / quality banner for the receiving agent (Wave H1).
+ * @param {HandoffQuality | null | undefined} quality
+ * @returns {string}
+ */
+function renderPolicyBanner(quality) {
+  if (!quality) return "";
+  const lines = [];
+  if (quality.emptyPacket || !quality.hasBlock) {
+    lines.push(
+      "⚠ emptyPacket：无标准 handoff。请先 session-search / 读 Active Memories，再执行破坏性操作。"
+    );
+  } else if (quality.degraded || !quality.ok) {
+    lines.push(
+      `⚠ degraded：交接包不完整（缺失: ${
+        (quality.missing && quality.missing.join(", ")) || "—"
+      }）。先补上下文再改代码。`
+    );
+  }
+  if (quality.toMismatch) {
+    lines.push("⚠ toMismatch：路由目标以行首 @（to_routed）为准，忽略冲突的 packet.to。");
+  }
+  if (quality.policy === "request_repair") {
+    lines.push("⛔ request_repair：本轮未入队；请发送方补全 handoff 后再 @。");
+  } else if (quality.policy === "allow_degraded") {
+    lines.push("ℹ policy=allow_degraded：已放行，但交接质量不足。");
+  }
+  if (lines.length === 0) return "";
+  return ["<!-- Policy Banner -->", ...lines, "<!-- /Policy Banner -->"].join("\n");
+}
+
+/**
+ * Assemble A2A Receive Bundle middle section (identity/collab/callback stay outside).
+ *
+ * Order: Memory Card → Policy Banner → Structured Handoff Task → outbound A2A card.
+ *
+ * @param {object} opts
+ * @returns {{ text: string, appendixChars: number, hasMemoryCard: boolean, policyBanner: string }}
+ */
+function renderReceiveBundle(opts = {}) {
+  const memoryCard = typeof opts.memoryCard === "string" ? opts.memoryCard.trim() : "";
+  const hasMemoryCard = Boolean(memoryCard) && !/Active Memories\s*\(0\)/.test(memoryCard);
+  const handoff = opts.handoff || null;
+  const quality =
+    opts.quality ||
+    evaluateHandoff(handoff, {
+      routedTo: opts.toAgentId,
+      fromAgentId: opts.fromAgent,
+      toAgentId: opts.toAgentId,
+    });
+  const appendixChars =
+    opts.appendixChars !== undefined
+      ? opts.appendixChars
+      : resolveAppendixChars(quality, handoff, { hasMemoryCard });
+  const policyBanner = renderPolicyBanner(quality);
+  const task = renderHandoffTask({
+    ...opts,
+    handoff,
+    quality,
+    appendixChars,
+    userPrompt: truncateUserPrompt(opts.userPrompt || ""),
+  });
+  const parts = ["<!-- Receive Bundle -->"];
+  if (memoryCard) parts.push(memoryCard);
+  if (policyBanner) parts.push(policyBanner);
+  parts.push(task);
+  if (opts.includeOutboundCard !== false) {
+    parts.push(renderA2AHandoffCard());
+  }
+  parts.push("<!-- /Receive Bundle -->");
+  return {
+    text: parts.filter(Boolean).join("\n\n"),
+    appendixChars,
+    hasMemoryCard,
+    policyBanner,
+  };
 }
 
 /**
@@ -488,7 +615,6 @@ function renderHandoffTask(opts) {
     toLabel = "",
     fromContent = "",
     userPrompt = "",
-    appendixChars = DEFAULT_APPENDIX_CHARS,
   } = opts;
   const quality =
     opts.quality ||
@@ -497,6 +623,12 @@ function renderHandoffTask(opts) {
       fromAgentId: fromAgent,
       toAgentId,
     });
+  const hasMemoryCard = Boolean(opts.hasMemoryCard);
+  const appendixChars =
+    opts.appendixChars !== undefined
+      ? opts.appendixChars
+      : resolveAppendixChars(quality, handoff, { hasMemoryCard });
+  const userPromptWindow = truncateUserPrompt(userPrompt);
 
   const label = fromLabel || fromAgent || "previous agent";
   const routed = String(toAgentId || "").trim();
@@ -509,13 +641,10 @@ function renderHandoffTask(opts) {
       toAgentId: routed,
       toLabel: routedLabel,
       fromContent,
-      userPrompt,
+      userPrompt: userPromptWindow,
       missing: quality.missing,
       repairHints: quality.repairHints,
-      appendixChars:
-        appendixChars === DEFAULT_APPENDIX_CHARS
-          ? DEGRADED_APPENDIX_CHARS
-          : Math.max(appendixChars, DEGRADED_APPENDIX_CHARS),
+      appendixChars: Math.max(appendixChars, APPENDIX_EMPTY),
     });
   }
 
@@ -557,12 +686,12 @@ function renderHandoffTask(opts) {
   }
   lines.push("<!-- /Structured Handoff -->", "");
 
-  lines.push("=== 用户原始请求 ===", userPrompt || "(无)", "");
+  lines.push("=== 用户原始请求 ===", userPromptWindow || "(无)", "");
 
   const appendix = selectAppendix(fromContent, appendixChars);
   if (appendix) {
     lines.push(
-      `=== ${label} 原文附录（截断） ===`,
+      `=== ${label} 原文附录（截断，budget=${appendixChars}） ===`,
       appendix,
       "",
       "请优先依据 Structured Handoff 执行；附录仅供补充。"
@@ -590,7 +719,7 @@ function renderDegradedHandoff(opts) {
     appendixChars = DEGRADED_APPENDIX_CHARS,
   } = opts;
   const label = fromLabel || fromAgent || "previous agent";
-  const prevBlock = selectAppendix(fromContent, Math.max(appendixChars, DEGRADED_APPENDIX_CHARS));
+  const prevBlock = selectAppendix(fromContent, Math.max(appendixChars, APPENDIX_EMPTY));
   const routed = String(toAgentId || "").trim();
   const lines = [
     `[任务交接：由 ${label} 转交给你]`,
@@ -667,6 +796,12 @@ module.exports = {
   RECOMMENDED_FIELDS,
   DEFAULT_APPENDIX_CHARS,
   DEGRADED_APPENDIX_CHARS,
+  APPENDIX_OK_FULL,
+  APPENDIX_OK_THIN,
+  APPENDIX_OK_DEFAULT,
+  APPENDIX_DEGRADED,
+  APPENDIX_EMPTY,
+  USER_PROMPT_MAX_CHARS,
   IMPLEMENTER_AGENT_IDS,
   REVIEWER_AGENT_IDS,
   parseHandoffBlocks,
@@ -676,6 +811,10 @@ module.exports = {
   evaluateHandoff,
   computeToMismatch,
   inferIntent,
+  resolveAppendixChars,
+  truncateUserPrompt,
+  renderPolicyBanner,
+  renderReceiveBundle,
   renderHandoffTask,
   renderDegradedHandoff,
   renderA2AHandoffCard,

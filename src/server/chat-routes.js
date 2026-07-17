@@ -377,7 +377,19 @@ function createChatRoutes({
             prev.handoffQualityByTarget && prev.handoffQualityByTarget[agent]
               ? prev.handoffQualityByTarget[agent]
               : prev.handoffQuality || agentHandoff.evaluateHandoff(handoff);
-          const handoffTask = agentHandoff.renderHandoffTask({
+          // Wave H1 Receive Bundle: memory card + policy banner + structured task + outbound card.
+          const a2aMemoryCard = await sessionBootstrap.buildActiveMemoryCard({
+            threadId: sessionId,
+            prompt: [rawPrompt, handoff?.what, handoff?.next_action, prev.content]
+              .filter(Boolean)
+              .join("\n"),
+            retrieveSource: recallService || null,
+            memorySource: memoryService || null,
+            budgetChars: sessionBootstrap.resolveA2AMemoryBudget
+              ? sessionBootstrap.resolveA2AMemoryBudget()
+              : undefined,
+          });
+          const receiveBundle = agentHandoff.renderReceiveBundle({
             handoff,
             quality,
             fromAgent: prev.agent,
@@ -386,48 +398,40 @@ function createChatRoutes({
             toLabel: agentConfig.label || agent,
             fromContent: prev.content,
             userPrompt: rawPrompt,
+            memoryCard: a2aMemoryCard,
+            includeOutboundCard: true,
           });
-          // A2A: compact handoff card (not full always-on a2a-handoff body) +
-          // optional receiving-review when an implementer is fixing after review.
           const a2aSkillNames = [];
           if (
             agentHandoff.shouldInjectReceivingReview({
               targetAgentId: agent,
               fromAgentId: prev.agent,
               handoff,
-              text: handoffTask,
+              quality,
+              text: receiveBundle.text,
             })
           ) {
             a2aSkillNames.push("receiving-review");
           }
-          const a2aSkills = augmentPrompt(handoffTask, useWorktree, {
+          // Bundle already includes handoff task + compact outbound card; skills wrap it.
+          const a2aSkills = augmentPrompt(receiveBundle.text, useWorktree, {
             skillNames: a2aSkillNames,
           });
-          const compactCard = agentHandoff.renderA2AHandoffCard();
-          const a2aMemoryCard = await sessionBootstrap.buildActiveMemoryCard({
-            threadId: sessionId,
-            prompt: [rawPrompt, handoffTask].filter(Boolean).join("\n"),
-            retrieveSource: recallService || null,
-            memorySource: memoryService || null,
-            budgetChars: sessionBootstrap.resolveA2AMemoryBudget
-              ? sessionBootstrap.resolveA2AMemoryBudget()
-              : undefined,
-          });
-          agentPrompt = [compactCard, a2aMemoryCard, a2aSkills.augmentedPrompt]
-            .filter(Boolean)
-            .join("\n\n");
-          turnSkillNames = ["a2a-handoff-card", ...a2aSkills.skillNames];
+          agentPrompt = a2aSkills.augmentedPrompt;
+          turnSkillNames = ["receive-bundle", ...a2aSkills.skillNames];
         }
 
         // Prompt layout (top → bottom):
         //   1. Agent identity (every turn, including A2A)
-        //   2. Collaboration rules (every turn: soft ban nested subagents)
+        //   2. Collaboration rules (every turn: soft ban nested subagents; A2A uses compact)
         //   3. Session bootstrap (first turn only: coords + digest + recall)
         //   4. Light session header on later turns (correct agent label)
-        //   5. Task body (user/skills or compact card + handoff [+ receiving-review])
+        //   5. Task body (user/skills or Receive Bundle [+ receiving-review])
         //   6. Callback instructions
         const identityBlock = agentIdentity.renderIdentityBlock(agent, agentConfig);
-        const collaborationBlock = renderCollaborationRules(agent, AGENTS);
+        const collaborationBlock = renderCollaborationRules(agent, AGENTS, {
+          compact: i > 0,
+        });
         const promptParts = [identityBlock, collaborationBlock];
         if (i === 0) {
           promptParts.push(bootstrapPacket, augmentedPrompt);
