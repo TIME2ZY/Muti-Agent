@@ -160,22 +160,78 @@ test("evaluateHandoff null is fully degraded", () => {
   const q = evaluateHandoff(null);
   assert.equal(q.hasBlock, false);
   assert.equal(q.degraded, true);
+  assert.equal(q.emptyPacket, true);
+  assert.equal(q.toMismatch, false);
+  assert.ok(Array.isArray(q.repairHints) && q.repairHints.length > 0);
   assert.deepEqual(q.missing, REQUIRED_FIELDS.slice());
   assert.equal(q.score, 0);
 });
 
+test("evaluateHandoff marks toMismatch without failing field completeness", () => {
+  const h = parseHandoffBody(
+    "to: gemini\nwhat: handoff body\nwhy: route check\nnext_action: continue"
+  );
+  const q = evaluateHandoff(h, { routedTo: "opencode" });
+  assert.equal(q.ok, true);
+  assert.equal(q.degraded, false);
+  assert.equal(q.toMismatch, true);
+  assert.ok(q.repairHints.some((hint) => /@/.test(hint) || /路由/.test(hint)));
+});
+
+test("extractPrimaryHandoffMatch refuses shared packs under multi-target without to match", () => {
+  const text = [
+    "```handoff",
+    "to: opencode",
+    "what: only for opencode",
+    "why: focused",
+    "next_action: implement",
+    "```",
+  ].join("\n");
+  const forOpen = handoff.extractPrimaryHandoffMatch(text, {
+    routedTo: "opencode",
+    mentionCount: 2,
+  });
+  const forGrok = handoff.extractPrimaryHandoffMatch(text, {
+    routedTo: "grok",
+    mentionCount: 2,
+  });
+  assert.equal(forOpen.handoff.what, "only for opencode");
+  assert.equal(forGrok.handoff, null);
+  assert.equal(forGrok.blockIndex, null);
+});
+
+test("extractPrimaryHandoffMatch single-target may use unbound last block", () => {
+  const text = [
+    "```handoff",
+    "what: unbound pack",
+    "why: single @ only",
+    "next_action: proceed",
+    "```",
+  ].join("\n");
+  const match = handoff.extractPrimaryHandoffMatch(text, {
+    routedTo: "gemini",
+    mentionCount: 1,
+  });
+  assert.equal(match.handoff.what, "unbound pack");
+  assert.equal(match.blockIndex, 0);
+});
+
 test("renderHandoffTask uses structured fields for complete handoff", () => {
   const h = extractPrimaryHandoff(FULL_BLOCK);
-  const q = evaluateHandoff(h);
+  const q = evaluateHandoff(h, { routedTo: "opencode" });
   const text = renderHandoffTask({
     handoff: h,
     quality: q,
-    fromagent: "grok",
+    fromAgent: "grok",
     fromLabel: "Grok",
+    toAgentId: "opencode",
+    toLabel: "OpenCode",
     fromContent: "long narrative should be appendix only " + "x".repeat(100),
     userPrompt: "实现登录",
   });
   assert.match(text, /Structured Handoff/);
+  assert.match(text, /to_routed: opencode/);
+  assert.match(text, /to_packet: opencode/);
   assert.match(text, /what: 新增 POST \/api\/login/);
   assert.match(text, /why: 多实例不能用 session/);
   assert.match(text, /next_action: 审查 JWT 与哈希/);
@@ -183,6 +239,25 @@ test("renderHandoffTask uses structured fields for complete handoff", () => {
   assert.match(text, /实现登录/);
   assert.match(text, /交接包完整度: ok/);
   assert.doesNotMatch(text, /未提供标准/);
+  assert.doesNotMatch(text, /以 to_routed 为准/);
+});
+
+test("renderHandoffTask surfaces route authority when packet.to mismatches @", () => {
+  const h = parseHandoffBody(
+    "to: gemini\nwhat: work\nwhy: mismatch demo\nnext_action: continue"
+  );
+  const text = renderHandoffTask({
+    handoff: h,
+    fromAgent: "codex",
+    fromLabel: "Codex",
+    toAgentId: "opencode",
+    toLabel: "OpenCode",
+    fromContent: "body",
+    userPrompt: "task",
+  });
+  assert.match(text, /to_routed: opencode/);
+  assert.match(text, /to_packet: gemini/);
+  assert.match(text, /路由目标以行首 @ 为准/);
 });
 
 test("renderHandoffTask marks incomplete packs degraded but still structured", () => {
@@ -204,10 +279,14 @@ test("renderHandoffTask falls back when no block", () => {
     handoff: null,
     fromAgent: "codex",
     fromLabel: "Codex",
+    toAgentId: "gemini",
+    toLabel: "Gemini",
     fromContent: "@Gemini\nplease plan",
     userPrompt: "start",
   });
   assert.match(text, /未提供标准/);
+  assert.match(text, /emptyPacket/);
+  assert.match(text, /to_routed: gemini/);
   assert.match(text, /please plan/);
   assert.match(text, /start/);
 });
@@ -225,12 +304,16 @@ test("renderDegradedHandoff includes missing list", () => {
 
 test("summarizeHandoff is compact for SSE", () => {
   const h = extractPrimaryHandoff(FULL_BLOCK);
-  const q = evaluateHandoff(h);
+  const q = evaluateHandoff(h, { routedTo: "opencode" });
   const s = summarizeHandoff(h, q);
   assert.equal(s.hasBlock, true);
   assert.equal(s.ok, true);
+  assert.equal(s.emptyPacket, false);
+  assert.equal(s.toMismatch, false);
   assert.equal(s.to, "opencode");
   assert.ok(s.next_action);
+  assert.ok(Array.isArray(s.repairHints));
+  assert.ok("policy" in s);
   assert.ok(!("raw" in s));
 });
 

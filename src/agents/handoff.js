@@ -57,6 +57,12 @@ const REVIEWER_AGENT_IDS = new Set(["opencode"]);
  * @property {string[]} missingRecommended
  * @property {number} score
  * @property {boolean} hasBlock
+ * @property {boolean} emptyPacket
+ * @property {boolean} toMismatch
+ * @property {string[]} repairHints
+ * @property {string[]} riskFlags
+ * @property {string|null} intent
+ * @property {string|null} [policy] Wave H2 placeholder (soft/allow/…); H0 leaves null
  */
 
 /**
@@ -185,7 +191,7 @@ function parseHandoffBody(body) {
  * Prefers the last block; if routedTo is set, prefers matching `to`.
  *
  * @param {string} text
- * @param {{ currentAgentId?: string, routedTo?: string }} [opts]
+ * @param {{ currentAgentId?: string, routedTo?: string, mentionCount?: number, multiTarget?: boolean }} [opts]
  * @returns {Handoff | null}
  */
 function extractPrimaryHandoff(text, opts = {}) {
@@ -194,8 +200,14 @@ function extractPrimaryHandoff(text, opts = {}) {
 
 /**
  * Pick the primary handoff and retain its parsed block index for stable capture keys.
+ *
+ * Per-target selection (Wave H0 / handoff-design §4.2–4.3):
+ * 1. Prefer last block whose `to` matches routedTo
+ * 2. If multi-@ and no match → null (do not silently share one pack as ok)
+ * 3. If single-@ and no match → last unbound (`to` empty) block, else last block
+ *
  * @param {string} text
- * @param {{ currentAgentId?: string, routedTo?: string }} [opts]
+ * @param {{ currentAgentId?: string, routedTo?: string, mentionCount?: number, multiTarget?: boolean }} [opts]
  * @returns {{ handoff: Handoff | null, blockIndex: number | null }}
  */
 function extractPrimaryHandoffMatch(text, opts = {}) {
@@ -203,16 +215,42 @@ function extractPrimaryHandoffMatch(text, opts = {}) {
   if (blocks.length === 0) return { handoff: null, blockIndex: null };
 
   const routedTo = opts.routedTo ? String(opts.routedTo).toLowerCase() : "";
+  const multiTarget = isMultiTarget(opts);
+
   if (routedTo) {
     for (let i = blocks.length - 1; i >= 0; i--) {
-      const to = normalizeTo(blocks[i].to);
-      if (to && (to === routedTo || to.includes(routedTo))) {
+      if (toMatchesRoute(blocks[i].to, routedTo)) {
+        return { handoff: blocks[i], blockIndex: i };
+      }
+    }
+    if (multiTarget) {
+      return { handoff: null, blockIndex: null };
+    }
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      if (!normalizeTo(blocks[i].to)) {
         return { handoff: blocks[i], blockIndex: i };
       }
     }
   }
 
   return { handoff: blocks[blocks.length - 1], blockIndex: blocks.length - 1 };
+}
+
+function isMultiTarget(opts = {}) {
+  if (opts.multiTarget === true) return true;
+  if (opts.multiTarget === false) return false;
+  const count = Number(opts.mentionCount);
+  return Number.isFinite(count) && count > 1;
+}
+
+function toMatchesRoute(packetTo, routedTo) {
+  const to = normalizeTo(packetTo);
+  const target = String(routedTo || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "");
+  if (!to || !target) return false;
+  return to === target || to.includes(target) || target.includes(to);
 }
 
 function normalizeTo(value) {
@@ -225,9 +263,13 @@ function normalizeTo(value) {
 /**
  * Evaluate completeness of a handoff (soft scoring).
  * @param {Handoff | null} handoff
+ * @param {{ routedTo?: string, riskFlags?: string[], intent?: string|null, policy?: string|null, fromAgentId?: string, toAgentId?: string, useWorktree?: boolean }} [opts]
  * @returns {HandoffQuality}
  */
-function evaluateHandoff(handoff) {
+function evaluateHandoff(handoff, opts = {}) {
+  const riskFlags = normalizeRiskFlags(opts.riskFlags);
+  if (opts.useWorktree && !riskFlags.includes("worktree")) riskFlags.push("worktree");
+
   if (!handoff) {
     return {
       ok: false,
@@ -236,6 +278,14 @@ function evaluateHandoff(handoff) {
       missingRecommended: RECOMMENDED_FIELDS.slice(),
       score: 0,
       hasBlock: false,
+      emptyPacket: true,
+      toMismatch: false,
+      repairHints: [
+        "缺少 ```handoff 块。请补充 to/what/why/next_action 后再用行首 @ 交接。",
+      ],
+      riskFlags,
+      intent: inferIntent(null, opts),
+      policy: opts.policy || null,
     };
   }
 
@@ -246,15 +296,75 @@ function evaluateHandoff(handoff) {
     (RECOMMENDED_FIELDS.length - missingRecommended.length) / RECOMMENDED_FIELDS.length;
   const score = Math.round((requiredScore * 0.75 + recommendedScore * 0.25) * 100) / 100;
   const ok = missing.length === 0;
+  const routedTo = opts.routedTo || opts.toAgentId || "";
+  const toMismatch = computeToMismatch(handoff, routedTo);
+  const repairHints = [];
+  if (missing.length > 0) {
+    repairHints.push(`补全必填字段: ${missing.join(", ")}`);
+  }
+  if (toMismatch) {
+    repairHints.push("packet.to 与行首 @ 路由目标不一致；接收侧以 @ 为准。");
+  }
+  if (missingRecommended.includes("to")) {
+    repairHints.push("建议填写 to: 与行首 @ 目标一致。");
+  }
 
   return {
     ok,
+    // Field completeness only; toMismatch is a separate routing signal (G3).
     degraded: !ok,
     missing,
     missingRecommended,
     score,
     hasBlock: true,
+    emptyPacket: false,
+    toMismatch,
+    repairHints,
+    riskFlags,
+    intent: opts.intent || inferIntent(handoff, opts),
+    policy: opts.policy || null,
   };
+}
+
+/**
+ * packet.to vs routed @ target. Missing `to` is incompleteness, not mismatch.
+ * @param {Handoff | null} handoff
+ * @param {string} [routedTo]
+ */
+function computeToMismatch(handoff, routedTo) {
+  if (!handoff || !routedTo) return false;
+  const to = normalizeTo(handoff.to);
+  if (!to) return false;
+  return !toMatchesRoute(handoff.to, routedTo);
+}
+
+/**
+ * Weak intent inference for quality metadata (Wave H0; H4 may promote to protocol).
+ * @param {Handoff | null} handoff
+ * @param {{ fromAgentId?: string, toAgentId?: string, routedTo?: string, useWorktree?: boolean, intent?: string|null }} [opts]
+ * @returns {string|null}
+ */
+function inferIntent(handoff, opts = {}) {
+  if (opts.intent) return String(opts.intent);
+  const from = String(opts.fromAgentId || "")
+    .trim()
+    .toLowerCase();
+  const to = String(opts.toAgentId || opts.routedTo || "")
+    .trim()
+    .toLowerCase();
+  if (REVIEWER_AGENT_IDS.has(from) && IMPLEMENTER_AGENT_IDS.has(to)) return "fix";
+  if (REVIEWER_AGENT_IDS.has(to)) return "review";
+  if (opts.useWorktree) return "implement";
+  if (handoff && typeof handoff.what === "string") {
+    const what = handoff.what.toLowerCase();
+    if (/request-changes|approve-with-nits|\bp0\b|评审|review/.test(what)) return "review";
+  }
+  return null;
+}
+
+function normalizeRiskFlags(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((flag) => typeof flag === "string" && flag).slice();
 }
 
 function hasValue(v) {
@@ -362,6 +472,8 @@ function shouldInjectReceivingReview(opts = {}) {
  * @param {HandoffQuality} [opts.quality]
  * @param {string} opts.fromAgent
  * @param {string} [opts.fromLabel]
+ * @param {string} [opts.toAgentId] routed @ target (authoritative)
+ * @param {string} [opts.toLabel]
  * @param {string} opts.fromContent
  * @param {string} opts.userPrompt
  * @param {number} [opts.appendixChars]
@@ -370,23 +482,36 @@ function shouldInjectReceivingReview(opts = {}) {
 function renderHandoffTask(opts) {
   const {
     handoff,
-    quality = evaluateHandoff(handoff),
     fromAgent,
     fromLabel,
+    toAgentId = "",
+    toLabel = "",
     fromContent = "",
     userPrompt = "",
     appendixChars = DEFAULT_APPENDIX_CHARS,
   } = opts;
+  const quality =
+    opts.quality ||
+    evaluateHandoff(handoff, {
+      routedTo: toAgentId,
+      fromAgentId: fromAgent,
+      toAgentId,
+    });
 
   const label = fromLabel || fromAgent || "previous agent";
+  const routed = String(toAgentId || "").trim();
+  const routedLabel = toLabel || routed;
 
   if (!handoff || !quality.hasBlock) {
     return renderDegradedHandoff({
       fromAgent,
       fromLabel: label,
+      toAgentId: routed,
+      toLabel: routedLabel,
       fromContent,
       userPrompt,
       missing: quality.missing,
+      repairHints: quality.repairHints,
       appendixChars:
         appendixChars === DEFAULT_APPENDIX_CHARS
           ? DEGRADED_APPENDIX_CHARS
@@ -396,7 +521,19 @@ function renderHandoffTask(opts) {
 
   const lines = [`[任务交接：由 ${label} 转交给你]`, "", "<!-- Structured Handoff -->"];
 
-  if (quality.degraded) {
+  if (routed) {
+    lines.push(`to_routed: ${routed}${routedLabel && routedLabel !== routed ? ` (${routedLabel})` : ""}`);
+  }
+  if (hasValue(handoff.to)) {
+    lines.push(`to_packet: ${handoff.to}`);
+  }
+  if (quality.toMismatch || (routed && hasValue(handoff.to) && computeToMismatch(handoff, routed))) {
+    lines.push("⚠ 路由目标以行首 @ 为准；packet.to 与路由不一致时，以 to_routed 为准。");
+  }
+
+  if (quality.emptyPacket) {
+    lines.push("交接包完整度: emptyPacket", "");
+  } else if (quality.degraded || !quality.ok) {
     lines.push(
       `⚠ 交接包不完整（缺失必填: ${quality.missing.join(", ") || "—"}）。请先补全上下文，谨慎执行破坏性操作。`,
       ""
@@ -405,15 +542,19 @@ function renderHandoffTask(opts) {
     lines.push("交接包完整度: ok", "");
   }
 
-  pushField(lines, "to", handoff.to);
+  if (quality.intent) lines.push(`intent: ${quality.intent}`);
   pushField(lines, "goal", handoff.goal);
+  pushField(lines, "next_action", handoff.next_action);
   pushField(lines, "what", handoff.what);
   pushField(lines, "why", handoff.why);
   pushField(lines, "tradeoff", handoff.tradeoff);
-  pushField(lines, "next_action", handoff.next_action);
-  pushList(lines, "open_questions", handoff.open_questions);
   pushList(lines, "files", handoff.files);
   pushList(lines, "evidence", handoff.evidence);
+  pushList(lines, "open_questions", handoff.open_questions);
+  if (Array.isArray(quality.repairHints) && quality.repairHints.length > 0) {
+    lines.push("repair_hints:");
+    for (const hint of quality.repairHints) lines.push(`  - ${hint}`);
+  }
   lines.push("<!-- /Structured Handoff -->", "");
 
   lines.push("=== 用户原始请求 ===", userPrompt || "(无)", "");
@@ -440,20 +581,38 @@ function renderDegradedHandoff(opts) {
   const {
     fromAgent,
     fromLabel,
+    toAgentId = "",
+    toLabel = "",
     fromContent = "",
     userPrompt = "",
     missing = REQUIRED_FIELDS.slice(),
+    repairHints = [],
     appendixChars = DEGRADED_APPENDIX_CHARS,
   } = opts;
   const label = fromLabel || fromAgent || "previous agent";
   const prevBlock = selectAppendix(fromContent, Math.max(appendixChars, DEGRADED_APPENDIX_CHARS));
-
-  return [
+  const routed = String(toAgentId || "").trim();
+  const lines = [
     `[任务交接：由 ${label} 转交给你]`,
     "",
     "⚠ 上一位 Agent 未提供标准 ```handoff 块。以下信息可能不完整。",
+    `交接包完整度: emptyPacket`,
+  ];
+  if (routed) {
+    lines.push(
+      `to_routed: ${routed}${toLabel && toLabel !== routed ? ` (${toLabel})` : ""}`,
+      "⚠ 路由目标以行首 @ 为准。"
+    );
+  }
+  lines.push(
     `缺失: ${missing.join(", ") || "what, why, next_action"}`,
-    "请先用 session-search / 读上下文补全，不要凭猜测执行破坏性操作。",
+    "请先用 session-search / 读 Active Memories 补全，不要凭猜测执行破坏性操作。"
+  );
+  if (Array.isArray(repairHints) && repairHints.length > 0) {
+    lines.push("repair_hints:");
+    for (const hint of repairHints) lines.push(`  - ${hint}`);
+  }
+  lines.push(
     "",
     `=== ${label} 的完整分析 ===`,
     prevBlock,
@@ -461,8 +620,9 @@ function renderDegradedHandoff(opts) {
     "=== 用户原始请求 ===",
     userPrompt || "(无)",
     "",
-    "请根据上述上下文继续执行任务。",
-  ].join("\n");
+    "请根据上述上下文继续执行任务。"
+  );
+  return lines.join("\n");
 }
 
 function pushField(lines, key, value) {
@@ -490,6 +650,13 @@ function summarizeHandoff(handoff, quality) {
     degraded: quality.degraded,
     score: quality.score,
     missing: quality.missing.slice(),
+    emptyPacket: Boolean(quality.emptyPacket),
+    toMismatch: Boolean(quality.toMismatch),
+    repairHints: Array.isArray(quality.repairHints) ? quality.repairHints.slice() : [],
+    riskFlags: Array.isArray(quality.riskFlags) ? quality.riskFlags.slice() : [],
+    intent: quality.intent || null,
+    // Wave H2 will fill real policy decisions; H0 exposes the slot for observability.
+    policy: quality.policy || null,
     to: handoff && handoff.to ? String(handoff.to) : null,
     next_action: handoff && handoff.next_action ? String(handoff.next_action).slice(0, 200) : null,
   };
@@ -507,6 +674,8 @@ module.exports = {
   extractPrimaryHandoff,
   extractPrimaryHandoffMatch,
   evaluateHandoff,
+  computeToMismatch,
+  inferIntent,
   renderHandoffTask,
   renderDegradedHandoff,
   renderA2AHandoffCard,
@@ -514,4 +683,5 @@ module.exports = {
   shouldInjectReceivingReview,
   summarizeHandoff,
   normalizeTo,
+  toMatchesRoute,
 };

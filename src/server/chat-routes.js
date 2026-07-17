@@ -382,6 +382,8 @@ function createChatRoutes({
             quality,
             fromAgent: prev.agent,
             fromLabel: prevLabel,
+            toAgentId: agent,
+            toLabel: agentConfig.label || agent,
             fromContent: prev.content,
             userPrompt: rawPrompt,
           });
@@ -643,21 +645,20 @@ function createChatRoutes({
           const handoffMatch = agentHandoff.extractPrimaryHandoffMatch(assistantContent, {
             currentAgentId: agent,
             routedTo: m,
+            mentionCount: mentions.length,
           });
           const targetHandoff = handoffMatch.handoff;
-          const targetQuality = agentHandoff.evaluateHandoff(targetHandoff);
+          const targetQuality = agentHandoff.evaluateHandoff(targetHandoff, {
+            routedTo: m,
+            toAgentId: m,
+            fromAgentId: agent,
+            useWorktree: Boolean(useWorktree),
+            riskFlags: mentions.length > 1 ? ["multi_target"] : [],
+          });
           handoffByTarget[m] = targetHandoff;
           handoffQualityByTarget[m] = targetQuality;
 
           const summary = agentHandoff.summarizeHandoff(targetHandoff, targetQuality);
-          if (targetHandoff && targetHandoff.to) {
-            const toNorm = agentHandoff.normalizeTo(targetHandoff.to);
-            const targetNorm = String(m).toLowerCase();
-            const targetLabel = (AGENTS[m]?.label || "").toLowerCase();
-            if (toNorm && toNorm !== targetNorm && toNorm !== targetLabel) {
-              summary.toMismatch = true;
-            }
-          }
 
           // Route target `m` wins over handoff.to (which may be missing/mismatched).
           transcript.appendEvent(sessionId, invocationId, "handoff", {

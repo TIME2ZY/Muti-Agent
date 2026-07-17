@@ -178,8 +178,14 @@ function postMessage(
     const handoffMatch = agentHandoff.extractPrimaryHandoffMatch(content, {
       currentAgentId: agent,
       routedTo: target,
+      mentionCount: mentions.length,
     });
-    const handoffQuality = agentHandoff.evaluateHandoff(handoffMatch.handoff);
+    const handoffQuality = agentHandoff.evaluateHandoff(handoffMatch.handoff, {
+      routedTo: target,
+      toAgentId: target,
+      fromAgentId: agent,
+      riskFlags: mentions.length > 1 ? ["multi_target"] : [],
+    });
     // Capture before routing decisions: max_depth soft-skips enqueue only.
     const capture = memoryCapture?.captureHandoff({
       threadId: thread.sessionId || threadId,
