@@ -88,6 +88,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
    * Empty / weak query → recency-only memory hits (no full evidence scan).
    */
   async function searchSession(threadId, query, options = {}) {
+    const started = Date.now();
     const limit = Math.max(1, Math.min(Number(options.limit) || 20, 200));
     const includeRetired = Boolean(options.includeRetired);
     const includeThinking =
@@ -99,71 +100,114 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     const terms = extractSearchTerms(rawQuery, { maxChars: 200, maxTerms: 8 });
     const searchQuery = clampSearchQuery(rawQuery, 200);
     const weak = !searchQuery || isWeakQuery(terms, rawQuery);
+    let source = "sqlite";
 
+    let result;
     if (weak) {
       const recencyHits = listRecencyHits(threadId, {
         limit,
         layers,
         includeRetired,
       });
-      return finalizeSearchResult(recencyHits, {
+      source = "recency";
+      result = finalizeSearchResult(recencyHits, {
         query: rawQuery,
         limit,
         weakQuery: true,
       });
-    }
-
-    const sqliteHits = trySqlite("search transcript", () => {
-      if (!storage.recall) return [];
-      return searchSqliteLayers({
-        threadId,
-        query: searchQuery,
-        terms,
-        limit,
-        layers,
-        includeRetired,
-        includeThinking,
-        memoryQuota: options.memoryQuota,
-        messageQuota: options.messageQuota,
+    } else {
+      const sqliteHits = trySqlite("search transcript", () => {
+        if (!storage.recall) return [];
+        return searchSqliteLayers({
+          threadId,
+          query: searchQuery,
+          terms,
+          limit,
+          layers,
+          includeRetired,
+          includeThinking,
+          memoryQuota: options.memoryQuota,
+          messageQuota: options.messageQuota,
+        });
       });
-    });
 
-    // With a healthy SQLite index, do not fall back to full-file scans (R0 / R8).
-    if (sqliteHits !== undefined && mode !== "files") {
-      return finalizeSearchResult(sqliteHits.slice(0, limit), {
-        query: searchQuery,
-        limit,
-        weakQuery: false,
-      });
-    }
-
-    const fileHits = await tryFile(
-      "search transcript",
-      () => transcript.searchTranscript(threadId, searchQuery, { limit }),
-      []
-    );
-    if (sqliteHits === undefined) {
-      return finalizeSearchResult(
-        fileHits.map((hit) => enrichFileHit(hit, terms)).slice(0, limit),
-        { query: searchQuery, limit, weakQuery: false }
-      );
-    }
-
-    // mode === "files": merge lightly but still prefer layered sqlite order.
-    const merged = [];
-    const seen = new Set();
-    const fileHasUserPrompt = fileHits.some((hit) => hit.invocationId === "_user_prompt");
-    for (const hit of [...sqliteHits, ...fileHits.map((item) => enrichFileHit(item, terms))]) {
-      if (fileHasUserPrompt && hit.sourceKind === "message" && hit.kind === "message.user") {
-        continue;
+      // With a healthy SQLite index, do not fall back to full-file scans (R0 / R8).
+      if (sqliteHits !== undefined && mode !== "files") {
+        result = finalizeSearchResult(sqliteHits.slice(0, limit), {
+          query: searchQuery,
+          limit,
+          weakQuery: false,
+        });
+      } else {
+        const fileHits = await tryFile(
+          "search transcript",
+          () => transcript.searchTranscript(threadId, searchQuery, { limit }),
+          []
+        );
+        if (sqliteHits === undefined) {
+          source = "file";
+          result = finalizeSearchResult(
+            fileHits.map((hit) => enrichFileHit(hit, terms)).slice(0, limit),
+            { query: searchQuery, limit, weakQuery: false }
+          );
+        } else {
+          // mode === "files": merge lightly but still prefer layered sqlite order.
+          source = "mixed";
+          const merged = [];
+          const seen = new Set();
+          const fileHasUserPrompt = fileHits.some((hit) => hit.invocationId === "_user_prompt");
+          for (const hit of [
+            ...sqliteHits,
+            ...fileHits.map((item) => enrichFileHit(item, terms)),
+          ]) {
+            if (fileHasUserPrompt && hit.sourceKind === "message" && hit.kind === "message.user") {
+              continue;
+            }
+            const key = hitKey(hit);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(hit);
+            if (merged.length >= limit) break;
+          }
+          result = finalizeSearchResult(merged, { query: searchQuery, limit, weakQuery: false });
+        }
       }
-      const key = hitKey(hit);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      merged.push(hit);
-      if (merged.length >= limit) break;
     }
-    return finalizeSearchResult(merged, { query: searchQuery, limit, weakQuery: false });
+
+    logSearchMetrics({
+      threadId,
+      query: result.query,
+      terms,
+      weakQuery: result.weakQuery,
+      source,
+      mode,
+      limit,
+      hits: result.hits.length,
+      layers: result.layers,
+      truncated: result.truncated,
+      ms: Date.now() - started,
+    });
+    return result;
+  }
+
+  function logSearchMetrics(metrics) {
+    const line =
+      `[recall-search] thread=${metrics.threadId}` +
+      ` qChars=${String(metrics.query || "").length}` +
+      ` terms=${(metrics.terms || []).length}` +
+      ` weak=${metrics.weakQuery ? 1 : 0}` +
+      ` source=${metrics.source}` +
+      ` mode=${metrics.mode}` +
+      ` hits=${metrics.hits}` +
+      ` memory=${metrics.layers?.memory || 0}` +
+      ` message=${metrics.layers?.message || 0}` +
+      ` evidence=${metrics.layers?.evidence || 0}` +
+      ` truncated=${metrics.truncated ? 1 : 0}` +
+      ` ms=${metrics.ms}`;
+    // Prefer info/log; never use error for successful search metrics (tests and
+    // ops dashboards treat error as failures).
+    if (typeof logger.info === "function") logger.info(line);
+    else if (typeof logger.log === "function") logger.log(line);
   }
 
   function listRecencyHits(threadId, { limit, layers, includeRetired }) {

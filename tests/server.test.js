@@ -2708,6 +2708,14 @@ test("frontend recall expand uses shared process panel path not flat dump as pri
   assert.match(recallJs, /emptyFallback:\s*true/);
   assert.match(recallJs, /recall-raw-events/);
   assert.match(recallJs, /rawEvents/);
+  // Wave R2: search hits grouped by memory/message/evidence layers.
+  assert.match(recallJs, /groupHitsByLayer/);
+  assert.match(recallJs, /recall-hit-section/);
+  assert.match(recallJs, /recall-hit-layer/);
+  assert.match(recallJs, /layer-\$\{layer\}/);
+  const recallCss = fs.readFileSync(path.join(__dirname, "../public/styles", "recall.css"), "utf8");
+  assert.match(recallCss, /\.recall-layer-chip/);
+  assert.match(recallCss, /\.recall-hit-layer\.layer-memory/);
   // Debug dump helper may remain for raw details, but must not be the only path.
   assert.match(recallJs, /function eventBodyText/);
   // Recall copy is locale-driven (N2).

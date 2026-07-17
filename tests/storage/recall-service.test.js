@@ -405,7 +405,23 @@ test("search filters retired memories by default", async () => {
 });
 
 test("searchSession empty query returns recency-only memory hits with layer stats", async () => {
-  const { storage, service } = createFixture();
+  const logs = [];
+  const storage = createStorage({ file: ":memory:" });
+  storage.threads.create({ id: "thread-1" });
+  const service = createRecallService({
+    storage,
+    transcript: {
+      listInvocationsWithMeta: async () => [],
+      searchTranscript: async () => [],
+      readInvocationPage: async () => ({ events: [], total: 0, from: 0, limit: 200 }),
+    },
+    logger: {
+      error() {},
+      info(message) {
+        logs.push(message);
+      },
+    },
+  });
   try {
     storage.memory.capture({
       id: "memory-recency",
@@ -422,6 +438,7 @@ test("searchSession empty query returns recency-only memory hits with layer stat
     assert.equal(result.layers.evidence, 0);
     assert.ok(result.hits.every((hit) => hit.layer === "memory"));
     assert.ok(result.hits.some((hit) => hit.sourceId === "memory-recency"));
+    assert.ok(logs.some((line) => line.includes("[recall-search]") && line.includes("source=recency")));
   } finally {
     storage.close();
   }

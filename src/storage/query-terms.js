@@ -96,14 +96,23 @@ function extractSearchTerms(input, options = {}) {
     bump(match, 7);
   }
   for (const run of text.match(/[\u4e00-\u9fff]{2,}/g) || []) {
-    if (run.length <= 6) {
+    // Prefer whole short compounds (2–4 chars) — common Chinese technical phrases.
+    if (run.length >= 2 && run.length <= 4) {
+      bump(run, 9 + run.length);
+    } else if (run.length <= 6) {
       bump(run, 6 + Math.min(run.length, 4));
     } else {
       bump(run.slice(0, 6), 5);
     }
-    if (run.length >= 4) {
-      for (let i = 0; i < run.length - 1 && i < 8; i++) {
+    // Bigrams + light trigrams for longer runs (non-vector CJK boost, Wave R2).
+    if (run.length >= 3) {
+      for (let i = 0; i < run.length - 1 && i < 10; i++) {
         bump(run.slice(i, i + 2), 3);
+      }
+    }
+    if (run.length >= 5) {
+      for (let i = 0; i < run.length - 2 && i < 8; i++) {
+        bump(run.slice(i, i + 3), 4);
       }
     }
   }

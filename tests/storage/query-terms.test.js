@@ -10,6 +10,12 @@ test("extractSearchTerms keeps identifiers and Chinese signal terms", () => {
   assert.ok(terms.some((term) => term.includes("过期")));
 });
 
+test("extractSearchTerms prefers short Chinese compounds and emits trigrams", () => {
+  const terms = extractSearchTerms("鉴权策略与过期时间配置");
+  assert.ok(terms.some((term) => term.includes("鉴权") || term === "鉴权策略"));
+  assert.ok(terms.some((term) => term.length >= 3 && /[\u4e00-\u9fff]/.test(term)));
+});
+
 test("isWeakQuery treats empty and continue-only prompts as weak", () => {
   assert.equal(isWeakQuery([], ""), true);
   assert.equal(isWeakQuery([], "继续"), true);
