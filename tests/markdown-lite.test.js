@@ -132,6 +132,45 @@ test("renderMd closed fences still win over unclosed trailing text", () => {
   assert.equal((html.match(/class="md-code /g) || []).length, 1);
 });
 
+test("normalizeMdNewlines converts CRLF and bare CR", () => {
+  assert.equal(markdownLite.normalizeMdNewlines("a\r\nb\rc"), "a\nb\nc");
+});
+
+test("renderMd continuous text keeps soft line breaks without stray CR", () => {
+  const html = markdownLite.renderMd("第一句。\r\n第二句。\r\n第三句。");
+  assert.match(html, /<p>第一句。<br>第二句。<br>第三句。<\/p>/);
+  assert.doesNotMatch(html, /\r/);
+  // One paragraph only — continuous prose, not three spaced blocks.
+  assert.equal((html.match(/<p>/g) || []).length, 1);
+});
+
+test("renderMd blank lines still split continuous text into paragraphs", () => {
+  const html = markdownLite.renderMd("第一段。\n\n第二段。\n\n第三段。");
+  assert.equal((html.match(/<p>/g) || []).length, 3);
+  assert.match(html, /<p>第一段。<\/p>/);
+  assert.match(html, /<p>第二段。<\/p>/);
+  assert.match(html, /<p>第三段。<\/p>/);
+});
+
+test("renderMd pipe lines without a separator stay continuous text", () => {
+  // Previously isTableRowLine was treated as a block start, so each pipe
+  // line became its own <p> with extra spacing — broke continuous prose.
+  const html = markdownLite.renderMd("A | B | C\nD | E | F\nmore text");
+  assert.equal((html.match(/<p>/g) || []).length, 1);
+  assert.match(html, /A \| B \| C<br>D \| E \| F<br>more text/);
+  assert.doesNotMatch(html, /<table/);
+});
+
+test("renderMd still parses real GFM tables after continuous text", () => {
+  const html = markdownLite.renderMd(
+    ["intro line", "", "| name | value |", "| --- | --- |", "| a | 1 |", "", "outro"].join("\n")
+  );
+  assert.match(html, /<p>intro line<\/p>/);
+  assert.match(html, /<table class="md-table">/);
+  assert.match(html, /<td>a<\/td>/);
+  assert.match(html, /<p>outro<\/p>/);
+});
+
 test("renderMd keeps tight ordered lists in a single <ol>", () => {
   const html = markdownLite.renderMd("1. a\n2. b\n3. c");
   assert.match(html, /<ol>\s*<li>a<\/li>\s*<li>b<\/li>\s*<li>c<\/li>\s*<\/ol>/);

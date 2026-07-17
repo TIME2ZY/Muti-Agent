@@ -25,6 +25,21 @@
     return /^\|?[\s:|-]+\|[\s:|-]+\|?\s*$/.test(t);
   }
 
+  /** True table starts only when a row is followed by a separator row. */
+  function isTableStartAt(lines, index) {
+    if (!Array.isArray(lines) || index < 0 || index >= lines.length) return false;
+    return isTableRowLine(lines[index]) && index + 1 < lines.length && isTableSepLine(lines[index + 1]);
+  }
+
+  /**
+   * Normalize newlines before parse. Windows CLIs often emit CRLF; bare CR
+   * also appears in progress rewrites. Leaving \r in HTML breaks continuous
+   * text layout and can confuse line-oriented matchers.
+   */
+  function normalizeMdNewlines(text) {
+    return String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  }
+
   /**
    * Blockquote prefix after escHtml: ">" becomes "&gt;".
    * Accept both so pre-escape call sites (if any) still work.
@@ -45,7 +60,9 @@
     if (/^[-*]\s+/.test(raw)) return true;
     if (/^\d+\.\s+/.test(raw)) return true;
     if (isBlockquoteLine(raw)) return true;
-    if (isTableRowLine(raw)) return true;
+    // Do NOT treat bare pipe-rows as block starts — continuous prose like
+    // "A | B" lines would otherwise be split into one <p> per line. Real
+    // tables are detected via isTableStartAt (row + separator look-ahead).
     return false;
   }
 
@@ -56,7 +73,6 @@
     if (/^---+\s*$/.test(raw) || /^\*\*\*+\s*$/.test(raw)) return true;
     if (/^#{1,6}\s+/.test(raw)) return true;
     if (isBlockquoteLine(raw)) return true;
-    if (isTableRowLine(raw)) return true;
     if (marker && new RegExp(`^${marker}\\d+${marker}$`).test(raw.trim())) return true;
     return false;
   }
@@ -306,7 +322,7 @@
     const marker = "\uE000";
     const codeBlocks = [];
     const inlineCodes = [];
-    let html = escHtml(text);
+    let html = escHtml(normalizeMdNewlines(text));
 
     // Fenced code: allow optional trailing spaces on the closing fence.
     html = html.replace(/```([\w+-]*)\r?\n?([\s\S]*?)```/g, (_, lang, code) => {
@@ -486,12 +502,14 @@
 
       // Paragraphs: wrap plain lines so newlines/structure survive without
       // relying on white-space:pre-wrap (which breaks lists/tables styling).
+      // Soft line breaks → <br> (chat-friendly; keeps single-\n agent prose).
       closeList();
       const paraLines = [raw];
       i++;
       while (
         i < lines.length
         && !isBlockStartLine(lines[i])
+        && !isTableStartAt(lines, i)
         && !new RegExp(`^${marker}\\d+${marker}$`).test(String(lines[i]).trim())
       ) {
         paraLines.push(lines[i]);
@@ -570,7 +588,10 @@
     scheduleIdle,
     MD_SYNC_HIGHLIGHT_CHARS,
     MD_DEFER_PARSE_CHARS,
-    // list / quote helpers (exported for unit tests)
+    // helpers (exported for unit tests)
+    normalizeMdNewlines,
+    isTableStartAt,
+    isTableRowLine,
     isBlockquoteLine,
     stripBlockquotePrefix,
     matchOrderedItem,
