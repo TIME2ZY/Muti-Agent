@@ -229,3 +229,63 @@ test("replay restores transcript-only memory without stale foreign keys", async 
     storage.close();
   }
 });
+
+test("replay applies supersession in createdAt order even when invocations are listed reverse", async () => {
+  const events = [
+    {
+      threadId: "thread-1",
+      invocationId: "z-later",
+      kind: "memory-captured",
+      payload: {
+        id: "memory-new",
+        threadId: "thread-1",
+        kind: "handoff",
+        status: "captured",
+        content: "Use signed cookies.",
+        createdBy: "codex",
+        createdAt: "2026-07-16T00:00:02.000Z",
+        captureKey: "handoff:z-later:opencode:0",
+        supersessionKey: "handoff:login",
+        metadata: { quality: { ok: true } },
+      },
+    },
+    {
+      threadId: "thread-1",
+      invocationId: "a-earlier",
+      kind: "memory-captured",
+      payload: {
+        id: "memory-old",
+        threadId: "thread-1",
+        kind: "handoff",
+        status: "captured",
+        content: "Use plain cookies.",
+        createdBy: "codex",
+        createdAt: "2026-07-16T00:00:01.000Z",
+        captureKey: "handoff:a-earlier:opencode:0",
+        supersessionKey: "handoff:login",
+        metadata: { quality: { ok: true } },
+      },
+    },
+  ];
+  const storage = createStorage({ file: ":memory:" });
+  storage.threads.create({ id: "thread-1" });
+  try {
+    const capture = createMemoryCapture({
+      memoryService: storage.memory,
+      transcript: createTranscript(events),
+      logger: { error() {} },
+    });
+    const outcome = await capture.replayThread("thread-1");
+
+    assert.deepEqual(outcome, { replayed: 2, existing: 0, failed: 0, cached: false });
+    assert.equal(storage.memories.get("memory-old").status, "superseded");
+    assert.equal(storage.memories.get("memory-old").supersededBy, "memory-new");
+    assert.equal(storage.memories.get("memory-new").status, "captured");
+    assert.deepEqual(
+      storage.memory.listActive("thread-1").map((memory) => memory.id),
+      ["memory-new"]
+    );
+  } finally {
+    storage.close();
+  }
+});

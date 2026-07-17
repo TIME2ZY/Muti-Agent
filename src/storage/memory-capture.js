@@ -134,22 +134,37 @@ function createMemoryCapture({
     try {
       if (typeof transcript.flush === "function") await transcript.flush();
       const invocationIds = await transcript.listInvocations(threadId);
+      /** @type {Array<{ captureKey: string, memoryInput: object, createdAt: string }>} */
+      const pending = [];
       for (const invocationId of invocationIds) {
         const events = await transcript.readInvocation(threadId, invocationId);
         for (const event of events) {
           if (event?.kind !== "memory-captured") continue;
           const memoryInput = replayInput(event.payload, threadId);
           if (!memoryInput) continue;
-          try {
-            const outcome = memoryService.capture(memoryInput);
-            if (outcome.created) replayed += 1;
-            else existing += 1;
-          } catch (error) {
-            failed += 1;
-            logger.error?.(
-              `[memory-capture] replay failed for ${memoryInput.captureKey}: ${error.message}`
-            );
-          }
+          pending.push({
+            captureKey: memoryInput.captureKey,
+            memoryInput,
+            createdAt: typeof memoryInput.createdAt === "string" ? memoryInput.createdAt : "",
+          });
+        }
+      }
+      // Supersession is order-sensitive: always replay oldest captures first so a
+      // later version can retire earlier active rows for the same topic key.
+      pending.sort((a, b) => {
+        if (a.createdAt !== b.createdAt) return a.createdAt.localeCompare(b.createdAt);
+        return a.captureKey.localeCompare(b.captureKey);
+      });
+      for (const item of pending) {
+        try {
+          const outcome = memoryService.capture(item.memoryInput);
+          if (outcome.created) replayed += 1;
+          else existing += 1;
+        } catch (error) {
+          failed += 1;
+          logger.error?.(
+            `[memory-capture] replay failed for ${item.captureKey}: ${error.message}`
+          );
         }
       }
     } catch (error) {

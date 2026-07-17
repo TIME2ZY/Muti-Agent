@@ -292,6 +292,7 @@ function createChatRoutes({
       sessionsFile: options.sessionsFile,
       tokens: new Map(),
       currentInvocationId: null,
+      windowId: null,
       sealer: null,
     };
     callbacks.registerThread(sessionId, threadCtx);
@@ -432,6 +433,7 @@ function createChatRoutes({
         const promptForAgent = promptParts.filter(Boolean).join("\n\n");
         healthTracker.addInput(promptForAgent.length);
         threadCtx.currentInvocationId = invocationId;
+        threadCtx.windowId = durableRun?.window?.id || null;
         const invocationEnv = {
           [ENV.API_URL]: apiUrl,
           [ENV.THREAD_ID]: sessionId,
@@ -658,6 +660,21 @@ function createChatRoutes({
           const fromLabel = AGENTS[agent]?.label || agent;
           const toLabel = AGENTS[m]?.label || m;
 
+          // Capture before routing decisions: max_depth soft-skips enqueue only.
+          const capture = memories.captureHandoff({
+            threadId: sessionId,
+            invocationId,
+            windowId: durableRun?.window?.id || null,
+            fromAgent: agent,
+            toAgent: m,
+            handoff: targetHandoff,
+            quality: targetQuality,
+            blockIndex: handoffMatch.blockIndex,
+          });
+          if (capture?.captured) {
+            sendSse(res, "memory-captured", capture.event);
+          }
+
           if (threadCtx.a2aCount >= maxDepth) {
             const skipText = `⏭ ${fromLabel} → ${toLabel}（已达 A2A 深度上限 ${maxDepth}，未入队）`;
             appendToSession(
@@ -688,20 +705,6 @@ function createChatRoutes({
               maxDepth,
             });
             continue;
-          }
-
-          const capture = memories.captureHandoff({
-            threadId: sessionId,
-            invocationId,
-            windowId: durableRun?.window?.id || null,
-            fromAgent: agent,
-            toAgent: m,
-            handoff: targetHandoff,
-            quality: targetQuality,
-            blockIndex: handoffMatch.blockIndex,
-          });
-          if (capture?.captured) {
-            sendSse(res, "memory-captured", capture.event);
           }
 
           // Re-entry allowed: push even if `m` already ran earlier in this request.
@@ -754,6 +757,7 @@ function createChatRoutes({
 
     await transcript.flush();
     threadCtx.currentInvocationId = null;
+    threadCtx.windowId = null;
     if (!aborted) {
       sendSse(res, "done", {});
     }

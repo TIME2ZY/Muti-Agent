@@ -175,6 +175,25 @@ function postMessage(
   const maxDepth = getMaxA2ADepth();
   for (const target of mentions) {
     if (thread.controller && thread.controller.signal.aborted) break;
+    const handoffMatch = agentHandoff.extractPrimaryHandoffMatch(content, {
+      currentAgentId: agent,
+      routedTo: target,
+    });
+    const handoffQuality = agentHandoff.evaluateHandoff(handoffMatch.handoff);
+    // Capture before routing decisions: max_depth soft-skips enqueue only.
+    const capture = memoryCapture?.captureHandoff({
+      threadId: thread.sessionId || threadId,
+      invocationId,
+      windowId: typeof thread.windowId === "string" ? thread.windowId : null,
+      fromAgent: agent,
+      toAgent: target,
+      handoff: handoffMatch.handoff,
+      quality: handoffQuality,
+      blockIndex: handoffMatch.blockIndex,
+    });
+    if (capture?.captured) {
+      sendSse(thread.res, "memory-captured", capture.event);
+    }
     if (thread.a2aCount >= maxDepth) {
       const skipText = `⏭ ${agent} → ${target}（已达 A2A 深度上限 ${maxDepth}，未入队）`;
       if (appendToSession && thread.sessionsFile) {
@@ -216,24 +235,6 @@ function postMessage(
         });
       }
       continue;
-    }
-    const handoffMatch = agentHandoff.extractPrimaryHandoffMatch(content, {
-      currentAgentId: agent,
-      routedTo: target,
-    });
-    const handoffQuality = agentHandoff.evaluateHandoff(handoffMatch.handoff);
-    const capture = memoryCapture?.captureHandoff({
-      threadId: thread.sessionId || threadId,
-      invocationId,
-      windowId: null,
-      fromAgent: agent,
-      toAgent: target,
-      handoff: handoffMatch.handoff,
-      quality: handoffQuality,
-      blockIndex: handoffMatch.blockIndex,
-    });
-    if (capture?.captured) {
-      sendSse(thread.res, "memory-captured", capture.event);
     }
     // Re-entry allowed (same agent may run again after a teammate, e.g. fix loop).
     thread.worklist.push(target);
