@@ -68,9 +68,8 @@ test("recall service serves SQLite invocation metadata and event search", async 
     assert.equal(invocations[0].state, null);
 
     const hits = await service.searchTranscript("thread-1", "sqlite memory");
-    assert.equal(hits.length, 1);
-    assert.equal(hits[0].invocationId, "invocation-1");
-    assert.equal(hits[0].kind, "text.delta");
+    assert.ok(hits.some((hit) => hit.invocationId === "invocation-1" && hit.kind === "text.delta"));
+    assert.ok(hits.every((hit) => typeof hit.layer === "string" && typeof hit.score === "number"));
   } finally {
     storage.close();
   }
@@ -79,28 +78,56 @@ test("recall service serves SQLite invocation metadata and event search", async 
 test("recall service returns SQLite-only user messages and memory entries", async () => {
   const { storage, service } = createFixture();
   try {
-    const messageHits = await service.searchTranscript("thread-1", "user requirement");
+    const messageHits = await service.searchTranscript("thread-1", "user requirement", {
+      layers: "message",
+    });
     assert.equal(messageHits.length, 1);
     assert.equal(messageHits[0].sourceKind, "message");
     assert.equal(messageHits[0].kind, "message.user");
+    assert.equal(messageHits[0].layer, "message");
 
-    const memoryHits = await service.searchTranscript("thread-1", "durable decision");
+    const memoryHits = await service.searchTranscript("thread-1", "durable decision", {
+      layers: "memory",
+    });
     assert.equal(memoryHits.length, 1);
     assert.equal(memoryHits[0].sourceKind, "memory-entry");
+    assert.equal(memoryHits[0].layer, "memory");
     assert.equal(memoryHits[0].invocationId, "invocation-1");
   } finally {
     storage.close();
   }
 });
 
-test("recall service merges and deduplicates SQLite and file hits", async () => {
-  const duplicate = {
-    invocationId: "invocation-1",
-    eventNo: 0,
-    kind: "text.delta",
-    ts: "2026-07-12T00:00:01.000Z",
-    snippet: "file duplicate",
-  };
+test("dual mode prefers healthy SQLite search and skips file scans", async () => {
+  let fileSearches = 0;
+  const { storage, service } = createFixture({
+    searchTranscript: async () => {
+      fileSearches += 1;
+      return [
+        {
+          invocationId: "legacy-invocation",
+          eventNo: 4,
+          kind: "stderr",
+          ts: "2026-07-11T00:00:00.000Z",
+          snippet: "legacy sqlite memory",
+        },
+      ];
+    },
+  });
+  try {
+    const hits = await service.searchTranscript("thread-1", "sqlite memory", {
+      layers: "evidence",
+    });
+    assert.equal(fileSearches, 0);
+    assert.ok(hits.some((hit) => hit.invocationId === "invocation-1"));
+    assert.ok(hits.every((hit) => hit.layer === "evidence"));
+    assert.ok(typeof hits[0].score === "number");
+  } finally {
+    storage.close();
+  }
+});
+
+test("files mode can still merge file hits when requested", async () => {
   const fileOnly = {
     invocationId: "legacy-invocation",
     eventNo: 4,
@@ -109,32 +136,21 @@ test("recall service merges and deduplicates SQLite and file hits", async () => 
     snippet: "legacy sqlite memory",
   };
   const { storage, service } = createFixture({
-    searchTranscript: async () => [duplicate, fileOnly],
+    searchTranscript: async () => [fileOnly],
+  });
+  const filesService = createRecallService({
+    storage,
+    transcript: {
+      listInvocationsWithMeta: async () => [],
+      searchTranscript: async () => [fileOnly],
+      readInvocationPage: async () => ({ events: [], total: 0, from: 0, limit: 200 }),
+    },
+    mode: "files",
   });
   try {
-    const hits = await service.searchTranscript("thread-1", "sqlite memory");
-    assert.equal(hits.length, 2);
-    assert.equal(hits[0].invocationId, "invocation-1");
-    assert.equal(hits[1].invocationId, "legacy-invocation");
-  } finally {
-    storage.close();
-  }
-});
-
-test("file user-prompt hits suppress duplicate SQLite user messages", async () => {
-  const filePrompt = {
-    invocationId: "_user_prompt",
-    eventNo: 0,
-    kind: "user-prompt",
-    ts: "2026-07-12T00:00:00.500Z",
-    snippet: "sqlite-only user requirement",
-  };
-  const { storage, service } = createFixture({
-    searchTranscript: async () => [filePrompt],
-  });
-  try {
-    const hits = await service.searchTranscript("thread-1", "user requirement");
-    assert.deepEqual(hits, [filePrompt]);
+    const hits = await filesService.searchTranscript("thread-1", "sqlite memory");
+    assert.ok(hits.some((hit) => hit.invocationId === "invocation-1"));
+    assert.ok(hits.some((hit) => hit.invocationId === "legacy-invocation"));
   } finally {
     storage.close();
   }
@@ -233,7 +249,8 @@ test("recall service uses SQLite when transcript reads fail", async () => {
     assert.equal((await service.listInvocationsWithMeta("thread-1")).length, 1);
     assert.equal((await service.searchTranscript("thread-1", "file failure")).length, 1);
     assert.equal((await service.readInvocationPage("thread-1", "invocation-1")).total, 1);
-    assert.equal(errors.length, 3);
+    // dual/sqlite search no longer probes the file index when SQLite is healthy.
+    assert.equal(errors.length, 2);
     assert.ok(errors.every((message) => message.includes("file-recall")));
   } finally {
     storage.close();
@@ -305,6 +322,140 @@ test("sqlite mode skips transcript search after filling the requested limit", as
     const hits = await service.searchTranscript("thread-1", "sqlite memory", { limit: 1 });
     assert.equal(hits.length, 1);
     assert.equal(fileSearches, 0);
+  } finally {
+    storage.close();
+  }
+});
+
+test("layered search keeps memory hits before evidence fills the limit", async () => {
+  const { storage, service } = createFixture();
+  try {
+    for (let i = 0; i < 30; i++) {
+      storage.invocations.appendEvent({
+        invocationId: "invocation-1",
+        sequenceNo: i + 1,
+        kind: "text.delta",
+        payload: { text: `JWT evidence noise ${i}` },
+        createdAt: `2026-07-12T00:01:${String(i).padStart(2, "0")}.000Z`,
+      });
+    }
+    storage.memory.capture({
+      id: "memory-jwt",
+      threadId: "thread-1",
+      kind: "decision",
+      content: "JWT 过期时间固定为 15 分钟",
+      createdBy: "codex",
+      captureKey: "decision:jwt-expiry",
+      createdAt: "2026-07-12T00:02:00.000Z",
+    });
+    storage.recall.rebuildThread("thread-1");
+
+    const hits = await service.searchTranscript("thread-1", "JWT 过期", { limit: 12 });
+    assert.ok(hits.length > 0);
+    // Memory quota is filled first so evidence cannot crowd it out of the result window.
+    assert.equal(hits[0].layer, "memory");
+    assert.equal(hits[0].sourceKind, "memory-entry");
+    const firstEvidence = hits.findIndex((hit) => hit.layer === "evidence");
+    if (firstEvidence !== -1) {
+      assert.ok(hits.slice(0, firstEvidence).every((hit) => hit.layer === "memory"));
+    }
+    const memoryCount = hits.filter((hit) => hit.layer === "memory").length;
+    assert.ok(memoryCount >= 1);
+  } finally {
+    storage.close();
+  }
+});
+
+test("search filters retired memories by default", async () => {
+  const { storage, service } = createFixture();
+  try {
+    storage.memory.capture({
+      id: "memory-old",
+      threadId: "thread-1",
+      kind: "decision",
+      content: "cookie sessions are fine",
+      createdBy: "codex",
+      captureKey: "decision:auth-v1",
+      supersessionKey: "decision:auth",
+      createdAt: "2026-07-12T00:03:00.000Z",
+    });
+    storage.memory.capture({
+      id: "memory-new",
+      threadId: "thread-1",
+      kind: "decision",
+      content: "signed cookie sessions are required",
+      createdBy: "codex",
+      captureKey: "decision:auth-v2",
+      supersessionKey: "decision:auth",
+      createdAt: "2026-07-12T00:04:00.000Z",
+    });
+
+    const activeOnly = await service.searchTranscript("thread-1", "cookie sessions");
+    assert.ok(activeOnly.every((hit) => hit.sourceId !== "memory-old"));
+    assert.ok(activeOnly.some((hit) => hit.sourceId === "memory-new"));
+
+    const withRetired = await service.searchTranscript("thread-1", "cookie sessions", {
+      includeRetired: true,
+      layers: "memory",
+    });
+    assert.ok(withRetired.some((hit) => hit.sourceId === "memory-old"));
+  } finally {
+    storage.close();
+  }
+});
+
+test("retrieveForTurn merges recency and related channels and fits budget", async () => {
+  const { storage, service } = createFixture();
+  try {
+    storage.memory.capture({
+      id: "memory-recent",
+      threadId: "thread-1",
+      kind: "window-seal",
+      content: "recent seal snapshot about cache",
+      createdBy: "system:window-seal",
+      captureKey: "window-seal:window-1",
+      createdAt: "2026-07-16T12:00:00.000Z",
+    });
+    storage.memory.capture({
+      id: "memory-related",
+      threadId: "thread-1",
+      kind: "decision",
+      content: "JWT 过期时间固定为 15 分钟，错误码使用 AUTH_EXPIRED",
+      createdBy: "codex",
+      captureKey: "decision:jwt",
+      createdAt: "2026-07-10T00:00:00.000Z",
+    });
+    storage.memory.capture({
+      id: "memory-noise",
+      threadId: "thread-1",
+      kind: "handoff",
+      content: "unrelated handoff about CSS layout",
+      createdBy: "codex",
+      captureKey: "handoff:css",
+      createdAt: "2026-07-15T00:00:00.000Z",
+    });
+
+    const result = service.retrieveForTurn({
+      threadId: "thread-1",
+      prompt: "请继续完成 JWT 过期处理并检查错误码 AUTH_EXPIRED",
+      budgetChars: 4000,
+      recentLimit: 6,
+      relatedLimit: 5,
+    });
+
+    assert.ok(result.items.some((item) => item.id === "memory-related"));
+    assert.match(result.rendered, /JWT 过期时间/);
+    assert.ok(result.stats.usedChars <= 4000);
+    assert.ok(result.stats.channels.related >= 1);
+
+    const weak = service.retrieveForTurn({
+      threadId: "thread-1",
+      prompt: "继续",
+      budgetChars: 4000,
+    });
+    assert.equal(weak.stats.weakQuery, true);
+    assert.ok(weak.items.length >= 1);
+    assert.match(weak.rendered, /Active Memories/);
   } finally {
     storage.close();
   }

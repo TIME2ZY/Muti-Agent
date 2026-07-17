@@ -2959,6 +2959,8 @@ test("A2A-routed agents get persona identity + light session header, not full bo
   assert.match(prompts[1], /Agent: Gemini/);
   assert.doesNotMatch(prompts[1], /<!-- 回忆铁律/);
   assert.doesNotMatch(prompts[1], /<!-- Digest/);
+  // Wave R: A2A turns get compact Active Memory Card, not the full bootstrap packet.
+  assert.match(prompts[1], /<!-- Active Memories/);
   assert.match(prompts[1], /任务交接/);
   assert.match(prompts[1], /codex result/);
   // No ```handoff block → soft degraded path still routes with warning

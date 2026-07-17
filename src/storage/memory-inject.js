@@ -3,6 +3,9 @@ const { ENV } = require("../shared/brand");
 const DEFAULT_MEMORY_BUDGET_CHARS = 4000;
 const DEFAULT_A2A_MEMORY_BUDGET_CHARS = 2000;
 const DEFAULT_RECENT_MEMORY_LIMIT = 6;
+const DEFAULT_RELATED_MEMORY_LIMIT = 5;
+const DEFAULT_SEARCH_MEMORY_QUOTA = 8;
+const DEFAULT_SEARCH_MESSAGE_QUOTA = 4;
 const MIN_MEMORY_BUDGET_CHARS = 256;
 const MAX_MEMORY_BUDGET_CHARS = 100000;
 const MEMORY_DATA_OPEN = "<<<SHIFT_MEMORY_DATA>>>";
@@ -120,6 +123,24 @@ function resolveRecentMemoryLimit(env = process.env) {
   return normalizeInteger(env[ENV.RETRIEVE_RECENT_LIMIT], DEFAULT_RECENT_MEMORY_LIMIT, 1, 100);
 }
 
+function resolveRelatedMemoryLimit(env = process.env) {
+  return normalizeInteger(env[ENV.RETRIEVE_RELATED_LIMIT], DEFAULT_RELATED_MEMORY_LIMIT, 1, 100);
+}
+
+function resolveSearchMemoryQuota(env = process.env) {
+  return normalizeInteger(env[ENV.SEARCH_MEMORY_QUOTA], DEFAULT_SEARCH_MEMORY_QUOTA, 1, 100);
+}
+
+function resolveSearchMessageQuota(env = process.env) {
+  return normalizeInteger(env[ENV.SEARCH_MESSAGE_QUOTA], DEFAULT_SEARCH_MESSAGE_QUOTA, 1, 100);
+}
+
+function resolveSearchIncludeThinking(env = process.env) {
+  const raw = env[ENV.SEARCH_INCLUDE_THINKING];
+  if (raw === undefined || raw === null || raw === "") return false;
+  return raw === "1" || raw === "true" || raw === "TRUE" || raw === "yes";
+}
+
 function normalizeBudget(value, fallback) {
   return normalizeInteger(value, fallback, MIN_MEMORY_BUDGET_CHARS, MAX_MEMORY_BUDGET_CHARS);
 }
@@ -145,10 +166,17 @@ module.exports = {
   DEFAULT_MEMORY_BUDGET_CHARS,
   DEFAULT_A2A_MEMORY_BUDGET_CHARS,
   DEFAULT_RECENT_MEMORY_LIMIT,
+  DEFAULT_RELATED_MEMORY_LIMIT,
+  DEFAULT_SEARCH_MEMORY_QUOTA,
+  DEFAULT_SEARCH_MESSAGE_QUOTA,
   MEMORY_DATA_OPEN,
   MEMORY_DATA_CLOSE,
   renderActiveMemoryCard,
   resolveMemoryBudget,
   resolveA2AMemoryBudget,
   resolveRecentMemoryLimit,
+  resolveRelatedMemoryLimit,
+  resolveSearchMemoryQuota,
+  resolveSearchMessageQuota,
+  resolveSearchIncludeThinking,
 };

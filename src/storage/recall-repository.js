@@ -40,31 +40,34 @@ function createRecallRepository(db) {
     if (!threadId || !normalizedQuery) return [];
     const limit = normalizeLimit(options.limit);
     const kinds = normalizeKinds(options.sourceKinds);
+    const matchMode = options.matchMode === "or" ? "or" : "and";
     const results = [];
     const seen = new Set();
 
-    const append = (rows) => {
+    const append = (rows, channel) => {
       for (const row of rows) {
         if (seen.has(row.id)) continue;
         seen.add(row.id);
-        results.push(mapRecallItem(row));
+        const item = mapRecallItem(row);
+        item.matchChannel = channel;
+        results.push(item);
         if (results.length >= limit) break;
       }
     };
 
-    append(runExactSearch(db, threadId, normalizedQuery, kinds, limit));
+    append(runExactSearch(db, threadId, normalizedQuery, kinds, limit), "exact");
     if (results.length < limit) {
-      const ftsQuery = buildFtsQuery(normalizedQuery);
+      const ftsQuery = buildFtsQuery(normalizedQuery, { matchMode });
       if (ftsQuery) {
         try {
-          append(runFtsSearch(db, threadId, ftsQuery, kinds, limit));
+          append(runFtsSearch(db, threadId, ftsQuery, kinds, limit), "fts");
         } catch {
           // Invalid or unavailable FTS query degrades to contains search below.
         }
       }
     }
     if (results.length < limit) {
-      append(runContainsSearch(db, threadId, normalizedQuery, kinds, limit));
+      append(runContainsSearch(db, threadId, normalizedQuery, kinds, limit), "contains");
     }
     return results;
   }
@@ -189,11 +192,14 @@ function kindFilter(kinds, alias = "") {
   };
 }
 
-function buildFtsQuery(query) {
-  const tokens = query.match(/[\p{L}\p{N}_-]+/gu) || [];
-  // AND keeps multi-token search closer to transcript substring semantics and
-  // avoids loose single-token hits crowding out true matches.
-  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" AND ");
+function buildFtsQuery(query, options = {}) {
+  const tokens = query.match(/[\p{L}\p{N}_./:-]+/gu) || [];
+  if (tokens.length === 0) return "";
+  const quoted = tokens.map((token) => `"${token.replace(/"/g, '""')}"`);
+  // OR is used by retrieve related-channel / Chinese multi-term recall; AND keeps
+  // active session-search closer to substring semantics when callers want strictness.
+  const joiner = options.matchMode === "or" ? " OR " : " AND ";
+  return quoted.join(joiner);
 }
 
 function makeSnippet(content, query) {

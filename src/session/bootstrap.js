@@ -1,8 +1,10 @@
 const transcript = require("./transcript");
 const {
   renderActiveMemoryCard,
+  resolveA2AMemoryBudget,
   resolveMemoryBudget,
   resolveRecentMemoryLimit,
+  resolveRelatedMemoryLimit,
 } = require("../storage/memory-inject");
 
 // Recall rule injected into the first agent's prompt of each session. Modeled
@@ -59,13 +61,36 @@ async function buildDigest({ sessionId, invocationSource = transcript }) {
   return lines.join("\n");
 }
 
-function buildActiveMemoryCard({
+/**
+ * Build Active Memory Card via retrieveForTurn when available (Wave R),
+ * otherwise fall back to recency-only listActive (Wave M compatibility).
+ */
+async function buildActiveMemoryCard({
   threadId,
+  prompt = "",
+  retrieveSource = null,
   memorySource = null,
   budgetChars = resolveMemoryBudget(),
   recentLimit = resolveRecentMemoryLimit(),
+  relatedLimit = resolveRelatedMemoryLimit(),
   logger = console,
-}) {
+} = {}) {
+  if (retrieveSource && typeof retrieveSource.retrieveForTurn === "function") {
+    try {
+      const result = retrieveSource.retrieveForTurn({
+        threadId,
+        prompt,
+        budgetChars,
+        recentLimit,
+        relatedLimit,
+        layers: ["memory"],
+      });
+      if (result && typeof result.rendered === "string") return result.rendered;
+    } catch (error) {
+      logger.error?.(`[memory-bootstrap] retrieveForTurn failed: ${error.message}`);
+    }
+  }
+
   let memories = [];
   if (memorySource && typeof memorySource.listActive === "function") {
     try {
@@ -83,21 +108,27 @@ async function buildBootstrapPacket(opts) {
     sessionId,
     agent,
     generation = 1,
+    prompt = "",
     invocationSource = transcript,
+    retrieveSource = null,
     memorySource = null,
     memoryBudgetChars = resolveMemoryBudget(),
     recentMemoryLimit = resolveRecentMemoryLimit(),
+    relatedMemoryLimit = resolveRelatedMemoryLimit(),
     logger = console,
   } = opts;
   if (!threadId) throw new Error("threadId is required");
   if (!sessionId) throw new Error("sessionId is required");
   if (!agent) throw new Error("agent is required");
   const identity = buildIdentity({ threadId, sessionId, agent, generation });
-  const memoryCard = buildActiveMemoryCard({
+  const memoryCard = await buildActiveMemoryCard({
     threadId,
+    prompt,
+    retrieveSource,
     memorySource,
     budgetChars: memoryBudgetChars,
     recentLimit: recentMemoryLimit,
+    relatedLimit: relatedMemoryLimit,
     logger,
   });
   const digest = await buildDigest({ threadId, sessionId, invocationSource });
@@ -110,4 +141,6 @@ module.exports = {
   buildDigest,
   buildActiveMemoryCard,
   RECALL_RULE,
+  resolveA2AMemoryBudget,
+  resolveMemoryBudget,
 };
