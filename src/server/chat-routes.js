@@ -261,12 +261,15 @@ function createChatRoutes({
 
     // Session bootstrap (coords + digest + recall) is built once for the first turn.
     // Agent persona identity is re-rendered every turn so A2A handoffs still know "who I am".
+    // Wave R: Memory Card uses retrieveForTurn(recency + related) when recallService supports it.
     const bootstrapPacket = await sessionBootstrap.buildBootstrapPacket({
       threadId: sessionId,
       sessionId,
       agent: AGENTS[requestedAgent],
       generation: initialWindow?.generation || 1,
+      prompt: rawPrompt,
       invocationSource: recallService || transcript,
+      retrieveSource: recallService || null,
       memorySource: memoryService || null,
     });
 
@@ -399,7 +402,18 @@ function createChatRoutes({
             skillNames: a2aSkillNames,
           });
           const compactCard = agentHandoff.renderA2AHandoffCard();
-          agentPrompt = compactCard + "\n\n" + a2aSkills.augmentedPrompt;
+          const a2aMemoryCard = await sessionBootstrap.buildActiveMemoryCard({
+            threadId: sessionId,
+            prompt: [rawPrompt, handoffTask].filter(Boolean).join("\n"),
+            retrieveSource: recallService || null,
+            memorySource: memoryService || null,
+            budgetChars: sessionBootstrap.resolveA2AMemoryBudget
+              ? sessionBootstrap.resolveA2AMemoryBudget()
+              : undefined,
+          });
+          agentPrompt = [compactCard, a2aMemoryCard, a2aSkills.augmentedPrompt]
+            .filter(Boolean)
+            .join("\n\n");
           turnSkillNames = ["a2a-handoff-card", ...a2aSkills.skillNames];
         }
 

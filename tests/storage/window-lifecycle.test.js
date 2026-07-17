@@ -451,7 +451,14 @@ test("database exceptions do not present memory as empty when file data exists",
   const listed = await service.listInvocationsWithMeta("thread-1");
   assert.deepEqual(listed, fileInvocations);
   const searched = await service.searchTranscript("thread-1", "memory");
-  assert.deepEqual(searched, fileHits);
+  // File fallback must still surface hits (not an empty "memory missing" result).
+  // Wave R enriches file hits with layer/score; compare the durable identity fields.
+  assert.equal(searched.length, 1);
+  assert.equal(searched[0].invocationId, "file-inv");
+  assert.equal(searched[0].kind, "text.delta");
+  assert.equal(searched[0].snippet, "file memory payload");
+  assert.equal(searched[0].layer, "evidence");
+  assert.equal(typeof searched[0].score, "number");
   const page = await service.readInvocationPage("thread-1", "file-inv");
   assert.equal(page.total, 1);
   assert.ok(errors.length >= 2);

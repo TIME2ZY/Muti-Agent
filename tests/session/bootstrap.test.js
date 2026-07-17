@@ -123,13 +123,14 @@ test("RECALL_RULE contains the three recall steps + key phrases", () => {
   assert.match(RECALL_RULE, /session-search/);
   assert.match(RECALL_RULE, /read-invocation/);
   assert.match(RECALL_RULE, /不要凭印象猜/);
-  assert.match(RECALL_RULE, /不要凭印象猜/);
   assert.match(RECALL_RULE, /Active Memories/);
+  assert.match(RECALL_RULE, /layer=memory/);
+  assert.match(RECALL_RULE, /空 query/);
 });
 
-test("buildActiveMemoryCard reads only the configured recency window", () => {
+test("buildActiveMemoryCard reads only the configured recency window", async () => {
   const calls = [];
-  const card = buildActiveMemoryCard({
+  const card = await buildActiveMemoryCard({
     threadId: "thread-memory",
     recentLimit: 4,
     memorySource: {
@@ -154,9 +155,9 @@ test("buildActiveMemoryCard reads only the configured recency window", () => {
   assert.match(card, /Use SQLite/);
 });
 
-test("buildActiveMemoryCard degrades to an empty card when SQLite read fails", () => {
+test("buildActiveMemoryCard degrades to an empty card when SQLite read fails", async () => {
   const errors = [];
-  const card = buildActiveMemoryCard({
+  const card = await buildActiveMemoryCard({
     threadId: "thread-memory",
     memorySource: {
       listActive() {
@@ -172,6 +173,34 @@ test("buildActiveMemoryCard degrades to an empty card when SQLite read fails", (
 
   assert.match(card, /Active Memories \(0\)/);
   assert.match(errors[0], /listActive failed: database offline/);
+});
+
+test("buildActiveMemoryCard prefers retrieveForTurn when available", async () => {
+  const calls = [];
+  const card = await buildActiveMemoryCard({
+    threadId: "thread-memory",
+    prompt: "继续完成 JWT 过期处理",
+    memorySource: {
+      listActive() {
+        throw new Error("listActive should not be used when retrieve exists");
+      },
+    },
+    retrieveSource: {
+      retrieveForTurn(input) {
+        calls.push(input);
+        return {
+          rendered: "<!-- Active Memories (1) -->\nJWT\n<!-- /Active Memories -->",
+          items: [],
+          stats: {},
+        };
+      },
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].threadId, "thread-memory");
+  assert.match(calls[0].prompt, /JWT/);
+  assert.match(card, /JWT/);
 });
 
 // ── buildBootstrapPacket ───────────────────────────────────────

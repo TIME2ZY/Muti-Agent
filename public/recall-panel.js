@@ -61,6 +61,58 @@
     return {};
   }
 
+  const LAYER_ORDER = ["memory", "message", "evidence"];
+
+  function normalizeSearchResult(result) {
+    if (Array.isArray(result)) {
+      return {
+        hits: result,
+        layers: countLayers(result),
+        query: "",
+        limit: result.length,
+        truncated: false,
+        weakQuery: false,
+      };
+    }
+    const hits = result && Array.isArray(result.hits) ? result.hits : [];
+    return {
+      hits,
+      layers: result?.layers || countLayers(hits),
+      query: result?.query || "",
+      limit: result?.limit || hits.length,
+      truncated: Boolean(result?.truncated),
+      weakQuery: Boolean(result?.weakQuery),
+    };
+  }
+
+  function countLayers(hits) {
+    const layers = { memory: 0, message: 0, evidence: 0 };
+    for (const hit of hits || []) {
+      const layer = hit.layer || layerFromHit(hit);
+      if (layers[layer] !== undefined) layers[layer] += 1;
+    }
+    return layers;
+  }
+
+  function layerFromHit(hit) {
+    if (hit.layer === "memory" || hit.layer === "message" || hit.layer === "evidence") {
+      return hit.layer;
+    }
+    if (hit.sourceKind === "memory-entry") return "memory";
+    if (hit.sourceKind === "message") return "message";
+    return "evidence";
+  }
+
+  function groupHitsByLayer(hits) {
+    const groups = { memory: [], message: [], evidence: [] };
+    for (const hit of hits || []) {
+      const layer = layerFromHit(hit);
+      if (!groups[layer]) groups[layer] = [];
+      groups[layer].push(hit);
+    }
+    return groups;
+  }
+
   function resolveRecallLocale(localePack) {
     const defaults = {
       toggle: "回忆",
@@ -76,6 +128,13 @@
       noSession: "暂无会话",
       emptyList: "本会话暂无调用记录",
       noHits: "无匹配结果",
+      layerMemory: "记忆",
+      layerMessage: "消息",
+      layerEvidence: "证据",
+      layerSummary: (layers, total) =>
+        `共 ${total} 条 · 记忆 ${layers.memory || 0} · 消息 ${layers.message || 0} · 证据 ${layers.evidence || 0}`,
+      recencyOnly: "空关键词：仅展示最近活跃记忆",
+      scoreLabel: (score) => `分 ${Number(score).toFixed(0)}`,
     };
     const pack = localePack && typeof localePack === "object" ? localePack : null;
     const fromLocale =
@@ -462,53 +521,130 @@
       }
     }
 
-    function renderRecallHits(hits) {
+    function layerLabel(layer) {
+      if (layer === "memory") return R.layerMemory || "记忆";
+      if (layer === "message") return R.layerMessage || "消息";
+      return R.layerEvidence || "证据";
+    }
+
+    function renderSearchSummary(result) {
+      const bar = document.createElement("div");
+      bar.className = "recall-search-summary";
+      const layers = result.layers || countLayers(result.hits);
+      const total = (result.hits || []).length;
+      const text = document.createElement("div");
+      text.className = "recall-search-summary-text";
+      text.textContent =
+        typeof R.layerSummary === "function"
+          ? R.layerSummary(layers, total)
+          : `共 ${total} 条`;
+      bar.appendChild(text);
+      if (result.weakQuery) {
+        const note = document.createElement("div");
+        note.className = "recall-search-summary-note";
+        note.textContent = R.recencyOnly || "空关键词：仅展示最近活跃记忆";
+        bar.appendChild(note);
+      }
+      const chips = document.createElement("div");
+      chips.className = "recall-layer-chips";
+      for (const layer of LAYER_ORDER) {
+        const count = layers[layer] || 0;
+        if (!count) continue;
+        const chip = document.createElement("span");
+        chip.className = `recall-layer-chip layer-${layer}`;
+        chip.textContent = `${layerLabel(layer)} ${count}`;
+        chips.appendChild(chip);
+      }
+      if (chips.childNodes.length) bar.appendChild(chips);
+      return bar;
+    }
+
+    function renderHitRow(hit) {
+      const layer = layerFromHit(hit);
+      const row = document.createElement("div");
+      row.className = `recall-hit layer-${layer}`;
+      row.dataset.layer = layer;
+      if (hit.invocationId) row.dataset.invocationId = hit.invocationId;
+      if (hit.eventNo != null) row.dataset.eventNo = String(hit.eventNo);
+      if (hit.memoryId) row.dataset.memoryId = hit.memoryId;
+
+      const head = document.createElement("div");
+      head.className = "recall-hit-head";
+
+      const badges = document.createElement("div");
+      badges.className = "recall-hit-badges";
+      const layerBadge = document.createElement("span");
+      layerBadge.className = `recall-hit-layer layer-${layer}`;
+      layerBadge.textContent = layerLabel(layer);
+      badges.appendChild(layerBadge);
+      if (typeof hit.score === "number" && Number.isFinite(hit.score)) {
+        const scoreBadge = document.createElement("span");
+        scoreBadge.className = "recall-hit-score";
+        scoreBadge.textContent =
+          typeof R.scoreLabel === "function" ? R.scoreLabel(hit.score) : `分 ${hit.score}`;
+        badges.appendChild(scoreBadge);
+      }
+
+      const kind = document.createElement("span");
+      kind.className = "recall-hit-kind";
+      const parts = [hit.kind || layer];
+      if (hit.eventNo != null && hit.sourceKind === "invocation-event") {
+        parts[0] = `${hit.kind} · #${hit.eventNo}`;
+      } else if (hit.eventNo != null && hit.invocationId) {
+        parts.push(`#${hit.eventNo}`);
+      }
+      if (hit.memoryStatus) parts.push(hit.memoryStatus);
+      if (hit.agent) parts.push(agentLabel(hit.agent));
+      kind.textContent = parts.join(" · ");
+
+      const time = document.createElement("span");
+      time.className = "recall-hit-time";
+      time.textContent = fmtTime(hit.ts);
+      head.append(badges, kind, time);
+
+      const snip = document.createElement("div");
+      snip.className = "recall-hit-snippet";
+      snip.textContent = hit.snippet || hit.content || "";
+      row.append(head, snip);
+
+      // No invocationId (message / formal memory) → static snippet only.
+      if (hit.invocationId) {
+        const openHit = () => toggleRecallHit(row, hit);
+        head.addEventListener("click", openHit);
+        snip.addEventListener("click", openHit);
+        head.style.cursor = "pointer";
+        snip.style.cursor = "pointer";
+      } else {
+        row.classList.add("recall-hit-static");
+      }
+      return row;
+    }
+
+    function renderRecallHits(rawResult) {
       if (!bodyEl) return;
+      const result = normalizeSearchResult(rawResult);
+      const hits = result.hits || [];
       if (hits.length === 0) {
         setRecallEmptyAll(R.noHits);
         return;
       }
-      bodyEl.replaceChildren(
-        ...hits.map((hit) => {
-          const row = document.createElement("div");
-          row.className = "recall-hit";
-          if (hit.invocationId) row.dataset.invocationId = hit.invocationId;
-          if (hit.eventNo != null) row.dataset.eventNo = String(hit.eventNo);
-          const head = document.createElement("div");
-          head.className = "recall-hit-head";
-          const kind = document.createElement("span");
-          kind.className = "recall-hit-kind";
-          // kind · #eventNo · agent (when known) · source
-          const parts = [hit.kind];
-          if (hit.eventNo != null && hit.sourceKind === "invocation-event") {
-            parts[0] = `${hit.kind} · #${hit.eventNo}`;
-          } else if (hit.eventNo != null && hit.invocationId) {
-            parts.push(`#${hit.eventNo}`);
-          }
-          if (hit.agent) parts.push(agentLabel(hit.agent));
-          kind.textContent = parts.join(" · ");
-          const time = document.createElement("span");
-          time.className = "recall-hit-time";
-          time.textContent = fmtTime(hit.ts);
-          head.append(kind, time);
-          const snip = document.createElement("div");
-          snip.className = "recall-hit-snippet";
-          snip.textContent = hit.snippet;
-          row.append(head, snip);
-          // No invocationId (message / formal memory) → static snippet only.
-          if (hit.invocationId) {
-            // Head + snippet expand; expanded body must not re-trigger toggle.
-            const openHit = () => toggleRecallHit(row, hit);
-            head.addEventListener("click", openHit);
-            snip.addEventListener("click", openHit);
-            head.style.cursor = "pointer";
-            snip.style.cursor = "pointer";
-          } else {
-            row.classList.add("recall-hit-static");
-          }
-          return row;
-        })
-      );
+
+      const nodes = [renderSearchSummary(result)];
+      const grouped = groupHitsByLayer(hits);
+      for (const layer of LAYER_ORDER) {
+        const groupHits = grouped[layer] || [];
+        if (groupHits.length === 0) continue;
+        const section = document.createElement("section");
+        section.className = `recall-hit-section layer-${layer}`;
+        section.dataset.layer = layer;
+        const title = document.createElement("h3");
+        title.className = "recall-hit-section-title";
+        title.textContent = `${layerLabel(layer)} · ${groupHits.length}`;
+        section.appendChild(title);
+        for (const hit of groupHits) section.appendChild(renderHitRow(hit));
+        nodes.push(section);
+      }
+      bodyEl.replaceChildren(...nodes);
     }
 
     async function toggleRecallHit(row, hit) {
@@ -565,7 +701,16 @@
     };
   }
 
-  const api = { createRecallPanel, eventBodyText, fmtEventTime, focusEventInTrace };
+  const api = {
+    createRecallPanel,
+    eventBodyText,
+    fmtEventTime,
+    focusEventInTrace,
+    groupHitsByLayer,
+    layerFromHit,
+    normalizeSearchResult,
+    LAYER_ORDER,
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   globalScope.RecallPanel = api;
 })(typeof window !== "undefined" ? window : globalThis);

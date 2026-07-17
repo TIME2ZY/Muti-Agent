@@ -306,7 +306,7 @@ curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/
 - 发现需要别人处理的问题 → 发消息/回复，行首 @ 对方（不要 spawn 子代理）
 - 想主动汇报进度 → 直接发消息
 - 需要更多上下文 → 发消息询问
-- 想"回忆"之前做过的决策 → 用下面的 session-search / read-invocation
+- 想"回忆"之前做过的决策 → **先读 prompt 顶部 Active Memories**，不足再用 session-search
 
 注意：
 - @mention 必须单独出现在行首才会触发路由（例如 \`@Codex 请 review\`）
@@ -331,7 +331,7 @@ curl -G ${apiUrl}/api/callbacks/list-invocations -H "X-Callback-Token: $SHIFT_CA
 
 返回：\`{ invocations: [{ invocationId, agent, startedAt, endedAt, state, eventCount }] }\`
 
-## 搜索本会话所有 invocation 的历史（按关键词）
+## 搜索本会话历史（分层：memory / message / evidence）
 
 \`\`\`bash
 curl -G ${apiUrl}/api/callbacks/session-search \\
@@ -339,10 +339,16 @@ curl -G ${apiUrl}/api/callbacks/session-search \\
   --data-urlencode "sessionId=$SHIFT_THREAD_ID" \\
   --data-urlencode "invocationId=$SHIFT_INVOCATION_ID" \\
   --data-urlencode "query=redis 端口" \\
-  --data-urlencode "limit=10"
+  --data-urlencode "limit=10" \\
+  --data-urlencode "layers=memory,message,evidence"
 \`\`\`
 
-返回：\`{ hits: [{ invocationId, eventNo, kind, ts, snippet, sourceKind, sourceId }] }\`。消息或记忆命中可能没有 invocationId，此时 snippet 即为可回忆内容。
+返回：\`{ query, limit, layers: { memory, message, evidence }, truncated, hits: [{ layer, score, snippet, sourceKind, sourceId, kind, invocationId, eventNo, memoryId? }] }\`。
+
+要点：
+- **优先阅读 \`layer=memory\`** 的 hit；evidence 只用于下钻核对
+- 空 query 或仅“继续” → 只返回最近活跃记忆（recency-only），不会扫全量日志
+- 可选 \`includeRetired=1\` 查看已 superseded 的旧记忆；默认不返回
 
 ## 读取某次 invocation 的完整事件流
 
@@ -359,9 +365,10 @@ curl -G ${apiUrl}/api/callbacks/read-invocation \\
 返回：\`{ invocationId, events: [...], total, from, limit }\`
 
 回忆工作流建议：
-1. 不确定"之前为什么这样做" → \`session-search query="关键词"\`
-2. 找到命中点 → \`read-invocation targetInvocationId=<id>\` 看完整记录
-3. 不要凭印象猜 — 先查再说
+1. 先读 Active Memories 卡片
+2. 不够 → \`session-search query="关键词"\`，优先 memory 层
+3. 需要过程细节 → \`read-invocation targetInvocationId=<id>\`
+4. 不要凭印象猜 — 先查再说
 `;
 }
 

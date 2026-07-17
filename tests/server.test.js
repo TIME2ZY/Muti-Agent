@@ -2195,13 +2195,18 @@ test("/api/callbacks/session-search rejects invalid token with 401", async () =>
   });
 });
 
-test("/api/callbacks/session-search rejects missing query with 400", async () => {
+test("/api/callbacks/session-search empty query returns recency payload shape", async () => {
   await withActiveChat(async (baseUrl, sid, captured) => {
     const resp = await fetch(
       `${baseUrl}/api/callbacks/session-search?sessionId=${sid}&invocationId=${captured.env.SHIFT_INVOCATION_ID}`,
       { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
     );
-    assert.equal(resp.status, 400);
+    assert.equal(resp.status, 200);
+    const body = await resp.json();
+    assert.ok(Array.isArray(body.hits));
+    assert.ok(body.layers);
+    assert.equal(typeof body.layers.memory, "number");
+    assert.equal(typeof body.truncated, "boolean");
   });
 });
 
@@ -2227,6 +2232,9 @@ test("/api/callbacks/session-search returns hits during active chat", async () =
     assert.equal(body.limit, 10);
     assert.ok(body.hits.length >= 1, `expected at least one hit, got ${JSON.stringify(body.hits)}`);
     assert.match(body.hits[0].snippet, /redis clustering/);
+    assert.ok(body.layers);
+    assert.ok(typeof body.hits[0].layer === "string");
+    assert.ok(typeof body.hits[0].score === "number");
   });
 });
 
@@ -2700,6 +2708,14 @@ test("frontend recall expand uses shared process panel path not flat dump as pri
   assert.match(recallJs, /emptyFallback:\s*true/);
   assert.match(recallJs, /recall-raw-events/);
   assert.match(recallJs, /rawEvents/);
+  // Wave R2: search hits grouped by memory/message/evidence layers.
+  assert.match(recallJs, /groupHitsByLayer/);
+  assert.match(recallJs, /recall-hit-section/);
+  assert.match(recallJs, /recall-hit-layer/);
+  assert.match(recallJs, /layer-\$\{layer\}/);
+  const recallCss = fs.readFileSync(path.join(__dirname, "../public/styles", "recall.css"), "utf8");
+  assert.match(recallCss, /\.recall-layer-chip/);
+  assert.match(recallCss, /\.recall-hit-layer\.layer-memory/);
   // Debug dump helper may remain for raw details, but must not be the only path.
   assert.match(recallJs, /function eventBodyText/);
   // Recall copy is locale-driven (N2).
@@ -2959,6 +2975,8 @@ test("A2A-routed agents get persona identity + light session header, not full bo
   assert.match(prompts[1], /Agent: Gemini/);
   assert.doesNotMatch(prompts[1], /<!-- 回忆铁律/);
   assert.doesNotMatch(prompts[1], /<!-- Digest/);
+  // Wave R: A2A turns get compact Active Memory Card, not the full bootstrap packet.
+  assert.match(prompts[1], /<!-- Active Memories/);
   assert.match(prompts[1], /任务交接/);
   assert.match(prompts[1], /codex result/);
   // No ```handoff block → soft degraded path still routes with warning
@@ -3206,6 +3224,9 @@ test("buildCallbackInstructions includes sessionId, SHIFT_THREAD_ID and recall r
   assert.match(instructions, /\/api\/callbacks\/list-invocations/);
   assert.match(instructions, /\/api\/callbacks\/session-search/);
   assert.match(instructions, /\/api\/callbacks\/read-invocation/);
+  assert.match(instructions, /layer=memory/);
+  assert.match(instructions, /Active Memories/);
+  assert.match(instructions, /layers=memory,message,evidence/);
 });
 
 test("chat records invocation events and recall routes expose them (no token = frontend path)", async () => {

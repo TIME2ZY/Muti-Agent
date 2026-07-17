@@ -21,5 +21,7 @@ describe("brand identifiers", () => {
     assert.equal(brand.ENV.THREAD_ID, "SHIFT_THREAD_ID");
     assert.equal(brand.ENV.UI_TOKEN, "SHIFT_UI_TOKEN");
     assert.equal(brand.ENV.RETRIEVE_BUDGET_CHARS, "SHIFT_RETRIEVE_BUDGET_CHARS");
+    assert.equal(brand.ENV.RETRIEVE_RELATED_LIMIT, "SHIFT_RETRIEVE_RELATED_LIMIT");
+    assert.equal(brand.ENV.SEARCH_MEMORY_QUOTA, "SHIFT_SEARCH_MEMORY_QUOTA");
   });
 });

@@ -44,12 +44,29 @@ test("createRecallApi searches a session transcript", async () => {
   const client = recallApi.createRecallApi(async (url) => {
     calls.push(url);
     if (url === "/api/callbacks/session-search?sessionId=s1&query=hello%20world&limit=25") {
-      return makeResponse(200, JSON.stringify({ hits: [{ invocationId: "i1" }], query: "hello world", limit: 25 }));
+      return makeResponse(
+        200,
+        JSON.stringify({
+          hits: [{ invocationId: "i1", layer: "evidence", score: 12 }],
+          query: "hello world",
+          limit: 25,
+          layers: { memory: 0, message: 0, evidence: 1 },
+          truncated: false,
+          weakQuery: false,
+        })
+      );
     }
     throw new Error(`unexpected url: ${url}`);
   });
 
-  assert.deepEqual(await client.searchSession("s1", "hello world", { limit: 25 }), [{ invocationId: "i1" }]);
+  assert.deepEqual(await client.searchSession("s1", "hello world", { limit: 25 }), {
+    hits: [{ invocationId: "i1", layer: "evidence", score: 12 }],
+    layers: { memory: 0, message: 0, evidence: 1 },
+    query: "hello world",
+    limit: 25,
+    truncated: false,
+    weakQuery: false,
+  });
   assert.deepEqual(calls, [
     "/api/callbacks/session-search?sessionId=s1&query=hello%20world&limit=25",
   ]);

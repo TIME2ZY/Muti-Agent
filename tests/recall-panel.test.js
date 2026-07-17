@@ -4,6 +4,9 @@ const {
   eventBodyText,
   createRecallPanel,
   focusEventInTrace,
+  groupHitsByLayer,
+  layerFromHit,
+  normalizeSearchResult,
 } = require("../public/recall-panel.js");
 const helpers = require("../public/message-process-helpers.js");
 const { locale } = require("../public/locale-zh-CN.js");
@@ -44,6 +47,24 @@ test("eventBodyText smoke: tool.finished and command.finished shapes", () => {
     }),
     /exit 0/
   );
+});
+
+test("groupHitsByLayer orders memory before message and evidence", () => {
+  const groups = groupHitsByLayer([
+    { sourceKind: "invocation-event", kind: "text.delta" },
+    { layer: "memory", kind: "memory.handoff" },
+    { sourceKind: "message", kind: "message.user" },
+  ]);
+  assert.equal(groups.memory.length, 1);
+  assert.equal(groups.message.length, 1);
+  assert.equal(groups.evidence.length, 1);
+  assert.equal(layerFromHit({ sourceKind: "memory-entry" }), "memory");
+});
+
+test("normalizeSearchResult accepts legacy hit arrays", () => {
+  const result = normalizeSearchResult([{ layer: "memory", kind: "memory.decision" }]);
+  assert.equal(result.hits.length, 1);
+  assert.equal(result.layers.memory, 1);
 });
 
 test("createRecallPanel uses locale.recall for toggle label", () => {

@@ -21,4 +21,8 @@ test("locale.recall covers process-panel and empty states", () => {
   assert.match(locale.recall.rawEvents(3), /原始事件/);
   assert.match(locale.recall.pageTruncated(200, 500), /200/);
   assert.match(locale.recall.pageTruncated(200, 500), /500/);
+  assert.equal(locale.recall.layerMemory, "记忆");
+  assert.equal(locale.recall.layerEvidence, "证据");
+  assert.match(locale.recall.layerSummary({ memory: 1, message: 2, evidence: 3 }, 6), /记忆 1/);
+  assert.match(locale.recall.scoreLabel(12.4), /12/);
 });

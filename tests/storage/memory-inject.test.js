@@ -5,12 +5,18 @@ const {
   DEFAULT_A2A_MEMORY_BUDGET_CHARS,
   DEFAULT_MEMORY_BUDGET_CHARS,
   DEFAULT_RECENT_MEMORY_LIMIT,
+  DEFAULT_RELATED_MEMORY_LIMIT,
+  DEFAULT_SEARCH_MEMORY_QUOTA,
+  DEFAULT_SEARCH_MESSAGE_QUOTA,
   MEMORY_DATA_CLOSE,
   MEMORY_DATA_OPEN,
   renderActiveMemoryCard,
   resolveA2AMemoryBudget,
   resolveMemoryBudget,
   resolveRecentMemoryLimit,
+  resolveRelatedMemoryLimit,
+  resolveSearchMemoryQuota,
+  resolveSearchMessageQuota,
 } = require("../../src/storage/memory-inject");
 
 function memory(overrides = {}) {
@@ -77,8 +83,13 @@ test("memory injection config uses aligned defaults and bounded overrides", () =
   assert.equal(resolveMemoryBudget({}), DEFAULT_MEMORY_BUDGET_CHARS);
   assert.equal(resolveA2AMemoryBudget({}), DEFAULT_A2A_MEMORY_BUDGET_CHARS);
   assert.equal(resolveRecentMemoryLimit({}), DEFAULT_RECENT_MEMORY_LIMIT);
+  assert.equal(resolveRelatedMemoryLimit({}), DEFAULT_RELATED_MEMORY_LIMIT);
+  assert.equal(resolveSearchMemoryQuota({}), DEFAULT_SEARCH_MEMORY_QUOTA);
+  assert.equal(resolveSearchMessageQuota({}), DEFAULT_SEARCH_MESSAGE_QUOTA);
   assert.equal(resolveMemoryBudget({ SHIFT_RETRIEVE_BUDGET_CHARS: "1234" }), 1234);
   assert.equal(resolveA2AMemoryBudget({ SHIFT_RETRIEVE_A2A_BUDGET_CHARS: "900" }), 900);
   assert.equal(resolveRecentMemoryLimit({ SHIFT_RETRIEVE_RECENT_LIMIT: "9" }), 9);
+  assert.equal(resolveRelatedMemoryLimit({ SHIFT_RETRIEVE_RELATED_LIMIT: "3" }), 3);
+  assert.equal(resolveSearchMemoryQuota({ SHIFT_SEARCH_MEMORY_QUOTA: "10" }), 10);
   assert.equal(resolveMemoryBudget({ SHIFT_RETRIEVE_BUDGET_CHARS: "bad" }), 4000);
 });

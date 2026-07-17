@@ -109,6 +109,13 @@
       noSession: "暂无会话",
       emptyList: "本会话暂无调用记录",
       noHits: "无匹配结果",
+      layerMemory: "记忆",
+      layerMessage: "消息",
+      layerEvidence: "证据",
+      layerSummary: (layers, total) =>
+        `共 ${total} 条 · 记忆 ${layers.memory || 0} · 消息 ${layers.message || 0} · 证据 ${layers.evidence || 0}`,
+      recencyOnly: "空关键词：仅展示最近活跃记忆",
+      scoreLabel: (score) => `分 ${Number(score).toFixed(0)}`,
     },
   };
 

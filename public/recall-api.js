@@ -43,13 +43,38 @@
         })));
       },
       async searchSession(sessionId, query, options = {}) {
-        const data = await jsonOrThrow(await request(buildUrl("/api/callbacks/session-search", {
-          sessionId,
-          query,
-          limit: options.limit ?? 20,
-        })));
-        return data.hits || [];
+        const data = await jsonOrThrow(
+          await request(
+            buildUrl("/api/callbacks/session-search", {
+              sessionId,
+              query,
+              limit: options.limit ?? 20,
+              layers: options.layers,
+              includeRetired: options.includeRetired ? "1" : undefined,
+              includeThinking: options.includeThinking ? "1" : undefined,
+            })
+          )
+        );
+        // Wave R2: full search contract (hits + layer stats). Callers that only
+        // need rows can read `.hits`.
+        return {
+          hits: Array.isArray(data.hits) ? data.hits : [],
+          layers: normalizeLayerCounts(data.layers),
+          query: data.query ?? query ?? "",
+          limit: Number(data.limit) || options.limit || 20,
+          truncated: Boolean(data.truncated),
+          weakQuery: Boolean(data.weakQuery),
+        };
       },
+    };
+  }
+
+  function normalizeLayerCounts(layers) {
+    const src = layers && typeof layers === "object" ? layers : {};
+    return {
+      memory: Number(src.memory) || 0,
+      message: Number(src.message) || 0,
+      evidence: Number(src.evidence) || 0,
     };
   }
 
