@@ -135,7 +135,7 @@ test("files mode can still merge file hits when requested", async () => {
     ts: "2026-07-11T00:00:00.000Z",
     snippet: "legacy sqlite memory",
   };
-  const { storage, service } = createFixture({
+  const { storage } = createFixture({
     searchTranscript: async () => [fileOnly],
   });
   const filesService = createRecallService({
