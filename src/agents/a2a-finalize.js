@@ -7,6 +7,10 @@ const {
   resolveHandoffPolicyMode,
   DECISIONS,
 } = require("./handoff-policy");
+const {
+  buildFinalizeMetrics,
+  logFinalizeMetrics,
+} = require("./handoff-metrics");
 
 /**
  * Unified A2A route finalization for chat turn-end and callback postMessage.
@@ -21,6 +25,7 @@ const {
  *   handoffByTarget: Record<string, object|null>,
  *   handoffQualityByTarget: Record<string, object>,
  *   mode: string,
+ *   metrics: object|null,
  * }}
  */
 function finalizeA2ARoutes(input = {}) {
@@ -44,6 +49,7 @@ function finalizeA2ARoutes(input = {}) {
   const sessionId = input.sessionId || threadId;
   const agentLabels = input.agentLabels || {};
   const source = input.source || "chat";
+  const logger = input.logger || console;
   const aborted =
     input.controller && input.controller.signal && input.controller.signal.aborted
       ? true
@@ -62,6 +68,7 @@ function finalizeA2ARoutes(input = {}) {
   const enqueued = [];
   const skipped = [];
   const repairs = [];
+  let capturedCount = 0;
 
   for (const target of mentions) {
     if (aborted) break;
@@ -118,8 +125,11 @@ function finalizeA2ARoutes(input = {}) {
         quality,
         blockIndex: handoffMatch.blockIndex,
       });
-      if (capture?.captured && sendSse && capture.event) {
-        sendSse("memory-captured", capture.event);
+      if (capture?.captured) {
+        capturedCount += 1;
+        if (sendSse && capture.event) {
+          sendSse("memory-captured", capture.event);
+        }
       }
     }
 
@@ -206,6 +216,23 @@ function finalizeA2ARoutes(input = {}) {
     input.a2aState.a2aCount = a2aCount;
   }
 
+  const metrics = buildFinalizeMetrics({
+    source,
+    mode,
+    threadId: sessionId,
+    invocationId,
+    mentions,
+    enqueued,
+    repairs,
+    skipped,
+    handoffQualityByTarget,
+    capturedCount,
+  });
+  if (metrics) {
+    logFinalizeMetrics(metrics, logger);
+    if (sendSse) sendSse("handoff-metrics", metrics);
+  }
+
   return {
     mentions,
     enqueued,
@@ -215,6 +242,8 @@ function finalizeA2ARoutes(input = {}) {
     handoffQualityByTarget,
     mode,
     a2aCount,
+    metrics,
+    capturedCount,
   };
 }
 

@@ -298,6 +298,7 @@ function createServer(options = {}) {
     persistInvocations: invocationRegistry.persist,
     durableRecorder,
     memoryCapture,
+    logger,
   });
 
   const server = http.createServer(async (req, res) => {
