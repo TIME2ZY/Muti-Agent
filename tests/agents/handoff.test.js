@@ -409,8 +409,8 @@ test("shouldInjectReceivingReview for implementer after reviewer", () => {
   );
 });
 
-test("renderHandoffTask appendix uses enlarged default budget", () => {
-  const h = parseHandoffBody("what: w\nwhy: y\nnext_action: n");
+test("renderHandoffTask appendix uses controlled budget for ok packs", () => {
+  const h = parseHandoffBody("what: w\nwhy: y\nnext_action: n\nfiles:\n  - a.js");
   const body = "x".repeat(6000) + "KEEP_END";
   const text = renderHandoffTask({
     handoff: h,
@@ -420,6 +420,53 @@ test("renderHandoffTask appendix uses enlarged default budget", () => {
     userPrompt: "u",
   });
   assert.match(text, /KEEP_END/);
-  assert.ok(handoff.DEFAULT_APPENDIX_CHARS >= 5000);
-  assert.ok(handoff.DEGRADED_APPENDIX_CHARS >= 8000);
+  assert.match(text, /budget=2000/);
+  assert.ok(handoff.APPENDIX_OK_FULL <= 2000);
+  assert.ok(handoff.APPENDIX_EMPTY >= 6000);
+});
+
+test("resolveAppendixChars shrinks when memory card is present", () => {
+  const h = parseHandoffBody("what: w\nwhy: y\nnext_action: n");
+  const q = evaluateHandoff(h);
+  const base = handoff.resolveAppendixChars(q, h, { hasMemoryCard: false });
+  const withMem = handoff.resolveAppendixChars(q, h, { hasMemoryCard: true });
+  assert.ok(withMem < base);
+  assert.ok(withMem >= 1000);
+});
+
+test("renderReceiveBundle orders memory, policy banner, task, and outbound card", () => {
+  const h = parseHandoffBody(
+    "to: gemini\nwhat: do work\nwhy: because\nnext_action: ship"
+  );
+  const q = evaluateHandoff(h, { routedTo: "opencode" });
+  const bundle = handoff.renderReceiveBundle({
+    handoff: h,
+    quality: q,
+    fromAgent: "codex",
+    fromLabel: "Codex",
+    toAgentId: "opencode",
+    toLabel: "OpenCode",
+    fromContent: "prior narrative",
+    userPrompt: "user goal",
+    memoryCard: "<!-- Active Memories (1) -->\nJWT decision\n<!-- /Active Memories -->",
+  });
+  assert.match(bundle.text, /Receive Bundle/);
+  assert.match(bundle.text, /Active Memories/);
+  assert.match(bundle.text, /Policy Banner/);
+  assert.match(bundle.text, /toMismatch|to_routed/);
+  assert.match(bundle.text, /Structured Handoff|do work/);
+  assert.match(bundle.text, /A2A Handoff Card/);
+  const memIdx = bundle.text.indexOf("Active Memories");
+  const bannerIdx = bundle.text.indexOf("Policy Banner");
+  const taskIdx = bundle.text.indexOf("to_routed");
+  const cardIdx = bundle.text.indexOf("A2A Handoff Card");
+  assert.ok(memIdx < bannerIdx || bannerIdx === -1 || memIdx < taskIdx);
+  assert.ok(taskIdx < cardIdx);
+  assert.equal(bundle.hasMemoryCard, true);
+});
+
+test("renderPolicyBanner is empty for clean ok handoffs", () => {
+  const h = parseHandoffBody("to: opencode\nwhat: w\nwhy: y\nnext_action: n");
+  const q = evaluateHandoff(h, { routedTo: "opencode" });
+  assert.equal(handoff.renderPolicyBanner(q), "");
 });
