@@ -70,6 +70,68 @@ test("renderMd renders collapsible fenced code blocks after 20 lines", () => {
   assert.match(html, /class="language-js"/);
 });
 
+test("renderMd renders blockquotes after escHtml (leading > becomes &gt;)", () => {
+  const simple = markdownLite.renderMd("> hello");
+  assert.match(simple, /<blockquote class="md-quote">hello<\/blockquote>/);
+  assert.doesNotMatch(simple, /&gt; hello/);
+
+  const multi = markdownLite.renderMd("> a\n> b\n> c");
+  assert.match(
+    multi,
+    /<blockquote class="md-quote">a<br>b<br>c<\/blockquote>/
+  );
+
+  // Blank quote line keeps the block open (GFM-ish soft continue).
+  const withBlank = markdownLite.renderMd("> a\n>\n> b");
+  assert.match(
+    withBlank,
+    /<blockquote class="md-quote">a<br><br>b<\/blockquote>/
+  );
+
+  // Quote content stays escaped.
+  const safe = markdownLite.renderMd("> <script>x</script>");
+  assert.match(safe, /<blockquote class="md-quote">/);
+  assert.match(safe, /&lt;script&gt;/);
+  assert.doesNotMatch(safe, /<script>/);
+});
+
+test("isBlockquoteLine accepts raw > and escaped &gt;", () => {
+  assert.equal(markdownLite.isBlockquoteLine("> hi"), true);
+  assert.equal(markdownLite.isBlockquoteLine("&gt; hi"), true);
+  assert.equal(markdownLite.isBlockquoteLine("&gt;hi"), true);
+  assert.equal(markdownLite.isBlockquoteLine("not a quote"), false);
+  assert.equal(markdownLite.stripBlockquotePrefix("&gt; hi"), "hi");
+  assert.equal(markdownLite.stripBlockquotePrefix("> hi"), "hi");
+});
+
+test("renderMd treats unclosed fences as code through EOF", () => {
+  const html = markdownLite.renderMd("before\n```js\nconst x = 1\nstill code");
+  assert.match(html, /<p>before<\/p>/);
+  assert.match(html, /class="md-code /);
+  assert.match(html, /class="language-js"/);
+  assert.match(html, /const x = 1/);
+  assert.match(html, /still code/);
+  // Must not leak fence markers as a paragraph of backticks.
+  assert.doesNotMatch(html, /<p>```/);
+  assert.doesNotMatch(html, /<p>`js/);
+});
+
+test("renderMd unclosed fence without language still becomes a code block", () => {
+  const html = markdownLite.renderMd("```\nplain code");
+  assert.match(html, /class="md-code /);
+  assert.match(html, /plain code/);
+  assert.doesNotMatch(html, /<p>```/);
+});
+
+test("renderMd closed fences still win over unclosed trailing text", () => {
+  const html = markdownLite.renderMd("```js\nclosed\n```\n\nafter");
+  assert.match(html, /class="language-js"/);
+  assert.match(html, /closed/);
+  assert.match(html, /<p>after<\/p>/);
+  // One code shell only — trailing "after" is not swallowed.
+  assert.equal((html.match(/class="md-code /g) || []).length, 1);
+});
+
 test("renderMd keeps tight ordered lists in a single <ol>", () => {
   const html = markdownLite.renderMd("1. a\n2. b\n3. c");
   assert.match(html, /<ol>\s*<li>a<\/li>\s*<li>b<\/li>\s*<li>c<\/li>\s*<\/ol>/);

@@ -25,6 +25,18 @@
     return /^\|?[\s:|-]+\|[\s:|-]+\|?\s*$/.test(t);
   }
 
+  /**
+   * Blockquote prefix after escHtml: ">" becomes "&gt;".
+   * Accept both so pre-escape call sites (if any) still work.
+   */
+  function isBlockquoteLine(line) {
+    return /^(&gt;|>)\s?/.test(String(line || ""));
+  }
+
+  function stripBlockquotePrefix(line) {
+    return String(line || "").replace(/^(&gt;|>)\s?/, "");
+  }
+
   function isBlockStartLine(line) {
     const raw = String(line || "");
     if (!raw.trim()) return true;
@@ -32,7 +44,7 @@
     if (/^#{1,6}\s+/.test(raw)) return true;
     if (/^[-*]\s+/.test(raw)) return true;
     if (/^\d+\.\s+/.test(raw)) return true;
-    if (/^>\s?/.test(raw)) return true;
+    if (isBlockquoteLine(raw)) return true;
     if (isTableRowLine(raw)) return true;
     return false;
   }
@@ -43,7 +55,7 @@
     if (!raw.trim()) return false;
     if (/^---+\s*$/.test(raw) || /^\*\*\*+\s*$/.test(raw)) return true;
     if (/^#{1,6}\s+/.test(raw)) return true;
-    if (/^>\s?/.test(raw)) return true;
+    if (isBlockquoteLine(raw)) return true;
     if (isTableRowLine(raw)) return true;
     if (marker && new RegExp(`^${marker}\\d+${marker}$`).test(raw.trim())) return true;
     return false;
@@ -303,6 +315,14 @@
       return `${marker}${idx}${marker}`;
     });
 
+    // Unclosed fence (stream abort / model omitted closer): treat rest of
+    // document as a code block so backticks don't leak as raw paragraphs.
+    html = html.replace(/```([\w+-]*)\r?\n?([\s\S]*)$/g, (_, lang, code) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push({ lang: lang || "", code: code.replace(/\n$/, "") });
+      return `${marker}${idx}${marker}`;
+    });
+
     html = html.replace(/`([^`\n]+)`/g, (_, code) => {
       const idx = inlineCodes.length;
       inlineCodes.push(code);
@@ -432,11 +452,11 @@
         continue;
       }
 
-      if (/^>\s?/.test(raw)) {
+      if (isBlockquoteLine(raw)) {
         closeList();
         const quoteLines = [];
-        while (i < lines.length && /^>\s?/.test(lines[i])) {
-          quoteLines.push(lines[i].replace(/^>\s?/, ""));
+        while (i < lines.length && isBlockquoteLine(lines[i])) {
+          quoteLines.push(stripBlockquotePrefix(lines[i]));
           i++;
         }
         out.push(`<blockquote class="md-quote">${quoteLines.join("<br>")}</blockquote>`);
@@ -550,7 +570,9 @@
     scheduleIdle,
     MD_SYNC_HIGHLIGHT_CHARS,
     MD_DEFER_PARSE_CHARS,
-    // list helpers (exported for unit tests)
+    // list / quote helpers (exported for unit tests)
+    isBlockquoteLine,
+    stripBlockquotePrefix,
     matchOrderedItem,
     matchUnorderedItem,
     matchTaskItem,
