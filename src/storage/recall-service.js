@@ -79,6 +79,15 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
   }
 
   async function searchTranscript(threadId, query, options = {}) {
+    const result = await searchSession(threadId, query, options);
+    return result.hits;
+  }
+
+  /**
+   * Active search with layer metadata for session-search API (Wave R1).
+   * Empty / weak query → recency-only memory hits (no full evidence scan).
+   */
+  async function searchSession(threadId, query, options = {}) {
     const limit = Math.max(1, Math.min(Number(options.limit) || 20, 200));
     const includeRetired = Boolean(options.includeRetired);
     const includeThinking =
@@ -86,9 +95,23 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         ? resolveSearchIncludeThinking()
         : Boolean(options.includeThinking);
     const layers = normalizeLayers(options.layers);
-    const terms = extractSearchTerms(query, { maxChars: 200, maxTerms: 8 });
-    const searchQuery = clampSearchQuery(query, 200);
-    if (!searchQuery) return [];
+    const rawQuery = typeof query === "string" ? query : "";
+    const terms = extractSearchTerms(rawQuery, { maxChars: 200, maxTerms: 8 });
+    const searchQuery = clampSearchQuery(rawQuery, 200);
+    const weak = !searchQuery || isWeakQuery(terms, rawQuery);
+
+    if (weak) {
+      const recencyHits = listRecencyHits(threadId, {
+        limit,
+        layers,
+        includeRetired,
+      });
+      return finalizeSearchResult(recencyHits, {
+        query: rawQuery,
+        limit,
+        weakQuery: true,
+      });
+    }
 
     const sqliteHits = trySqlite("search transcript", () => {
       if (!storage.recall) return [];
@@ -107,7 +130,11 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
 
     // With a healthy SQLite index, do not fall back to full-file scans (R0 / R8).
     if (sqliteHits !== undefined && mode !== "files") {
-      return sqliteHits.slice(0, limit);
+      return finalizeSearchResult(sqliteHits.slice(0, limit), {
+        query: searchQuery,
+        limit,
+        weakQuery: false,
+      });
     }
 
     const fileHits = await tryFile(
@@ -116,10 +143,13 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       []
     );
     if (sqliteHits === undefined) {
-      return fileHits.map((hit) => enrichFileHit(hit, terms)).slice(0, limit);
+      return finalizeSearchResult(
+        fileHits.map((hit) => enrichFileHit(hit, terms)).slice(0, limit),
+        { query: searchQuery, limit, weakQuery: false }
+      );
     }
 
-    // mode === "files" (or forced file path): merge lightly but still prefer layered sqlite order.
+    // mode === "files": merge lightly but still prefer layered sqlite order.
     const merged = [];
     const seen = new Set();
     const fileHasUserPrompt = fileHits.some((hit) => hit.invocationId === "_user_prompt");
@@ -133,7 +163,40 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       merged.push(hit);
       if (merged.length >= limit) break;
     }
-    return merged;
+    return finalizeSearchResult(merged, { query: searchQuery, limit, weakQuery: false });
+  }
+
+  function listRecencyHits(threadId, { limit, layers, includeRetired }) {
+    const hits = [];
+    if (layers.includes(LAYER_MEMORY) && storage?.memory?.listActive) {
+      try {
+        const recent = storage.memory.listActive(threadId, {
+          limit: Math.min(limit, resolveRecentMemoryLimit()),
+        });
+        for (const memory of recent) {
+          if (!includeRetired && RETIRED_STATUSES.has(memory.status)) continue;
+          hits.push({
+            invocationId: memory.sourceInvocationId || "",
+            eventNo: 0,
+            kind: `memory.${memory.kind || "entry"}`,
+            ts: memory.createdAt,
+            snippet: String(memory.content || "").slice(0, 200),
+            sourceKind: "memory-entry",
+            sourceId: memory.id,
+            layer: LAYER_MEMORY,
+            score: 20 + recencyBoost(memory.createdAt) + (memory.status === "confirmed" ? 10 : 0),
+            matchChannels: ["recency"],
+            memoryId: memory.id,
+            memoryStatus: memory.status || null,
+            memoryKind: memory.kind || null,
+            content: String(memory.content || "").slice(0, 2048),
+          });
+        }
+      } catch (error) {
+        logger.error?.(`[searchSession] recency listActive failed: ${error.message}`);
+      }
+    }
+    return hits.slice(0, limit);
   }
 
   function searchSqliteLayers({
@@ -413,11 +476,31 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
   return {
     listInvocationsWithMeta,
     searchTranscript,
+    searchSession,
     retrieveForTurn,
     readInvocationPage,
     // Helpers for tests / future wiring.
     resolveA2AMemoryBudget,
     resolveMemoryBudget,
+  };
+}
+
+function finalizeSearchResult(hits, { query, limit, weakQuery }) {
+  const list = Array.isArray(hits) ? hits : [];
+  const layers = { memory: 0, message: 0, evidence: 0 };
+  for (const hit of list) {
+    const layer = hit.layer || layerForSourceKind(hit.sourceKind);
+    if (layers[layer] !== undefined) layers[layer] += 1;
+    hit.layer = layer;
+    if (typeof hit.score !== "number") hit.score = 0;
+  }
+  return {
+    hits: list,
+    layers,
+    query: query || "",
+    limit,
+    truncated: list.length >= limit,
+    weakQuery: Boolean(weakQuery),
   };
 }
 
@@ -511,8 +594,19 @@ function scoreRecallItem(item, terms) {
   if (item.metadata?.quality?.ok) score += 2;
   if (item.metadata?.partial) score -= 2;
   if (String(item.snippet || item.content || "").trim().length < 8) score -= 5;
-  if (item.sourceKind === "invocation-event" && isThinkingEvidence(item)) score -= 8;
+  if (item.sourceKind === "invocation-event") {
+    score -= evidenceNoisePenalty(item);
+  }
   return score;
+}
+
+function evidenceNoisePenalty(item) {
+  const kind = item.metadata?.kind || item.title || "";
+  if (kind === "thinking.delta" || kind.startsWith("thinking.")) return 12;
+  if (kind === "stderr") return 6;
+  if (kind.startsWith("tool.") || kind === "tool_use" || kind === "tool_result") return 4;
+  if (kind === "invocation-start" || kind === "invocation-end") return 3;
+  return 0;
 }
 
 function scoreMemoryRecord(memory, terms) {

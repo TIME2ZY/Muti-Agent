@@ -1,3 +1,12 @@
+function countHitLayers(hits) {
+  const layers = { memory: 0, message: 0, evidence: 0 };
+  for (const hit of hits || []) {
+    const layer = hit.layer || "evidence";
+    if (layers[layer] !== undefined) layers[layer] += 1;
+  }
+  return layers;
+}
+
 function validateOptionalCallbackAuth({
   sessionId,
   invocationId,
@@ -128,13 +137,16 @@ function createCallbackRoutes({
       const query = url.searchParams.get("query") || "";
       const limitRaw = url.searchParams.get("limit");
       const limit = limitRaw ? Math.max(1, Math.min(200, parseInt(limitRaw, 10) || 20)) : 20;
+      const layers = url.searchParams.get("layers") || "";
+      const includeRetired = ["1", "true", "yes"].includes(
+        String(url.searchParams.get("includeRetired") || "").toLowerCase()
+      );
+      const includeThinking = ["1", "true", "yes"].includes(
+        String(url.searchParams.get("includeThinking") || "").toLowerCase()
+      );
 
       if (!sessionId) {
         sendJson(res, 400, { error: "sessionId is required." });
-        return true;
-      }
-      if (!query) {
-        sendJson(res, 400, { error: "query is required." });
         return true;
       }
       if (
@@ -150,8 +162,24 @@ function createCallbackRoutes({
         return true;
       }
 
-      const hits = await recall.searchTranscript(sessionId, query, { limit });
-      sendJson(res, 200, { hits, query, limit });
+      const searchOptions = { limit, includeRetired, includeThinking };
+      if (layers) searchOptions.layers = layers;
+
+      // Empty/weak query → recency-only (Wave R1). Prefer searchSession when available.
+      let body;
+      if (typeof recall.searchSession === "function") {
+        body = await recall.searchSession(sessionId, query, searchOptions);
+      } else {
+        const hits = await recall.searchTranscript(sessionId, query || " ", searchOptions);
+        body = {
+          hits,
+          query,
+          limit,
+          layers: countHitLayers(hits),
+          truncated: Array.isArray(hits) && hits.length >= limit,
+        };
+      }
+      sendJson(res, 200, body);
       return true;
     }
 

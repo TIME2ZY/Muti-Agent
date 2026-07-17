@@ -123,8 +123,9 @@ test("RECALL_RULE contains the three recall steps + key phrases", () => {
   assert.match(RECALL_RULE, /session-search/);
   assert.match(RECALL_RULE, /read-invocation/);
   assert.match(RECALL_RULE, /不要凭印象猜/);
-  assert.match(RECALL_RULE, /不要凭印象猜/);
   assert.match(RECALL_RULE, /Active Memories/);
+  assert.match(RECALL_RULE, /layer=memory/);
+  assert.match(RECALL_RULE, /空 query/);
 });
 
 test("buildActiveMemoryCard reads only the configured recency window", async () => {

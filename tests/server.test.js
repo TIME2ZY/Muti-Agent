@@ -2195,13 +2195,18 @@ test("/api/callbacks/session-search rejects invalid token with 401", async () =>
   });
 });
 
-test("/api/callbacks/session-search rejects missing query with 400", async () => {
+test("/api/callbacks/session-search empty query returns recency payload shape", async () => {
   await withActiveChat(async (baseUrl, sid, captured) => {
     const resp = await fetch(
       `${baseUrl}/api/callbacks/session-search?sessionId=${sid}&invocationId=${captured.env.SHIFT_INVOCATION_ID}`,
       { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
     );
-    assert.equal(resp.status, 400);
+    assert.equal(resp.status, 200);
+    const body = await resp.json();
+    assert.ok(Array.isArray(body.hits));
+    assert.ok(body.layers);
+    assert.equal(typeof body.layers.memory, "number");
+    assert.equal(typeof body.truncated, "boolean");
   });
 });
 
@@ -2227,6 +2232,9 @@ test("/api/callbacks/session-search returns hits during active chat", async () =
     assert.equal(body.limit, 10);
     assert.ok(body.hits.length >= 1, `expected at least one hit, got ${JSON.stringify(body.hits)}`);
     assert.match(body.hits[0].snippet, /redis clustering/);
+    assert.ok(body.layers);
+    assert.ok(typeof body.hits[0].layer === "string");
+    assert.ok(typeof body.hits[0].score === "number");
   });
 });
 
@@ -3208,6 +3216,9 @@ test("buildCallbackInstructions includes sessionId, SHIFT_THREAD_ID and recall r
   assert.match(instructions, /\/api\/callbacks\/list-invocations/);
   assert.match(instructions, /\/api\/callbacks\/session-search/);
   assert.match(instructions, /\/api\/callbacks\/read-invocation/);
+  assert.match(instructions, /layer=memory/);
+  assert.match(instructions, /Active Memories/);
+  assert.match(instructions, /layers=memory,message,evidence/);
 });
 
 test("chat records invocation events and recall routes expose them (no token = frontend path)", async () => {

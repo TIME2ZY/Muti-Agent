@@ -11,8 +11,10 @@ test("extractSearchTerms keeps identifiers and Chinese signal terms", () => {
 });
 
 test("isWeakQuery treats empty and continue-only prompts as weak", () => {
+  assert.equal(isWeakQuery([], ""), true);
   assert.equal(isWeakQuery([], "继续"), true);
   assert.equal(isWeakQuery(extractSearchTerms("继续"), "继续"), true);
+  assert.equal(isWeakQuery(extractSearchTerms("Hi"), "Hi"), false);
   assert.equal(
     isWeakQuery(extractSearchTerms("JWT 过期 AUTH_EXPIRED"), "JWT 过期 AUTH_EXPIRED"),
     false

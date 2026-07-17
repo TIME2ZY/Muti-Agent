@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const { eventPlainText } = require("./event-plain-text");
 
 function createDualWriteRecorder({ storage, logger = console } = {}) {
   const eventSequences = new Map();
@@ -331,7 +332,7 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
       sourceKind: "invocation-event",
       sourceId: `${event.invocationId}:${event.sequenceNo}`,
       title: event.kind,
-      content: JSON.stringify(event.payload || {}),
+      content: eventPlainText(event.kind, event.payload || {}),
       agentId: event.agentId,
       createdAt: event.createdAt,
       metadata: {

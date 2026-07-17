@@ -404,6 +404,45 @@ test("search filters retired memories by default", async () => {
   }
 });
 
+test("searchSession empty query returns recency-only memory hits with layer stats", async () => {
+  const { storage, service } = createFixture();
+  try {
+    storage.memory.capture({
+      id: "memory-recency",
+      threadId: "thread-1",
+      kind: "decision",
+      content: "prefer recency when query is empty",
+      createdBy: "codex",
+      captureKey: "decision:recency",
+      createdAt: "2026-07-16T12:00:00.000Z",
+    });
+    const result = await service.searchSession("thread-1", "", { limit: 10 });
+    assert.equal(result.weakQuery, true);
+    assert.ok(result.layers.memory >= 1);
+    assert.equal(result.layers.evidence, 0);
+    assert.ok(result.hits.every((hit) => hit.layer === "memory"));
+    assert.ok(result.hits.some((hit) => hit.sourceId === "memory-recency"));
+  } finally {
+    storage.close();
+  }
+});
+
+test("searchSession response includes layer score and layers counts", async () => {
+  const { storage, service } = createFixture();
+  try {
+    const result = await service.searchSession("thread-1", "sqlite memory", { limit: 20 });
+    assert.ok(result.hits.length >= 1);
+    assert.ok(result.hits.every((hit) => typeof hit.layer === "string"));
+    assert.ok(result.hits.every((hit) => typeof hit.score === "number"));
+    assert.equal(
+      result.layers.memory + result.layers.message + result.layers.evidence,
+      result.hits.length
+    );
+  } finally {
+    storage.close();
+  }
+});
+
 test("retrieveForTurn merges recency and related channels and fits budget", async () => {
   const { storage, service } = createFixture();
   try {

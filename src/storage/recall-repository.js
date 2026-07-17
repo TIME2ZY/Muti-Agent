@@ -1,3 +1,5 @@
+const { eventPlainText } = require("./event-plain-text");
+
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 200;
 
@@ -271,13 +273,21 @@ function messageToRecall(row) {
 }
 
 function eventToRecall(row) {
+  let payload = row.payload;
+  if (payload === undefined && row.payload_json != null) {
+    try {
+      payload = typeof row.payload_json === "string" ? JSON.parse(row.payload_json) : row.payload_json;
+    } catch {
+      payload = row.payload_json;
+    }
+  }
   return {
     threadId: row.thread_id,
     windowId: row.window_id,
     sourceKind: "invocation-event",
     sourceId: `${row.invocation_id}:${row.sequence_no}`,
     title: row.kind,
-    content: row.payload_json,
+    content: eventPlainText(row.kind, payload),
     agentId: row.agent_id,
     createdAt: row.created_at,
     metadata: {
@@ -335,4 +345,5 @@ module.exports = {
   messageToRecall,
   eventToRecall,
   memoryToRecall,
+  eventPlainText,
 };

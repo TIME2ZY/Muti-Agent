@@ -115,11 +115,18 @@ function extractSearchTerms(input, options = {}) {
 }
 
 function isWeakQuery(terms, raw = "") {
-  if (!Array.isArray(terms) || terms.length === 0) return true;
   const trimmed = String(raw || "").trim();
   if (!trimmed) return true;
-  if (trimmed.length <= 2) return true;
-  // Single ultra-generic term only.
+  // No extractable terms → treat as weak (recency-only), unless raw itself is a
+  // short non-stop token that can still be used as a contains query.
+  if (!Array.isArray(terms) || terms.length === 0) {
+    const token = trimmed.toLowerCase();
+    if (token.length >= 2 && !STOP_TERMS.has(token) && /[\p{L}\p{N}]/u.test(token)) {
+      return false;
+    }
+    return true;
+  }
+  // Single ultra-generic stop term only.
   if (terms.length === 1 && STOP_TERMS.has(terms[0])) return true;
   return false;
 }

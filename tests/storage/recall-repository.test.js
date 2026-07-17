@@ -77,6 +77,44 @@ test("recall upsert updates the FTS projection without duplicate rows", () => {
   }
 });
 
+test("rebuildThread indexes event plain text instead of raw JSON payload shells", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    seedThread(storage);
+    storage.invocations.start({
+      id: "invocation-1",
+      threadId: "thread-1",
+      windowId: "window-1",
+      agentId: "codex",
+    });
+    storage.invocations.appendEvent({
+      invocationId: "invocation-1",
+      sequenceNo: 0,
+      kind: "text.delta",
+      payload: { text: "readable delta body", nested: { a: 1 } },
+    });
+    storage.invocations.appendEvent({
+      invocationId: "invocation-1",
+      sequenceNo: 1,
+      kind: "handoff",
+      payload: { what: "实现登录", why: "鉴权", next_action: "测一下", to: "opencode" },
+    });
+    storage.recall.rebuildThread("thread-1");
+
+    const delta = storage.recall.getBySource("invocation-event", "invocation-1:0");
+    const handoff = storage.recall.getBySource("invocation-event", "invocation-1:1");
+    assert.equal(delta.content, "readable delta body");
+    assert.doesNotMatch(delta.content, /"nested"/);
+    assert.match(handoff.content, /what: 实现登录/);
+    assert.doesNotMatch(handoff.content, /\{"what"/);
+
+    const hits = storage.recall.search("thread-1", "readable delta");
+    assert.equal(hits[0].sourceId, "invocation-1:0");
+  } finally {
+    storage.close();
+  }
+});
+
 test("recall projection can be rebuilt from durable source tables", () => {
   const storage = createStorage({ file: ":memory:" });
   try {
