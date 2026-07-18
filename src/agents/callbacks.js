@@ -198,6 +198,7 @@ function postMessage(
     source: "callback",
     controller: thread.controller,
     a2aState: thread,
+    logger: console,
   });
 
   return true;

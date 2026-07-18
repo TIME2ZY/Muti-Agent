@@ -7,6 +7,10 @@ const {
 const { ENV } = require("../shared/brand");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
+const {
+  buildA2AInjectMetrics,
+  logA2AInjectMetrics,
+} = require("../agents/handoff-metrics");
 
 const NOOP_DURABLE_RECORDER = Object.freeze({
   ensureWindow: () => null,
@@ -68,9 +72,11 @@ function createChatRoutes({
   persistInvocations,
   durableRecorder,
   memoryCapture,
+  logger = console,
 }) {
   const durable = durableRecorder || NOOP_DURABLE_RECORDER;
   const memories = memoryCapture || NOOP_MEMORY_CAPTURE;
+  const log = logger || options?.logger || console;
   return async function handleChatRoutes(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/invoke") {
       let args;
@@ -421,6 +427,12 @@ function createChatRoutes({
           });
           agentPrompt = a2aSkills.augmentedPrompt;
           turnSkillNames = ["receive-bundle", ...a2aSkills.skillNames];
+          // Stash for metrics after full prompt assembly (needs promptBytes).
+          threadCtx._pendingA2AInject = {
+            agent,
+            fromAgent: prev.agent,
+            memoryCard: a2aMemoryCard,
+          };
         }
 
         // Prompt layout (top → bottom):
@@ -454,6 +466,21 @@ function createChatRoutes({
         promptParts.push(callbackInstructions);
         const promptForAgent = promptParts.filter(Boolean).join("\n\n");
         healthTracker.addInput(promptForAgent.length);
+        if (threadCtx._pendingA2AInject) {
+          const pending = threadCtx._pendingA2AInject;
+          threadCtx._pendingA2AInject = null;
+          const injectMetrics = buildA2AInjectMetrics({
+            source: "chat",
+            agent: pending.agent,
+            fromAgent: pending.fromAgent,
+            threadId: sessionId,
+            invocationId,
+            memoryCard: pending.memoryCard,
+            promptBytes: promptForAgent.length,
+          });
+          logA2AInjectMetrics(injectMetrics, log);
+          sendSse(res, "handoff-metrics", injectMetrics);
+        }
         threadCtx.currentInvocationId = invocationId;
         threadCtx.windowId = durableRun?.window?.id || null;
         const invocationEnv = {
@@ -669,6 +696,7 @@ function createChatRoutes({
           parseMentions: parseA2AMentions,
           controller: invocationController,
           a2aState: threadCtx,
+          logger: log,
         });
         Object.assign(handoffByTarget, finalized.handoffByTarget);
         Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
