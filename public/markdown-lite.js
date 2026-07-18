@@ -333,11 +333,14 @@
 
     // Unclosed fence (stream abort / model omitted closer): treat rest of
     // document as a code block so backticks don't leak as raw paragraphs.
-    html = html.replace(/```([\w+-]*)\r?\n?([\s\S]*)$/g, (_, lang, code) => {
-      const idx = codeBlocks.length;
-      codeBlocks.push({ lang: lang || "", code: code.replace(/\n$/, "") });
-      return `${marker}${idx}${marker}`;
-    });
+    html = html.replace(
+      /^ {0,3}```([\w+-]*)[ \t]*(?:\n([\s\S]*)|$)/m,
+      (_, lang, code = "") => {
+        const idx = codeBlocks.length;
+        codeBlocks.push({ lang: lang || "", code: code.replace(/\n$/, "") });
+        return `${marker}${idx}${marker}`;
+      }
+    );
 
     html = html.replace(/`([^`\n]+)`/g, (_, code) => {
       const idx = inlineCodes.length;

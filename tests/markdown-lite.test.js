@@ -123,6 +123,12 @@ test("renderMd unclosed fence without language still becomes a code block", () =
   assert.doesNotMatch(html, /<p>```/);
 });
 
+test("renderMd does not treat inline triple backticks as an unclosed fence", () => {
+  const html = markdownLite.renderMd("Use ``` to describe a fence in prose.");
+  assert.doesNotMatch(html, /class="md-code /);
+  assert.match(html, /<p>Use ``` to describe a fence in prose\.<\/p>/);
+});
+
 test("renderMd closed fences still win over unclosed trailing text", () => {
   const html = markdownLite.renderMd("```js\nclosed\n```\n\nafter");
   assert.match(html, /class="language-js"/);
