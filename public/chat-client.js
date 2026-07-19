@@ -29,6 +29,7 @@
       agentLabel,
       syncComposerControls,
       onRuntimeStatusChange,
+      onUsageEvent,
     } = deps;
 
     function store() {
@@ -107,6 +108,9 @@
         case "agent-event":
           rt.hasStructuredEvents = true;
           applyAgentEvent(data, sessionId);
+          if (data && data.type === "usage.update" && typeof onUsageEvent === "function") {
+            onUsageEvent(data, sessionId);
+          }
           break;
         case "message":
           if (rt.hasStructuredEvents) break;
@@ -134,7 +138,10 @@
             rt.status = "error";
             notifyStatus(sessionId);
             if (active) {
-              addSystem(`${agentLabel(data.agent)} exited with ${data.code ?? data.signal}`, "error");
+              addSystem(
+                `${agentLabel(data.agent)} exited with ${data.code ?? data.signal}`,
+                "error"
+              );
             }
           }
           // Per-agent finalize so A2A handoffs don't leave the prior agent on "输出中".
@@ -158,17 +165,28 @@
           // Always buffer for session remount; only paint when this session is visible.
           // Server also persists this as a system message for hard reloads.
           if (!Array.isArray(rt.systemNotices)) rt.systemNotices = [];
-          rt.systemNotices.push({ role: "system", agent: "system", content: text, kind: "a2a-route" });
+          rt.systemNotices.push({
+            role: "system",
+            agent: "system",
+            content: text,
+            kind: "a2a-route",
+          });
           if (active) addSystem(text);
           break;
         }
         case "a2a-skipped": {
           const fromLabel = agentLabel(data.from);
           const toLabel = agentLabel(data.to);
-          const reason = data.reason === "max_depth" ? "已达 A2A 深度上限" : data.reason || "未入队";
+          const reason =
+            data.reason === "max_depth" ? "已达 A2A 深度上限" : data.reason || "未入队";
           const text = `⏭ ${fromLabel} → ${toLabel}（${reason}，未入队）`;
           if (!Array.isArray(rt.systemNotices)) rt.systemNotices = [];
-          rt.systemNotices.push({ role: "system", agent: "system", content: text, kind: "a2a-skipped" });
+          rt.systemNotices.push({
+            role: "system",
+            agent: "system",
+            content: text,
+            kind: "a2a-skipped",
+          });
           if (active) addSystem(text);
           break;
         }

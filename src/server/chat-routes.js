@@ -582,6 +582,9 @@ function createChatRoutes({
             }
             if (event.type === "usage.update") {
               healthTracker.applyUsage(event);
+              if (durableRun?.window?.id) {
+                durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
+              }
             }
             durableCoalescer.accept(event);
           },

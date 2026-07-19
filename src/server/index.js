@@ -18,7 +18,7 @@ const sessionMapStore = require("./session-map-store");
 const projectDirService = require("./project-dir");
 const invocationStore = require("./invocation-store");
 const uiSecurity = require("./ui-security");
-const sessionRoutes = require("./session-routes");
+const { createSessionRoutes } = require("./session-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const skills = require("./skills");
@@ -62,7 +62,6 @@ const {
 } = sessionStore;
 const { getSessionMapPath, readSessionMap, deleteSessionMap } = sessionMapStore;
 const { validateProjectDir } = projectDirService;
-const { createSessionRoutes } = sessionRoutes;
 const { createCallbackRoutes } = callbackRoutes;
 const { createChatRoutes } = chatRoutes;
 const {
@@ -75,8 +74,7 @@ const {
   readInvocationFromMap,
 } = invocationStore;
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
-// Git root of the chat app itself — used to detect self-modification
-// (when projectDir points at this repo, we can preview modified code).
+// Git root of the chat app itself, used to detect self-modification previews.
 const SELF_GIT_ROOT = (() => {
   try {
     return worktreeManagerModule.ensureGitRoot(__dirname);
@@ -105,6 +103,7 @@ function publicAgents() {
       model: agent.model,
       modelVendor: modelProfile ? modelProfile.vendorId : "",
       contextTokens: modelProfile ? modelProfile.contextTokens : null,
+      reserveRatio: modelProfile ? modelProfile.reserveRatio : 0.2,
       capabilities: { ...provider.capabilities },
       reasoningEffort: agent.reasoningEffort || "",
       description: agent.description || "",
@@ -242,6 +241,7 @@ function createServer(options = {}) {
     setSessionWorktree: updateWorktreeDual,
     validateProjectDir,
     setSessionProjectDir: updateProjectDirDual,
+    usageStorage: storageContext.storage,
   });
   const handleCallbackRoutes = createCallbackRoutes({
     callbacks,

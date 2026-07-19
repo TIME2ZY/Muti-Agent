@@ -50,9 +50,24 @@ test("createSessionApi reads and updates session-scoped projectDir", async () =>
   assert.match(calls[1].options.body, /"dir":"\/tmp\/next"/);
 });
 
+test("createSessionApi reads session usage summary", async () => {
+  const client = sessionApi.createSessionApi(async (url) => {
+    assert.equal(url, "/api/sessions/s1/usage");
+    return makeResponse(
+      200,
+      JSON.stringify({ available: true, session: { totalTokens: 42 }, agents: [] })
+    );
+  });
+  const summary = await client.readUsage("s1");
+  assert.equal(summary.session.totalTokens, 42);
+});
+
 test("jsonOrThrow surfaces API errors with parsed message", async () => {
   await assert.rejects(
-    () => sessionApi.jsonOrThrow(makeResponse(400, JSON.stringify({ error: "bad input" }), "Bad Request")),
+    () =>
+      sessionApi.jsonOrThrow(
+        makeResponse(400, JSON.stringify({ error: "bad input" }), "Bad Request")
+      ),
     /bad input/
   );
 });

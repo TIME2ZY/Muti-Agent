@@ -29,7 +29,9 @@ test("handleSessionRoutes lists sessions", async () => {
     sendJson: makeSendJson(res),
     readJsonBody: async () => ({}),
     listSessions: () => [{ id: "s1" }],
-    createSession: () => { throw new Error("should not create"); },
+    createSession: () => {
+      throw new Error("should not create");
+    },
     getSession: () => null,
     deleteSession: () => false,
     setSessionWorktree: () => null,
@@ -41,6 +43,38 @@ test("handleSessionRoutes lists sessions", async () => {
   assert.equal(handled, true);
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { sessions: [{ id: "s1" }] });
+});
+
+test("handleSessionRoutes returns per-agent usage summary", async () => {
+  const res = makeRes();
+  const summary = { available: true, session: { totalTokens: 12 }, agents: [] };
+  const handle = sessionRoutes.createSessionRoutes({
+    rootDir: "/root",
+    sessionsFile: "/tmp/sessions.json",
+    worktreeManager: {},
+    cleanupSessionRuntime() {},
+    sendJson: makeSendJson(res),
+    readJsonBody: async () => ({}),
+    listSessions: () => [],
+    createSession: () => null,
+    getSession: () => ({ id: "s1" }),
+    deleteSession: () => false,
+    setSessionWorktree: () => null,
+    validateProjectDir: () => "/root",
+    setSessionProjectDir: () => null,
+    getUsageSummary: (id) => {
+      assert.equal(id, "s1");
+      return summary;
+    },
+  });
+  const handled = await handle(
+    makeReq("GET"),
+    res,
+    new URL("http://127.0.0.1/api/sessions/s1/usage")
+  );
+  assert.equal(handled, true);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, summary);
 });
 
 test("handleSessionRoutes updates projectDir for an existing session", async () => {
@@ -102,7 +136,11 @@ test("handleSessionRoutes discards a worktree and clears the session link", asyn
     setSessionProjectDir: () => null,
   });
 
-  const handled = await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/sessions/s1/worktree/discard"));
+  const handled = await handle(
+    makeReq("POST"),
+    res,
+    new URL("http://127.0.0.1/api/sessions/s1/worktree/discard")
+  );
   assert.equal(handled, true);
   assert.deepEqual(cleared, {
     file: "/tmp/sessions.json",

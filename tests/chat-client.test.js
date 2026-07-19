@@ -19,7 +19,9 @@ function makeDeps(overrides = {}) {
     value: "",
     disabled: false,
     focused: 0,
-    focus() { this.focused += 1; },
+    focus() {
+      this.focused += 1;
+    },
   };
   const btnSend = {
     textContent: "发送",
@@ -38,7 +40,9 @@ function makeDeps(overrides = {}) {
     sessionApi: { createSession: async () => ({ id: "s1" }) },
     createMessage() {},
     hideMentionMenu() {},
-    fetchImpl: async () => { throw new Error("should not fetch"); },
+    fetchImpl: async () => {
+      throw new Error("should not fetch");
+    },
     flushPendingLiveRender() {},
     renderMd: (text) => text,
     sessionController: { loadSessions() {}, refreshSessionList() {} },
@@ -61,9 +65,8 @@ function makeDeps(overrides = {}) {
 test("parseSse emits complete frames and preserves trailing partial data", () => {
   const client = chatClientModule.createChatClient(makeDeps());
   const seen = [];
-  const rest = client.parseSse(
-    "event: message\ndata: {\"text\":\"hi\"}\n\npartial",
-    (event, data) => seen.push({ event, data })
+  const rest = client.parseSse('event: message\ndata: {"text":"hi"}\n\npartial', (event, data) =>
+    seen.push({ event, data })
   );
 
   assert.deepEqual(seen, [{ event: "message", data: { text: "hi" } }]);
@@ -74,7 +77,7 @@ test("parseSse supports CRLF frames and multi-line data payloads", () => {
   const client = chatClientModule.createChatClient(makeDeps());
   const seen = [];
   const rest = client.parseSse(
-    "event: message\r\ndata: {\"text\":\r\ndata: \"hi\"}\r\n\r\nevent: done\r\ndata: {}\r\n\r\n",
+    'event: message\r\ndata: {"text":\r\ndata: "hi"}\r\n\r\nevent: done\r\ndata: {}\r\n\r\n',
     (event, data) => seen.push({ event, data })
   );
 
@@ -99,12 +102,22 @@ test("parseSse skips malformed JSON frames without throwing", () => {
 test("handleSseEvent session updates state and reloads session-scoped data", () => {
   const calls = [];
   const deps = makeDeps({
-    loadProjectDir(id) { calls.push(["project", id]); },
-    loadWorktreeStatus() { calls.push(["worktree"]); },
-    loadWorkspaceState() { calls.push(["workspace"]); },
+    loadProjectDir(id) {
+      calls.push(["project", id]);
+    },
+    loadWorktreeStatus() {
+      calls.push(["worktree"]);
+    },
+    loadWorkspaceState() {
+      calls.push(["workspace"]);
+    },
     sessionController: {
-      loadSessions() { calls.push(["sessions"]); },
-      refreshSessionList() { calls.push(["refresh"]); },
+      loadSessions() {
+        calls.push(["sessions"]);
+      },
+      refreshSessionList() {
+        calls.push(["refresh"]);
+      },
     },
   });
   deps.state.rightPanelTab = "workspace";
@@ -126,15 +139,36 @@ test("handleSseEvent routes canonical agent-event frames into the bound session"
   deps.state.currentSessionId = "visible";
   const client = chatClientModule.createChatClient(deps);
 
-  client.handleSseEvent("agent-event", {
-    type: "progress.update",
-    agent: "opencode",
-    invocationId: "inv-1",
-    items: [],
-  }, { sessionId: "background" });
+  client.handleSseEvent(
+    "agent-event",
+    {
+      type: "progress.update",
+      agent: "opencode",
+      invocationId: "inv-1",
+      items: [],
+    },
+    { sessionId: "background" }
+  );
 
   assert.deepEqual(seen, [["progress.update", "background"]]);
   assert.equal(deps.runtimeStore.get("background").hasStructuredEvents, true);
+});
+
+test("usage.update notifies the usage summary hook", () => {
+  const seen = [];
+  const client = chatClientModule.createChatClient(
+    makeDeps({ onUsageEvent: (event, sessionId) => seen.push({ event, sessionId }) })
+  );
+  const usage = {
+    type: "usage.update",
+    agent: "codex",
+    invocationId: "inv-usage",
+    scope: "turn",
+    mode: "cumulative",
+    totalTokens: 12,
+  };
+  client.handleSseEvent("agent-event", usage, { sessionId: "s1" });
+  assert.deepEqual(seen, [{ event: usage, sessionId: "s1" }]);
 });
 
 test("background SSE does not mutate the visible session UI helpers", () => {
@@ -147,15 +181,27 @@ test("background SSE does not mutate the visible session UI helpers", () => {
       sessions: {},
       projectDir: "",
     },
-    showThinking(agent, sessionId) { calls.push(["think", agent, sessionId]); },
-    appendLive(agent, text, sessionId) { calls.push(["live", agent, text, sessionId]); },
-    addSystem(text) { calls.push(["system", text]); },
-    addDebug(agent, text) { calls.push(["debug", agent, text]); },
+    showThinking(agent, sessionId) {
+      calls.push(["think", agent, sessionId]);
+    },
+    appendLive(agent, text, sessionId) {
+      calls.push(["live", agent, text, sessionId]);
+    },
+    addSystem(text) {
+      calls.push(["system", text]);
+    },
+    addDebug(agent, text) {
+      calls.push(["debug", agent, text]);
+    },
   });
   deps.runtimeStore = deps.state.runtimeStore;
   const client = chatClientModule.createChatClient(deps);
 
-  client.handleSseEvent("agent-start", { agent: "codex", invocationId: "inv-9" }, { sessionId: "bg" });
+  client.handleSseEvent(
+    "agent-start",
+    { agent: "codex", invocationId: "inv-9" },
+    { sessionId: "bg" }
+  );
   client.handleSseEvent("message", { agent: "codex", text: "secret" }, { sessionId: "bg" });
   client.handleSseEvent("stderr", { agent: "codex", text: "noise" }, { sessionId: "bg" });
   client.handleSseEvent("error", { message: "boom" }, { sessionId: "bg" });
@@ -180,16 +226,22 @@ test("a2a-route buffers system notice even when session is in background", () =>
       sessions: {},
       projectDir: "",
     },
-    addSystem(text) { calls.push(text); },
+    addSystem(text) {
+      calls.push(text);
+    },
     agentLabel: (id) => (id === "codex" ? "Codex" : id === "opencode" ? "Gemini" : id),
   });
   const client = chatClientModule.createChatClient(deps);
 
-  client.handleSseEvent("a2a-route", {
-    from: "codex",
-    to: "opencode",
-    handoffDegraded: false,
-  }, { sessionId: "bg" });
+  client.handleSseEvent(
+    "a2a-route",
+    {
+      from: "codex",
+      to: "opencode",
+      handoffDegraded: false,
+    },
+    { sessionId: "bg" }
+  );
 
   assert.deepEqual(calls, []);
   const notices = runtimeStore.get("bg").systemNotices;
@@ -210,16 +262,22 @@ test("a2a-route paints system notice when session is active", () => {
       sessions: {},
       projectDir: "",
     },
-    addSystem(text) { calls.push(text); },
+    addSystem(text) {
+      calls.push(text);
+    },
     agentLabel: (id) => id,
   });
   const client = chatClientModule.createChatClient(deps);
 
-  client.handleSseEvent("a2a-route", {
-    from: "codex",
-    to: "grok",
-    handoffDegraded: true,
-  }, { sessionId: "s1" });
+  client.handleSseEvent(
+    "a2a-route",
+    {
+      from: "codex",
+      to: "grok",
+      handoffDegraded: true,
+    },
+    { sessionId: "s1" }
+  );
 
   assert.equal(calls.length, 1);
   assert.match(calls[0], /codex.*grok/);
@@ -239,7 +297,9 @@ test("a2a-skipped paints system notice when session is active", () => {
       sessions: {},
       projectDir: "",
     },
-    addSystem(text) { calls.push(text); },
+    addSystem(text) {
+      calls.push(text);
+    },
     agentLabel: (id) => id,
   });
   const client = chatClientModule.createChatClient(deps);
@@ -279,11 +339,15 @@ test("agent-exit finalizes the agent so handoffs clear writing state", () => {
   });
   const client = chatClientModule.createChatClient(deps);
 
-  client.handleSseEvent("agent-exit", {
-    agent: "codex",
-    code: 0,
-    signal: null,
-  }, { sessionId: "s1" });
+  client.handleSseEvent(
+    "agent-exit",
+    {
+      agent: "codex",
+      code: 0,
+      signal: null,
+    },
+    { sessionId: "s1" }
+  );
 
   assert.deepEqual(finalized, [["codex", "s1", { error: false }]]);
 });
@@ -339,11 +403,17 @@ test("sendPrompt rejects when no agent can be resolved", async () => {
       value: "hello",
       disabled: false,
       focused: 0,
-      focus() { this.focused += 1; },
+      focus() {
+        this.focused += 1;
+      },
     },
     resolvePromptAgent: () => null,
-    addSystem(text, variant) { calls.push(["system", text, variant]); },
-    setStatus(text, variant) { calls.push(["status", text, variant]); },
+    addSystem(text, variant) {
+      calls.push(["system", text, variant]);
+    },
+    setStatus(text, variant) {
+      calls.push(["status", text, variant]);
+    },
   });
   const client = chatClientModule.createChatClient(deps);
 
@@ -426,11 +496,15 @@ test("sendPrompt keeps per-session controllers so another session can run in par
                     reject(err);
                     return;
                   }
-                  signal.addEventListener("abort", () => {
-                    const err = new Error("aborted");
-                    err.name = "AbortError";
-                    reject(err);
-                  }, { once: true });
+                  signal.addEventListener(
+                    "abort",
+                    () => {
+                      const err = new Error("aborted");
+                      err.name = "AbortError";
+                      reject(err);
+                    },
+                    { once: true }
+                  );
                 });
                 return { done: true, value: undefined };
               },

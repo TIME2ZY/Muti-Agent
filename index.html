@@ -1,160 +1,311 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="shift-ui-token" content="__SHIFT_UI_TOKEN__">
-  <title>SHIFT AGENTS · 交班台</title>
-  <link rel="icon" href="/public/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/public/styles.css">
-  <!-- Prism.js (vendored for offline use) -->
-  <link rel="stylesheet" href="/public/vendor/prism/prism-tomorrow.min.css">
-  <script src="/public/vendor/prism/prism.min.js"></script>
-  <script src="/public/vendor/prism/prism-javascript.min.js"></script>
-  <script src="/public/vendor/prism/prism-typescript.min.js"></script>
-  <script src="/public/vendor/prism/prism-python.min.js"></script>
-  <script src="/public/vendor/prism/prism-bash.min.js"></script>
-  <script src="/public/vendor/prism/prism-json.min.js"></script>
-  <script src="/public/vendor/prism/prism-css.min.js"></script>
-  <script src="/public/vendor/prism/prism-markup.min.js"></script>
-</head>
-<body>
-  <div class="app">
-    <!-- Mobile sidebar toggle -->
-    <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="对话列表" aria-controls="sidebar" aria-expanded="false">
-      <svg class="icon-svg" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path fill="currentColor" d="M2 3.5h12v1.5H2zm0 3.75h12v1.5H2zm0 3.75h12V12.5H2z"/>
-      </svg>
-      对话
-    </button>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="shift-ui-token" content="__SHIFT_UI_TOKEN__" />
+    <title>SHIFT AGENTS · 交班台</title>
+    <link rel="icon" href="/public/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/public/styles.css" />
+    <!-- Prism.js (vendored for offline use) -->
+    <link rel="stylesheet" href="/public/vendor/prism/prism-tomorrow.min.css" />
+    <script src="/public/vendor/prism/prism.min.js"></script>
+    <script src="/public/vendor/prism/prism-javascript.min.js"></script>
+    <script src="/public/vendor/prism/prism-typescript.min.js"></script>
+    <script src="/public/vendor/prism/prism-python.min.js"></script>
+    <script src="/public/vendor/prism/prism-bash.min.js"></script>
+    <script src="/public/vendor/prism/prism-json.min.js"></script>
+    <script src="/public/vendor/prism/prism-css.min.js"></script>
+    <script src="/public/vendor/prism/prism-markup.min.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <!-- Mobile sidebar toggle -->
+      <button
+        class="sidebar-toggle"
+        id="sidebar-toggle"
+        type="button"
+        aria-label="对话列表"
+        aria-controls="sidebar"
+        aria-expanded="false"
+      >
+        <svg
+          class="icon-svg"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path fill="currentColor" d="M2 3.5h12v1.5H2zm0 3.75h12v1.5H2zm0 3.75h12V12.5H2z" />
+        </svg>
+        对话
+      </button>
 
-    <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-head">
-        <button class="btn-new-chat" id="btn-new-chat" type="button">+ 新对话</button>
-      </div>
-      <nav class="session-list" id="session-list" aria-label="对话列表"></nav>
-    </aside>
-
-    <!-- Sidebar overlay (mobile) -->
-    <div class="sidebar-overlay" id="sidebar-overlay"></div>
-
-    <!-- Main -->
-    <main class="main">
-      <div class="main-header">
-        <div class="main-identity">
-          <span class="main-title" title="SHIFT AGENTS · 交班台">SHIFT AGENTS</span>
-          <button type="button" class="current-agent" id="current-agent"
-            title="当前默认 Agent；点击打开 Agents，消息行首 @ 可单次覆盖"
-            aria-label="当前默认 Agent">
-            <span class="current-agent-label">@</span><strong id="current-agent-name">codex</strong>
-          </button>
-          <span class="main-status" id="status" style="display:none"></span>
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-head">
+          <button class="btn-new-chat" id="btn-new-chat" type="button">+ 新对话</button>
         </div>
-
-        <div class="main-header-tools">
-          <div class="header-tool-group" aria-label="项目与工作区">
-            <span class="project-dir" id="project-dir" title="点击修改项目目录">
-              <span class="project-dir-icon" aria-hidden="true">
-                <svg class="icon-svg" width="14" height="14" viewBox="0 0 16 16" focusable="false">
-                  <path fill="currentColor" d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3.2l1.2 1.5H13A1.5 1.5 0 0 1 14.5 5v7A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z"/>
-                </svg>
-              </span>
-              <span class="project-dir-path" id="project-dir-path"></span>
-              <span class="project-dir-edit" aria-hidden="true">
-                <svg class="icon-svg" width="12" height="12" viewBox="0 0 16 16" focusable="false">
-                  <path fill="currentColor" d="M11.7 1.3a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4L6.4 12.6 3 13.5l.9-3.4z"/>
-                </svg>
-              </span>
-            </span>
-            <span class="worktree-status" id="worktree-status" title="当前对话的修改 worktree"></span>
-          </div>
-          <button class="theme-toggle header-icon-btn" id="theme-toggle" type="button"
-            aria-label="切换主题" title="切换主题"></button>
-        </div>
-      </div>
-
-      <div class="skills-bar" id="skills-bar" hidden>
-        <span class="skills-bar-label">已激活能力</span>
-      </div>
-
-      <div class="messages-column" id="messages-column">
-        <section class="messages" id="messages" aria-live="polite" aria-label="消息列表">
-          <div class="empty-state" id="empty-state">
-            <div class="empty-state-icon" aria-hidden="true">✦</div>
-            <p class="empty-state-title">选择默认 Agent 后直接发送，或用 @ 单次指定模型</p>
-            <p class="empty-state-hint">Enter 发送 · Shift + Enter 换行 · 右侧卡片切换默认 Agent</p>
-            <div class="empty-state-chips" id="empty-state-chips" role="group" aria-label="示例提示">
-              <button type="button" class="empty-chip" data-prompt="帮我梳理当前项目结构，并给出优先改进点。">梳理项目</button>
-              <button type="button" class="empty-chip" data-prompt="审查最近改动的 diff，指出风险与可改进处。">审查 diff</button>
-              <button type="button" class="empty-chip" data-prompt="把任务拆成可并行的子任务，并建议合适的 Agent 分工。">并行分工</button>
-            </div>
-          </div>
-          <div class="messages-spacer"></div>
-        </section>
-        <button type="button" class="jump-bottom" id="jump-bottom" hidden
-          aria-label="回到底部">↓ 回到底部</button>
-      </div>
-
-      <aside class="side-panel" id="side-panel" aria-label="右侧面板">
-        <div class="panel-tabs" role="tablist" aria-label="右侧面板标签">
-          <button id="panel-tab-agents" class="panel-tab is-active" type="button" role="tab"
-            aria-selected="true" aria-controls="agent-panel" tabindex="0">Agents</button>
-          <button id="panel-tab-workspace" class="panel-tab" type="button" role="tab"
-            aria-selected="false" aria-controls="workspace-panel" tabindex="-1">
-            工作区<span class="tab-badge" id="workspace-tab-badge" hidden></span>
-          </button>
-          <button id="panel-tab-recall" class="panel-tab" type="button" role="tab"
-            aria-selected="false" aria-controls="recall-panel-inline" tabindex="-1">回忆</button>
-        </div>
-
-        <section class="agent-panel" id="agent-panel" role="tabpanel" aria-labelledby="panel-tab-agents">
-          <div class="agent-tabs" id="agent-tabs" aria-label="可用 Agents"></div>
-        </section>
-
-        <section class="workspace-panel" id="workspace-panel" role="tabpanel" aria-labelledby="panel-tab-workspace" hidden></section>
-
-        <section class="recall-panel-inline" id="recall-panel-inline" role="tabpanel" aria-labelledby="panel-tab-recall" hidden>
-          <div class="recall-search">
-            <input id="recall-search-input-inline" type="search" placeholder="搜索历史（关键词）…" autocomplete="off" />
-          </div>
-          <div class="recall-body" id="recall-body-inline"></div>
-        </section>
+        <nav class="session-list" id="session-list" aria-label="对话列表"></nav>
       </aside>
 
-      <section class="composer">
-        <div class="run-bar" id="run-bar" hidden role="status" aria-live="polite">
-          <span class="run-bar-dot" aria-hidden="true"></span>
-          <span class="run-bar-label" id="run-bar-label">生成中…</span>
-          <span class="run-bar-time" id="run-bar-time"></span>
-          <button type="button" class="run-bar-stop" id="run-bar-stop">停止</button>
-        </div>
-        <div class="composer-shell">
-          <div class="composer-input">
-            <div class="mention-menu" id="mention-menu" role="listbox" aria-label="Agent 提及" hidden></div>
-            <textarea id="prompt" placeholder="直接输入消息，或用 @Agent 单次指定模型…" rows="1"
-              aria-autocomplete="list" aria-controls="mention-menu" aria-expanded="false"></textarea>
+      <!-- Sidebar overlay (mobile) -->
+      <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+      <!-- Main -->
+      <main class="main">
+        <div class="main-header">
+          <div class="main-identity">
+            <span class="main-title" title="SHIFT AGENTS · 交班台">SHIFT AGENTS</span>
+            <button
+              type="button"
+              class="current-agent"
+              id="current-agent"
+              title="当前默认 Agent；点击打开 Agents，消息行首 @ 可单次覆盖"
+              aria-label="当前默认 Agent"
+            >
+              <span class="current-agent-label">@</span
+              ><strong id="current-agent-name">codex</strong>
+            </button>
+            <button
+              type="button"
+              class="context-status"
+              id="context-status"
+              hidden
+              aria-label="当前 Agent 上下文用量"
+              title="打开 Agents 查看上下文用量"
+            >
+              <span class="context-status-label">上下文</span>
+              <strong id="context-status-value">—</strong>
+            </button>
+            <span class="main-status" id="status" style="display: none"></span>
           </div>
-          <div class="composer-actions">
-            <label class="worktree-mode" title="为本次对话创建或复用隔离 worktree">
-              <input id="use-worktree" type="checkbox">
-              <span class="worktree-mode-chip">改代码</span>
-            </label>
-            <div class="composer-actions-right">
-              <button id="btn-send" class="btn-cmd primary" type="button" aria-label="发送" aria-busy="false">发送</button>
+
+          <div class="main-header-tools">
+            <div class="header-tool-group" aria-label="项目与工作区">
+              <span class="project-dir" id="project-dir" title="点击修改项目目录">
+                <span class="project-dir-icon" aria-hidden="true">
+                  <svg
+                    class="icon-svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    focusable="false"
+                  >
+                    <path
+                      fill="currentColor"
+                      d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3.2l1.2 1.5H13A1.5 1.5 0 0 1 14.5 5v7A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z"
+                    />
+                  </svg>
+                </span>
+                <span class="project-dir-path" id="project-dir-path"></span>
+                <span class="project-dir-edit" aria-hidden="true">
+                  <svg
+                    class="icon-svg"
+                    width="12"
+                    height="12"
+                    viewBox="0 0 16 16"
+                    focusable="false"
+                  >
+                    <path
+                      fill="currentColor"
+                      d="M11.7 1.3a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4L6.4 12.6 3 13.5l.9-3.4z"
+                    />
+                  </svg>
+                </span>
+              </span>
+              <span
+                class="worktree-status"
+                id="worktree-status"
+                title="当前对话的修改 worktree"
+              ></span>
+            </div>
+            <button
+              class="theme-toggle header-icon-btn"
+              id="theme-toggle"
+              type="button"
+              aria-label="切换主题"
+              title="切换主题"
+            ></button>
+          </div>
+        </div>
+
+        <div class="skills-bar" id="skills-bar" hidden>
+          <span class="skills-bar-label">已激活能力</span>
+        </div>
+
+        <div class="messages-column" id="messages-column">
+          <section class="messages" id="messages" aria-live="polite" aria-label="消息列表">
+            <div class="empty-state" id="empty-state">
+              <div class="empty-state-icon" aria-hidden="true">✦</div>
+              <p class="empty-state-title">选择默认 Agent 后直接发送，或用 @ 单次指定模型</p>
+              <p class="empty-state-hint">
+                Enter 发送 · Shift + Enter 换行 · 右侧卡片切换默认 Agent
+              </p>
+              <div
+                class="empty-state-chips"
+                id="empty-state-chips"
+                role="group"
+                aria-label="示例提示"
+              >
+                <button
+                  type="button"
+                  class="empty-chip"
+                  data-prompt="帮我梳理当前项目结构，并给出优先改进点。"
+                >
+                  梳理项目
+                </button>
+                <button
+                  type="button"
+                  class="empty-chip"
+                  data-prompt="审查最近改动的 diff，指出风险与可改进处。"
+                >
+                  审查 diff
+                </button>
+                <button
+                  type="button"
+                  class="empty-chip"
+                  data-prompt="把任务拆成可并行的子任务，并建议合适的 Agent 分工。"
+                >
+                  并行分工
+                </button>
+              </div>
+            </div>
+            <div class="messages-spacer"></div>
+          </section>
+          <button type="button" class="jump-bottom" id="jump-bottom" hidden aria-label="回到底部">
+            ↓ 回到底部
+          </button>
+        </div>
+
+        <aside class="side-panel" id="side-panel" aria-label="右侧面板">
+          <div class="panel-tabs" role="tablist" aria-label="右侧面板标签">
+            <button
+              id="panel-tab-agents"
+              class="panel-tab is-active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="agent-panel"
+              tabindex="0"
+            >
+              Agents
+            </button>
+            <button
+              id="panel-tab-workspace"
+              class="panel-tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="workspace-panel"
+              tabindex="-1"
+            >
+              工作区<span class="tab-badge" id="workspace-tab-badge" hidden></span>
+            </button>
+            <button
+              id="panel-tab-recall"
+              class="panel-tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="recall-panel-inline"
+              tabindex="-1"
+            >
+              回忆
+            </button>
+          </div>
+
+          <section
+            class="agent-panel"
+            id="agent-panel"
+            role="tabpanel"
+            aria-labelledby="panel-tab-agents"
+          >
+            <div class="usage-summary" id="usage-summary" aria-live="polite"></div>
+            <div class="agent-tabs" id="agent-tabs" aria-label="可用 Agents"></div>
+          </section>
+
+          <section
+            class="workspace-panel"
+            id="workspace-panel"
+            role="tabpanel"
+            aria-labelledby="panel-tab-workspace"
+            hidden
+          ></section>
+
+          <section
+            class="recall-panel-inline"
+            id="recall-panel-inline"
+            role="tabpanel"
+            aria-labelledby="panel-tab-recall"
+            hidden
+          >
+            <div class="recall-search">
+              <input
+                id="recall-search-input-inline"
+                type="search"
+                placeholder="搜索历史（关键词）…"
+                autocomplete="off"
+              />
+            </div>
+            <div class="recall-body" id="recall-body-inline"></div>
+          </section>
+        </aside>
+
+        <section class="composer">
+          <div class="run-bar" id="run-bar" hidden role="status" aria-live="polite">
+            <span class="run-bar-dot" aria-hidden="true"></span>
+            <span class="run-bar-label" id="run-bar-label">生成中…</span>
+            <span class="run-bar-time" id="run-bar-time"></span>
+            <button type="button" class="run-bar-stop" id="run-bar-stop">停止</button>
+          </div>
+          <div class="composer-shell">
+            <div class="composer-input">
+              <div
+                class="mention-menu"
+                id="mention-menu"
+                role="listbox"
+                aria-label="Agent 提及"
+                hidden
+              ></div>
+              <textarea
+                id="prompt"
+                placeholder="直接输入消息，或用 @Agent 单次指定模型…"
+                rows="1"
+                aria-autocomplete="list"
+                aria-controls="mention-menu"
+                aria-expanded="false"
+              ></textarea>
+            </div>
+            <div class="composer-actions">
+              <label class="worktree-mode" title="为本次对话创建或复用隔离 worktree">
+                <input id="use-worktree" type="checkbox" />
+                <span class="worktree-mode-chip">改代码</span>
+              </label>
+              <div class="composer-actions-right">
+                <button
+                  id="btn-send"
+                  class="btn-cmd primary"
+                  type="button"
+                  aria-label="发送"
+                  aria-busy="false"
+                >
+                  发送
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
-    </main>
-  </div>
+        </section>
+      </main>
+    </div>
 
-  <div class="toast-host" id="toast-host" aria-live="polite" aria-relevant="additions"></div>
+    <div class="toast-host" id="toast-host" aria-live="polite" aria-relevant="additions"></div>
 
-  <!-- Recall now lives as the third tab inside the right-side panel;
+    <!-- Recall now lives as the third tab inside the right-side panel;
        the legacy standalone drawer and overlay have been removed. -->
 
-  <!-- App modules load in order via boot.js (see public/boot.js MODULES). -->
-  <script src="/public/boot.js"></script>
-</body>
+    <!-- App modules load in order via boot.js (see public/boot.js MODULES). -->
+    <script src="/public/boot.js"></script>
+  </body>
 </html>

@@ -1,0 +1,93 @@
+const BILLING_FIELDS = Object.freeze([
+  "inputTokens",
+  "cachedInputTokens",
+  "outputTokens",
+  "reasoningTokens",
+  "totalTokens",
+  "costUsd",
+]);
+
+function emptyBilling() {
+  return Object.fromEntries(BILLING_FIELDS.map((field) => [field, 0]));
+}
+
+function addWindowBilling(target, window) {
+  target.inputTokens += Number(window.billingInputTokens || 0);
+  target.cachedInputTokens += Number(window.billingCachedInputTokens || 0);
+  target.outputTokens += Number(window.billingOutputTokens || 0);
+  target.reasoningTokens += Number(window.billingReasoningTokens || 0);
+  target.totalTokens += Number(window.billingTotalTokens || 0);
+  target.costUsd += Number(window.billingCostUsd || 0);
+}
+
+function newerWindow(candidate, current) {
+  if (!current) return true;
+  const candidateOpen = candidate.state === "active" || candidate.state === "sealing";
+  const currentOpen = current.state === "active" || current.state === "sealing";
+  if (candidateOpen !== currentOpen) return candidateOpen;
+  if (candidate.generation !== current.generation) return candidate.generation > current.generation;
+  return String(candidate.createdAt || "") > String(current.createdAt || "");
+}
+
+function contextSnapshot(window) {
+  if (!window) return null;
+  const contextWindowTokens = Number(window.capacityTokens || 0);
+  const reserveRatio = Number(window.reserveRatio ?? 0.2);
+  const reserveTokens = Math.floor(contextWindowTokens * reserveRatio);
+  const usableContextTokens = Math.max(0, contextWindowTokens - reserveTokens);
+  const contextUsedTokens = Number(window.contextUsedTokens || 0);
+  return {
+    windowId: window.id,
+    generation: window.generation,
+    state: window.state,
+    contextWindowTokens,
+    reserveRatio,
+    reserveTokens,
+    usableContextTokens,
+    contextUsedTokens,
+    remainingTokens: Math.max(0, usableContextTokens - contextUsedTokens),
+    physicalFillRatio: contextWindowTokens > 0 ? contextUsedTokens / contextWindowTokens : 0,
+    budgetFillRatio: usableContextTokens > 0 ? contextUsedTokens / usableContextTokens : 0,
+    contextUsageSource: window.contextUsageSource || "char_estimated",
+  };
+}
+
+function buildUsageSummary(storage, threadId) {
+  if (!storage || !storage.windows || !threadId) {
+    return { available: false, session: emptyBilling(), agents: [] };
+  }
+  const windows = storage.windows.listForThread(threadId);
+  const session = emptyBilling();
+  const agents = new Map();
+
+  for (const window of windows) {
+    addWindowBilling(session, window);
+    if (!agents.has(window.agentId)) {
+      agents.set(window.agentId, {
+        agentId: window.agentId,
+        billing: emptyBilling(),
+        windowCount: 0,
+        latestWindow: null,
+      });
+    }
+    const entry = agents.get(window.agentId);
+    addWindowBilling(entry.billing, window);
+    entry.windowCount += 1;
+    if (newerWindow(window, entry.latestWindow)) entry.latestWindow = window;
+  }
+
+  return {
+    available: true,
+    session,
+    agents: [...agents.values()]
+      .map((entry) => ({
+        agentId: entry.agentId,
+        billing: entry.billing,
+        windowCount: entry.windowCount,
+        context: contextSnapshot(entry.latestWindow),
+      }))
+      .sort((a, b) => a.agentId.localeCompare(b.agentId)),
+  };
+}
+
+module.exports = { BILLING_FIELDS, emptyBilling, buildUsageSummary };

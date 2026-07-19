@@ -35,10 +35,16 @@
   // The recall UI now lives exclusively inside the right-side panel
   // (third tab). The legacy standalone drawer and overlay were removed.
   const recallPanelInlineEl = $("#recall-panel-inline");
-  const recallBodyEl = recallPanelInlineEl ? recallPanelInlineEl.querySelector(".recall-body") : null;
-  const recallSearchInputEl = recallPanelInlineEl ? recallPanelInlineEl.querySelector(".recall-search input") : null;
+  const recallBodyEl = recallPanelInlineEl
+    ? recallPanelInlineEl.querySelector(".recall-body")
+    : null;
+  const recallSearchInputEl = recallPanelInlineEl
+    ? recallPanelInlineEl.querySelector(".recall-search input")
+    : null;
   const currentAgentEl = $("#current-agent");
   const currentAgentNameEl = $("#current-agent-name");
+  const contextStatusEl = $("#context-status");
+  const usageSummaryEl = $("#usage-summary");
   const runBarEl = $("#run-bar");
   const runBarLabelEl = $("#run-bar-label");
   const runBarTimeEl = $("#run-bar-time");
@@ -92,6 +98,7 @@
       recallSearchDebounce: null,
       rightPanelTab: "agents", // agents | workspace | recall
       workspace: window.WorkspacePanel.emptyWorkspaceState(),
+      usageSummary: { available: false, session: {}, agents: [] },
       // NOT live run data — see runtimeStore
       runtimeStore,
     },
@@ -298,7 +305,11 @@
   async function jsonOrThrow(res) {
     const text = await res.text();
     let data = {};
-    try { data = JSON.parse(text); } catch { /* keep text */ }
+    try {
+      data = JSON.parse(text);
+    } catch {
+      /* keep text */
+    }
     if (!res.ok) {
       const err = new Error(data.error || `${res.status} ${res.statusText}`);
       err.body = text;
@@ -335,10 +346,13 @@
     if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "" };
     const agentId = lastAgent || state.selectedAgent || "codex";
     const known = state.agents.find((a) => a.id === agentId);
-    const resolvedId = known ? known.id : (state.agents[0]?.id || "codex");
+    const resolvedId = known ? known.id : state.agents[0]?.id || "codex";
     state.sessions[sid].lastAgent = resolvedId;
     if (sid === state.currentSessionId || !state.currentSessionId) {
-      uiStore.patch({ selectedAgent: resolvedId, lastAgent: resolvedId }, { source: "applySessionAgent" });
+      uiStore.patch(
+        { selectedAgent: resolvedId, lastAgent: resolvedId },
+        { source: "applySessionAgent" }
+      );
       renderAgentTabs();
       renderCurrentAgent();
     }
@@ -412,6 +426,26 @@
   let chatClient = null;
   let renderAgentTabs = () => {};
   let renderCurrentAgent = () => {};
+  let usageLoadToken = 0;
+
+  async function loadUsageSummary(sessionId = state.currentSessionId) {
+    if (!sessionId) {
+      state.usageSummary = { available: false, session: {}, agents: [] };
+      renderAgentTabs();
+      return state.usageSummary;
+    }
+    const token = ++usageLoadToken;
+    try {
+      const summary = await sessionApi.readUsage(sessionId);
+      if (token !== usageLoadToken || state.currentSessionId !== sessionId) return null;
+      state.usageSummary = summary;
+      renderAgentTabs();
+      return summary;
+    } catch (error) {
+      console.warn("Usage summary load failed:", error.message);
+      return null;
+    }
+  }
 
   messageView = window.MessageView.createMessageView({
     messagesEl,
@@ -463,6 +497,7 @@
     }
     try {
       await loadWorktreeStatus();
+      await loadUsageSummary(sessionId || state.currentSessionId);
       if (state.rightPanelTab === "workspace") {
         await workspacePanel.loadWorkspaceState();
       }
@@ -567,6 +602,7 @@
     applySessionAgent,
     remountLiveMessages,
     syncComposerControls,
+    loadUsageSummary,
   });
 
   const RIGHT_TABS = ["agents", "workspace", "recall"];
@@ -616,7 +652,8 @@
   const tablistEl = document.querySelector(".panel-tabs");
   if (tablistEl) {
     tablistEl.addEventListener("keydown", (e) => {
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End")
+        return;
       const idx = RIGHT_TABS.indexOf(state.rightPanelTab);
       if (idx < 0) return;
       e.preventDefault();
@@ -656,8 +693,8 @@
     clearTimeout(state.skillDebounce);
     state.skillDebounce = setTimeout(async () => {
       try {
-        const result = await runLatestSkillsRequest.run(
-          () => apiFetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`).then(jsonOrThrow)
+        const result = await runLatestSkillsRequest.run(() =>
+          apiFetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`).then(jsonOrThrow)
         );
         if (result.applied) renderSkillTags(result.value.active);
       } catch (error) {
@@ -696,6 +733,8 @@
     agentTabsEl,
     currentAgentEl,
     currentAgentNameEl,
+    contextStatusEl,
+    usageSummaryEl,
     state,
     agentLabel,
     agentMention,
@@ -718,6 +757,9 @@
         }
       });
     });
+  }
+  if (contextStatusEl) {
+    contextStatusEl.addEventListener("click", () => activateRightTab("agents"));
   }
 
   async function loadAgents() {
@@ -776,6 +818,7 @@
     agentLabel,
     syncComposerControls,
     onRuntimeStatusChange,
+    onUsageEvent: (_event, sessionId) => loadUsageSummary(sessionId),
   });
 
   /* ═══════════════════════════════════════════════════════════
@@ -841,10 +884,7 @@
   });
 
   // After send clears the textarea (chat-client), re-fit height.
-  const promptValueDesc = Object.getOwnPropertyDescriptor(
-    HTMLTextAreaElement.prototype,
-    "value"
-  );
+  const promptValueDesc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
   if (promptValueDesc && promptValueDesc.set) {
     const nativeSet = promptValueDesc.set;
     Object.defineProperty(promptEl, "value", {
@@ -884,7 +924,11 @@
       autoGrowPrompt();
       updateActiveSkills(promptEl.value);
       const len = promptEl.value.length;
-      try { promptEl.setSelectionRange(len, len); } catch { /* ignore */ }
+      try {
+        promptEl.setSelectionRange(len, len);
+      } catch {
+        /* ignore */
+      }
     });
   }
 

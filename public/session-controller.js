@@ -25,6 +25,7 @@
       applySessionAgent,
       remountLiveMessages,
       syncComposerControls,
+      loadUsageSummary,
     } = deps;
     let switchToken = 0;
 
@@ -148,6 +149,8 @@
       if (token !== switchToken || state.currentSessionId !== id) return;
       await loadWorktreeStatus();
       if (token !== switchToken || state.currentSessionId !== id) return;
+      if (typeof loadUsageSummary === "function") await loadUsageSummary(id);
+      if (token !== switchToken || state.currentSessionId !== id) return;
       if (state.rightPanelTab === "workspace") {
         await loadWorkspaceState();
       }
@@ -181,6 +184,7 @@
           applySessionAgent(session.id, state.selectedAgent || "codex");
         }
         await loadProjectDir(session.id);
+        if (typeof loadUsageSummary === "function") await loadUsageSummary(session.id);
         setStatus("就绪");
         await refreshSessionList();
         if (typeof syncComposerControls === "function") syncComposerControls();

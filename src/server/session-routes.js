@@ -1,3 +1,5 @@
+const { buildUsageSummary } = require("../storage/usage-summary");
+
 function createSessionRoutes({
   rootDir,
   sessionsFile,
@@ -12,6 +14,8 @@ function createSessionRoutes({
   setSessionWorktree,
   validateProjectDir,
   setSessionProjectDir,
+  getUsageSummary,
+  usageStorage,
 }) {
   const MAX_WORKTREE_DIFF_CHARS = 200 * 1024;
 
@@ -56,6 +60,23 @@ function createSessionRoutes({
       return true;
     }
 
+    const usageMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/usage$/);
+    if (usageMatch && req.method === "GET") {
+      const sessionId = usageMatch[1];
+      const session = getSession(sessionsFile, sessionId);
+      if (!session) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      const summary = getUsageSummary
+        ? getUsageSummary(sessionId)
+        : usageStorage
+          ? buildUsageSummary(usageStorage, sessionId)
+          : { available: false, session: {}, agents: [] };
+      sendJson(res, 200, summary);
+      return true;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/sessions") {
       sendJson(res, 201, { session: createSession(sessionsFile) });
       return true;
@@ -86,7 +107,9 @@ function createSessionRoutes({
       }
     }
 
-    const worktreeMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/worktree\/(status|diff|discard)$/);
+    const worktreeMatch = url.pathname.match(
+      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/worktree\/(status|diff|discard)$/
+    );
     if (worktreeMatch) {
       const sessionId = worktreeMatch[1];
       const action = worktreeMatch[2];
@@ -102,7 +125,11 @@ function createSessionRoutes({
           return true;
         }
         if (req.method === "GET" && action === "diff") {
-          sendJson(res, 200, buildWorktreeDiffPayload(sessionId, worktreeManager.getDiff(sessionId)));
+          sendJson(
+            res,
+            200,
+            buildWorktreeDiffPayload(sessionId, worktreeManager.getDiff(sessionId))
+          );
           return true;
         }
         if (req.method === "POST" && action === "discard") {
