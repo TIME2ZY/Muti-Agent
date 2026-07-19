@@ -23,18 +23,18 @@ test("update below warn threshold stays active", () => {
 
 test("update at warn threshold transitions to sealing", () => {
   const s = sessionSealer.makeSealer();
-  assert.equal(s.update(0.86), STATE.SEALING);
+  assert.equal(s.update(0.9), STATE.SEALING);
   assert.equal(s.isWarning(), true);
   const hist = s.getHistory();
   assert.equal(hist.length, 1);
   assert.equal(hist[0].from, STATE.ACTIVE);
   assert.equal(hist[0].to, STATE.SEALING);
-  assert.equal(hist[0].ratio, 0.86);
+  assert.equal(hist[0].ratio, 0.9);
 });
 
 test("update above action threshold from active goes directly to sealed", () => {
   const s = sessionSealer.makeSealer();
-  assert.equal(s.update(0.95), STATE.SEALED);
+  assert.equal(s.update(1.0), STATE.SEALED);
   assert.equal(s.isSealed(), true);
   const hist = s.getHistory();
   assert.equal(hist.length, 1);
@@ -44,8 +44,8 @@ test("update above action threshold from active goes directly to sealed", () => 
 
 test("sealing → sealed on action threshold", () => {
   const s = sessionSealer.makeSealer();
-  s.update(0.86);
-  assert.equal(s.update(0.91), STATE.SEALED);
+  s.update(0.9);
+  assert.equal(s.update(1.0), STATE.SEALED);
   assert.equal(s.isSealed(), true);
   const hist = s.getHistory();
   assert.equal(hist.length, 2);
@@ -55,8 +55,8 @@ test("sealing → sealed on action threshold", () => {
 
 test("sealing → active on recovery (hysteresis)", () => {
   const s = sessionSealer.makeSealer();
-  s.update(0.86);
-  assert.equal(s.update(0.75), STATE.ACTIVE);
+  s.update(0.9);
+  assert.equal(s.update(0.84), STATE.ACTIVE);
   const hist = s.getHistory();
   assert.equal(hist.length, 2);
   assert.equal(hist[1].from, STATE.SEALING);
@@ -65,14 +65,14 @@ test("sealing → active on recovery (hysteresis)", () => {
 
 test("sealing does NOT recover at ratio between recovery and warn", () => {
   const s = sessionSealer.makeSealer();
-  s.update(0.86);
-  // 0.82 is between recovery (0.80) and warn (0.85) — should stay sealing
-  assert.equal(s.update(0.82), STATE.SEALING);
+  s.update(0.9);
+  // 0.87 is between recovery (0.85) and warn (0.90) — should stay sealing
+  assert.equal(s.update(0.87), STATE.SEALING);
 });
 
 test("sealed is terminal — no further transitions", () => {
   const s = sessionSealer.makeSealer();
-  s.update(0.95);
+  s.update(1.0);
   assert.equal(s.getState(), STATE.SEALED);
   assert.equal(s.update(0.5), STATE.SEALED);
   assert.equal(s.update(0.99), STATE.SEALED);
@@ -121,8 +121,8 @@ test("lastRatio reflects the most recent update", () => {
   s.update(0.5);
   assert.equal(s.lastRatio(), 0.5);
   // After sealed, lastRatio still updates (we record the value, just don't transition)
-  s.update(0.95);
-  assert.equal(s.lastRatio(), 0.95);
+  s.update(1.0);
+  assert.equal(s.lastRatio(), 1.0);
   s.update(0.4);
   assert.equal(s.lastRatio(), 0.4);
   assert.equal(s.isSealed(), true, "stays sealed after ratio drops");

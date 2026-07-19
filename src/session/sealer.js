@@ -1,6 +1,6 @@
 // Three-state machine for session context health, modeled after cat-cafe-tutorials
-// lesson 08 "Session Chain" — but simplified for v1 (no auto-spawning of new
-// sessions; we just terminate the current chain when sealed).
+// lesson 08 "Session Chain" — adapted to rotate the durable provider session
+// after the usable context budget is exhausted.
 //
 // State transitions:
 //   active   --(ratio >= warn)-->     sealing
@@ -9,10 +9,10 @@
 //   sealing  --(ratio < recovery)-->  active   (recovery hysteresis)
 //   sealed   --(terminal)-->          sealed
 //
-// Thresholds (fraction of context window):
-//   warn      0.85  - start showing context-warning SSE events
-//   action    0.90  - terminate the current invocation, mark session sealed
-//   recovery  0.80  - if ratio drops below this while sealing, go back to active
+// Ratios are measured against usable context (physical window minus reserve):
+//   warn      0.90  - start showing context-warning SSE events
+//   action    1.00  - preserve the configured reserve and rotate the session
+//   recovery  0.85  - if ratio drops below this while sealing, go back to active
 
 const STATE = Object.freeze({
   ACTIVE: "active",
@@ -20,14 +20,16 @@ const STATE = Object.freeze({
   SEALED: "sealed",
 });
 
-const DEFAULT_WARN = 0.85;
-const DEFAULT_ACTION = 0.90;
-const DEFAULT_RECOVERY = 0.80;
+const DEFAULT_WARN = 0.9;
+const DEFAULT_ACTION = 1.0;
+const DEFAULT_RECOVERY = 0.85;
 
 function makeSealer(opts = {}) {
   const warnThreshold = typeof opts.warnThreshold === "number" ? opts.warnThreshold : DEFAULT_WARN;
-  const actionThreshold = typeof opts.actionThreshold === "number" ? opts.actionThreshold : DEFAULT_ACTION;
-  const recoveryThreshold = typeof opts.recoveryThreshold === "number" ? opts.recoveryThreshold : DEFAULT_RECOVERY;
+  const actionThreshold =
+    typeof opts.actionThreshold === "number" ? opts.actionThreshold : DEFAULT_ACTION;
+  const recoveryThreshold =
+    typeof opts.recoveryThreshold === "number" ? opts.recoveryThreshold : DEFAULT_RECOVERY;
 
   if (!(warnThreshold < actionThreshold)) {
     throw new Error("warnThreshold must be less than actionThreshold");

@@ -1,4 +1,5 @@
 const DEFAULT_CONTEXT_TOKENS = 200_000;
+const DEFAULT_RESERVE_RATIO = 0.2;
 
 function model(providerId, modelId, vendorId, options = {}) {
   return {
@@ -6,6 +7,9 @@ function model(providerId, modelId, vendorId, options = {}) {
     providerId,
     vendorId,
     contextTokens: options.contextTokens || DEFAULT_CONTEXT_TOKENS,
+    reserveRatio:
+      typeof options.reserveRatio === "number" ? options.reserveRatio : DEFAULT_RESERVE_RATIO,
+    capacitySource: options.capacitySource || "default",
     reasoning: options.reasoning || { supported: false, levels: [] },
   };
 }
@@ -13,14 +17,22 @@ function model(providerId, modelId, vendorId, options = {}) {
 /** Only models used by the four active agents. */
 const MODEL_PROFILES = [
   model("codex", "gpt-5.6-sol", "openai", {
+    contextTokens: 258_000,
+    capacitySource: "manual",
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
-  model("opencode", "qwen3.7-plus", "alibaba"),
+  model("opencode", "qwen3.7-plus", "alibaba", {
+    contextTokens: 1_000_000,
+    capacitySource: "manual",
+  }),
   model("grok", "grok-4.5", "xai", {
     contextTokens: 500_000,
+    capacitySource: "manual",
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
   model("antigravity", "gemini-3.5-flash", "google", {
+    contextTokens: 1_000_000,
+    capacitySource: "manual",
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
 ];
@@ -65,14 +77,9 @@ const AGENTS = {
     "想法与头脑风暴：发散灵感，可与 Codex 互证收敛（默认 plan，少改文件）。",
     { reasoningEffort: "high" }
   ),
-  grok: agent(
-    "grok",
-    "Grok",
-    "grok",
-    "grok-4.5",
-    "实现：写代码、改功能、跑测试。",
-    { reasoningEffort: "high", capacityTokens: 500_000 }
-  ),
+  grok: agent("grok", "Grok", "grok", "grok-4.5", "实现：写代码、改功能、跑测试。", {
+    reasoningEffort: "high",
+  }),
   opencode: agent(
     "opencode",
     "OpenCode",
@@ -104,6 +111,7 @@ function getAgentModelProfile(agentId) {
 
 module.exports = {
   DEFAULT_CONTEXT_TOKENS,
+  DEFAULT_RESERVE_RATIO,
   MODEL_PROFILES,
   MODELS,
   AGENTS,

@@ -1,4 +1,5 @@
 const { makeEvent } = require("../event-protocol");
+const { makeUsageEvent } = require("../usage");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveProxy } = require("../proxy");
@@ -18,14 +19,13 @@ const {
  *   opencode run --format json --thinking --auto --model provider/model "prompt"
  *
  * Event shapes (model-agnostic; only -m changes which model runs):
- *   step_start / step_finish  → progress.update (+ tokens/cost on finish, not mapped yet)
+ *   step_start / step_finish  → progress.update + usage.update
  *   reasoning                 → thinking.delta  (needs --thinking)
  *   text                      → text.delta      (often full part text, not micro-tokens)
  *   tool_use                  → tool.started + tool.finished (often already completed)
  *   sessionID on each line    → resume / run.started.sessionId
  *
- * Usage (part.tokens / part.cost on step_finish) is intentionally not mapped
- * until a platform-wide usage protocol exists.
+ * Usage comes from part.tokens / part.cost on step_finish.
  */
 
 function sessionIdFromEvent(event) {
@@ -215,9 +215,7 @@ function createOpencodeRuntime(cli) {
       // Prefer args.command for bash-like tools so UI shows the command string.
       const command = commandFromArgs(toolName, args);
       const startedArgs =
-        isBashLike(toolName) && command && !args.command
-          ? { ...args, command }
-          : args;
+        isBashLike(toolName) && command && !args.command ? { ...args, command } : args;
       events.push(
         makeEvent("tool.started", {
           ...base,
@@ -241,9 +239,7 @@ function createOpencodeRuntime(cli) {
       const failed = isFailedItem(part) || status === "error" || status === "failed";
       const command = commandFromArgs(toolName, args);
       const finishedArgs =
-        isBashLike(toolName) && command && !args.command
-          ? { ...args, command }
-          : args;
+        isBashLike(toolName) && command && !args.command ? { ...args, command } : args;
       events.push(
         makeEvent("tool.finished", {
           ...base,
@@ -392,7 +388,6 @@ function createOpencodeRuntime(cli) {
         event.type === "step.finish" ||
         event.type === "step-finish"
       ) {
-        // part.tokens / part.cost available here — reserved for future usage protocol.
         const reason = (part && part.reason) || event.reason || "";
         const label =
           reason === "tool-calls"
@@ -410,6 +405,17 @@ function createOpencodeRuntime(cli) {
             items: [{ text: label, done: true, reason }],
           })
         );
+        const rawUsage =
+          part && part.tokens
+            ? { ...part.tokens, ...(part.cost !== undefined ? { cost: part.cost } : {}) }
+            : event.tokens
+              ? { ...event.tokens, ...(event.cost !== undefined ? { cost: event.cost } : {}) }
+              : null;
+        const usage = makeUsageEvent(base, rawUsage, {
+          scope: "step",
+          mode: "delta",
+        });
+        if (usage) out.push(usage);
         return out;
       }
 
@@ -496,6 +502,7 @@ const opencodeProvider = {
     resume: true,
     thinking: true,
     tools: true,
+    usage: true,
     reasoning: "toggle",
   },
   // All OpenCode-backed models share this adapter; only --model changes.

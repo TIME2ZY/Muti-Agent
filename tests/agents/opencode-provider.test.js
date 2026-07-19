@@ -90,14 +90,35 @@ test("buildInvocation for opencode uses format json, thinking, and auto", () => 
 });
 
 test("buildInvocation can disable autoApprove", () => {
-  const inv = buildInvocation(
-    { ...AGENTS.opencode, providerOptions: { autoApprove: false } },
-    "x"
-  );
+  const inv = buildInvocation({ ...AGENTS.opencode, providerOptions: { autoApprove: false } }, "x");
   assert.ok(!inv.args.includes("--auto"));
 });
 
 test("opencode capabilities remain tools+thinking", () => {
   assert.equal(opencodeProvider.capabilities.tools, true);
   assert.equal(opencodeProvider.capabilities.thinking, true);
+});
+
+test("opencode step_finish maps tokens and cost to usage.update", () => {
+  const runtime = createProviderRuntime({ providerId: "opencode", model: "qwen3.7-plus" });
+  const events = runtime.transform(
+    {
+      type: "step_finish",
+      sessionID: "ses_usage",
+      part: {
+        type: "step-finish",
+        reason: "stop",
+        tokens: { input: 200, output: 50, reasoning: 15, cache: { read: 80 } },
+        cost: 0.04,
+      },
+    },
+    { agent: "opencode", invocationId: "inv-usage" }
+  );
+  const usage = events.find((event) => event.type === "usage.update");
+  assert.ok(usage);
+  assert.equal(usage.scope, "step");
+  assert.equal(usage.mode, "delta");
+  assert.equal(usage.totalTokens, 250);
+  assert.equal(usage.cachedInputTokens, 80);
+  assert.equal(usage.costUsd, 0.04);
 });

@@ -32,8 +32,7 @@
     if (evt.kind === "subagent.started")
       return `${p.name || p.toolName || "task"} · ${p.task || "started"}`;
     if (evt.kind === "subagent.progress") return `${p.name || "task"} · ${p.text || "running"}`;
-    if (evt.kind === "subagent.completed")
-      return `${p.name || "task"} · ${p.summary || "done"}`;
+    if (evt.kind === "subagent.completed") return `${p.name || "task"} · ${p.summary || "done"}`;
     if (evt.kind === "subagent.failed") return `${p.name || "task"} · ${p.error || "failed"}`;
     if (evt.kind === "command.started") return p.command || "";
     if (evt.kind === "command.finished")
@@ -42,6 +41,17 @@
       return `${p.code || "diagnostic"}${p.rawType ? ` · ${p.rawType}` : ""}${p.message ? ` · ${p.message}` : ""}`;
     if (evt.kind === "file.changed") return `${p.changeType || "modified"} ${p.path || ""}`.trim();
     if (evt.kind === "progress.update") return JSON.stringify(p.items || [], null, 2);
+    if (evt.kind === "usage.update") {
+      const values = [
+        p.inputTokens != null ? `input=${p.inputTokens}` : "",
+        p.cachedInputTokens != null ? `cached=${p.cachedInputTokens}` : "",
+        p.outputTokens != null ? `output=${p.outputTokens}` : "",
+        p.reasoningTokens != null ? `reasoning=${p.reasoningTokens}` : "",
+        p.totalTokens != null ? `total=${p.totalTokens}` : "",
+        p.costUsd != null ? `cost=$${p.costUsd}` : "",
+      ].filter(Boolean);
+      return values.join(" · ");
+    }
     if (evt.kind === "invocation-start")
       return `agent: ${p.agent || "?"}${p.shouldResume ? " · resume" : ""}`;
     if (evt.kind === "invocation-end")
@@ -299,8 +309,7 @@
       const summary = document.createElement("summary");
       summary.className = "recall-raw-events-summary";
       const n = Array.isArray(events) ? events.length : 0;
-      summary.textContent =
-        typeof R.rawEvents === "function" ? R.rawEvents(n) : `原始事件 · ${n}`;
+      summary.textContent = typeof R.rawEvents === "function" ? R.rawEvents(n) : `原始事件 · ${n}`;
       raw.append(summary, renderEventList(events));
       root.appendChild(raw);
 
@@ -535,9 +544,7 @@
       const text = document.createElement("div");
       text.className = "recall-search-summary-text";
       text.textContent =
-        typeof R.layerSummary === "function"
-          ? R.layerSummary(layers, total)
-          : `共 ${total} 条`;
+        typeof R.layerSummary === "function" ? R.layerSummary(layers, total) : `共 ${total} 条`;
       bar.appendChild(text);
       if (result.weakQuery) {
         const note = document.createElement("div");

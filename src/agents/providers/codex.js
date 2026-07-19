@@ -1,4 +1,5 @@
 const { makeEvent } = require("../event-protocol");
+const { makeUsageEvent } = require("../usage");
 const { resolveProxy } = require("../proxy");
 const {
   toolNameFromItem,
@@ -139,8 +140,7 @@ function createCodexRuntime(cli) {
         const command = event.item.command || "";
         const toolId = toolItemId(event.item, "command_execution");
         const exitCode = event.item.exit_code;
-        const failed =
-          typeof exitCode === "number" ? exitCode !== 0 : isFailedItem(event.item);
+        const failed = typeof exitCode === "number" ? exitCode !== 0 : isFailedItem(event.item);
         return [
           makeEvent("tool.finished", {
             ...base,
@@ -214,6 +214,14 @@ function createCodexRuntime(cli) {
         return text ? [makeEvent("text.delta", { ...base, text })] : [];
       }
 
+      if (event.type === "turn.completed" && event.usage) {
+        const usage = makeUsageEvent(base, event.usage, {
+          scope: "turn",
+          mode: "cumulative",
+        });
+        return usage ? [usage] : [];
+      }
+
       const content = event.content || (event.properties && event.properties.content);
       if (content && content.type === "text" && typeof content.text === "string") {
         return [
@@ -274,6 +282,7 @@ const codexProvider = {
     resume: true,
     thinking: true,
     tools: true,
+    usage: true,
     reasoning: "levels",
   },
   allowedProviderOptions: ["sandbox", "approvalPolicy"],

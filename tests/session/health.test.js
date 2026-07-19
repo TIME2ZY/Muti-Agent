@@ -3,10 +3,12 @@ const test = require("node:test");
 const contextHealth = require("../../src/session/health");
 const { AGENTS } = require("../../src/agents/invoke-cli");
 
-test("makeTracker with default capacity uses 200k tokens", () => {
+test("makeTracker uses the configured Codex capacity and 20% reserve", () => {
   const tracker = contextHealth.makeTracker("codex");
   assert.equal(tracker.agentId, "codex");
-  assert.equal(tracker.capacityTokens, 200_000);
+  assert.equal(tracker.capacityTokens, 258_000);
+  assert.equal(tracker.reserveTokens, 51_600);
+  assert.equal(tracker.usableContextTokens, 206_400);
   assert.equal(tracker.getUsedChars(), 0);
   assert.equal(tracker.getFillRatio(), 0);
 });
@@ -35,9 +37,9 @@ test("makeTracker resumes persisted window usage", () => {
     outputChars: 800,
   });
   assert.equal(tracker.getUsedChars(), 2000);
-  assert.equal(tracker.getFillRatio(), 0.5);
+  assert.equal(tracker.getFillRatio(), 0.625);
   tracker.addOutput(400);
-  assert.equal(tracker.getFillRatio(), 0.6);
+  assert.equal(tracker.getFillRatio(), 0.75);
 });
 
 test("addInput / addOutput ignore non-positive values", () => {
@@ -49,12 +51,13 @@ test("addInput / addOutput ignore non-positive values", () => {
   assert.equal(tracker.getUsedChars(), 0);
 });
 
-test("fillRatio is (input+output) / (capacity * charsPerToken)", () => {
+test("fillRatio is measured against usable capacity after reserve", () => {
   const tracker = contextHealth.makeTracker("codex", { capacityTokens: 1000 });
   // 4000 chars total = 1000 tokens = fillRatio 1.0
   tracker.addInput(2000);
   tracker.addOutput(2000);
-  assert.equal(tracker.getFillRatio(), 1.0);
+  assert.equal(tracker.getPhysicalFillRatio(), 1.0);
+  assert.equal(tracker.getFillRatio(), 1.25);
 });
 
 test("fillRatio grows monotonically as input/output accumulate", () => {
@@ -79,8 +82,88 @@ test("snapshot returns a consistent view of all counters", () => {
   assert.equal(snap.outputChars, 4000);
   assert.equal(snap.usedChars, 8000);
   assert.equal(snap.usedTokens, 2000);
-  assert.equal(snap.fillRatio, 1.0);
+  assert.equal(snap.physicalFillRatio, 1.0);
+  assert.equal(snap.fillRatio, 1.25);
   assert.ok(typeof snap.elapsedMs === "number" && snap.elapsedMs >= 0);
+});
+
+test("agent model capacities match the configured manual limits", () => {
+  assert.equal(contextHealth.getAgentCapacity("codex"), 258_000);
+  assert.equal(contextHealth.getAgentCapacity("gemini"), 1_000_000);
+  assert.equal(contextHealth.getAgentCapacity("opencode"), 1_000_000);
+  assert.equal(contextHealth.getAgentCapacity("grok"), 500_000);
+  for (const agent of ["codex", "gemini", "opencode", "grok"]) {
+    assert.equal(contextHealth.getAgentReserveRatio(agent), 0.2);
+  }
+});
+
+test("exact provider context overrides character estimate while billing stays separate", () => {
+  const tracker = contextHealth.makeTracker("codex", { capacityTokens: 1000 });
+  tracker.addInput(400);
+  tracker.applyUsage({
+    type: "usage.update",
+    scope: "turn",
+    mode: "cumulative",
+    inputTokens: 300,
+    cachedInputTokens: 100,
+    outputTokens: 50,
+    reasoningTokens: 20,
+    totalTokens: 350,
+    contextTokens: 320,
+    contextTokensExact: true,
+  });
+  const snapshot = tracker.snapshot();
+  assert.equal(snapshot.usedTokens, 320);
+  assert.equal(snapshot.contextUsageSource, "provider_exact");
+  assert.equal(snapshot.billing.totalTokens, 350);
+  assert.equal(snapshot.billing.cachedInputTokens, 100);
+});
+
+test("repeated cumulative usage snapshots are not double counted", () => {
+  const tracker = contextHealth.makeTracker("codex");
+  const usage = {
+    type: "usage.update",
+    scope: "turn",
+    mode: "cumulative",
+    inputTokens: 100,
+    outputTokens: 20,
+    totalTokens: 120,
+  };
+  tracker.applyUsage(usage);
+  tracker.applyUsage(usage);
+  assert.equal(tracker.snapshot().billing.totalTokens, 120);
+});
+
+test("authoritative run usage reconciles provisional step deltas", () => {
+  const tracker = contextHealth.makeTracker("gemini");
+  tracker.applyUsage({
+    type: "usage.update",
+    scope: "step",
+    mode: "delta",
+    inputTokens: 60,
+    outputTokens: 10,
+    totalTokens: 70,
+  });
+  tracker.applyUsage({
+    type: "usage.update",
+    scope: "step",
+    mode: "delta",
+    inputTokens: 80,
+    outputTokens: 20,
+    totalTokens: 100,
+  });
+  tracker.applyUsage({
+    type: "usage.update",
+    scope: "run",
+    mode: "cumulative",
+    inputTokens: 150,
+    outputTokens: 30,
+    totalTokens: 180,
+  });
+  const billing = tracker.snapshot().billing;
+  assert.equal(billing.inputTokens, 150);
+  assert.equal(billing.outputTokens, 30);
+  assert.equal(billing.totalTokens, 180);
 });
 
 test("getAgentCapacity honors per-agent capacityTokens override", () => {

@@ -192,6 +192,44 @@ const MIGRATIONS = Object.freeze([
         WHERE status IN ('captured', 'confirmed');
     `,
   },
+  {
+    version: 4,
+    name: "context_usage_accounting",
+    sql: `
+      ALTER TABLE context_windows ADD COLUMN reserve_ratio REAL NOT NULL DEFAULT 0.2
+        CHECK (reserve_ratio >= 0 AND reserve_ratio < 1);
+      ALTER TABLE context_windows ADD COLUMN context_used_tokens INTEGER NOT NULL DEFAULT 0
+        CHECK (context_used_tokens >= 0);
+      ALTER TABLE context_windows ADD COLUMN context_usage_source TEXT NOT NULL DEFAULT 'char_estimated';
+      ALTER TABLE context_windows ADD COLUMN billing_input_tokens INTEGER NOT NULL DEFAULT 0
+        CHECK (billing_input_tokens >= 0);
+      ALTER TABLE context_windows ADD COLUMN billing_cached_input_tokens INTEGER NOT NULL DEFAULT 0
+        CHECK (billing_cached_input_tokens >= 0);
+      ALTER TABLE context_windows ADD COLUMN billing_output_tokens INTEGER NOT NULL DEFAULT 0
+        CHECK (billing_output_tokens >= 0);
+      ALTER TABLE context_windows ADD COLUMN billing_reasoning_tokens INTEGER NOT NULL DEFAULT 0
+        CHECK (billing_reasoning_tokens >= 0);
+      ALTER TABLE context_windows ADD COLUMN billing_total_tokens INTEGER NOT NULL DEFAULT 0
+        CHECK (billing_total_tokens >= 0);
+      ALTER TABLE context_windows ADD COLUMN billing_cost_usd REAL NOT NULL DEFAULT 0
+        CHECK (billing_cost_usd >= 0);
+
+      UPDATE context_windows
+      SET capacity_tokens = CASE agent_id
+            WHEN 'codex' THEN 258000
+            WHEN 'gemini' THEN 1000000
+            WHEN 'opencode' THEN 1000000
+            WHEN 'grok' THEN 500000
+            ELSE capacity_tokens
+          END,
+          reserve_ratio = 0.2
+      WHERE state IN ('active', 'sealing')
+        AND (
+          (agent_id IN ('codex', 'gemini', 'opencode') AND capacity_tokens = 200000)
+          OR (agent_id = 'grok' AND capacity_tokens = 500000)
+        );
+    `,
+  },
 ]);
 
 module.exports = { PRAGMAS, MIGRATIONS };

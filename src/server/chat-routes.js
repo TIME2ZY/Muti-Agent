@@ -7,10 +7,7 @@ const {
 const { ENV } = require("../shared/brand");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
-const {
-  buildA2AInjectMetrics,
-  logA2AInjectMetrics,
-} = require("../agents/handoff-metrics");
+const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
 
 const NOOP_DURABLE_RECORDER = Object.freeze({
   ensureWindow: () => null,
@@ -21,6 +18,7 @@ const NOOP_DURABLE_RECORDER = Object.freeze({
   finishInvocation: () => null,
   bindProviderSession: () => false,
   addWindowUsage: () => false,
+  setWindowUsageSnapshot: () => false,
 });
 
 const NOOP_MEMORY_CAPTURE = Object.freeze({
@@ -356,6 +354,7 @@ function createChatRoutes({
           providerKey,
           workspaceKey,
           capacityTokens: contextHealth.getAgentCapacity(agent),
+          reserveRatio: contextHealth.getAgentReserveRatio(agent),
           resumeSessionId,
           startedAt,
         });
@@ -363,6 +362,15 @@ function createChatRoutes({
           capacityTokens: durableRun?.window?.capacityTokens,
           inputChars: durableRun?.window?.inputChars,
           outputChars: durableRun?.window?.outputChars,
+          reserveRatio: durableRun?.window?.reserveRatio,
+          contextUsedTokens: durableRun?.window?.contextUsedTokens,
+          contextUsageSource: durableRun?.window?.contextUsageSource,
+          billingInputTokens: durableRun?.window?.billingInputTokens,
+          billingCachedInputTokens: durableRun?.window?.billingCachedInputTokens,
+          billingOutputTokens: durableRun?.window?.billingOutputTokens,
+          billingReasoningTokens: durableRun?.window?.billingReasoningTokens,
+          billingTotalTokens: durableRun?.window?.billingTotalTokens,
+          billingCostUsd: durableRun?.window?.billingCostUsd,
         });
         const sealer = sessionSealer.makeSealer();
         threadCtx.sealer = sealer;
@@ -529,6 +537,7 @@ function createChatRoutes({
                 providerKey,
                 workspaceKey,
                 capacityTokens: durableRun.window.capacityTokens,
+                reserveRatio: durableRun.window.reserveRatio,
                 windowId: durableRun.window.id,
                 reason: "context overflow",
               })
@@ -571,6 +580,9 @@ function createChatRoutes({
               assistantContent += text;
               sendSse(res, "message", { agent, role: "assistant", text });
             }
+            if (event.type === "usage.update") {
+              healthTracker.applyUsage(event);
+            }
             durableCoalescer.accept(event);
           },
           onStderr(text) {
@@ -603,6 +615,7 @@ function createChatRoutes({
             inputChars: promptForAgent.length,
             outputChars: assistantContent.length,
           });
+          durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
         }
         if (sealer.isSealed()) {
           sealContextWindow(healthTracker.getFillRatio());

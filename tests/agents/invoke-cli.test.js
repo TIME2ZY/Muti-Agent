@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { AGENTS, invoke } = require("../../src/agents/invoke-cli");
+const { createProviderRuntime } = require("../../src/agents/providers");
 
 /** Regex-safe binary prefix in mock stdout (e.g. opencode.exe:run or opencode:run). */
 const OPENCODE_BIN_RE = process.platform === "win32" ? "opencode\\.exe" : "opencode";
@@ -403,7 +404,7 @@ test("codex runtime maps mcp tools as tool.* only (no subagent events)", () => {
     toolStarted.find((event) => event.type === "tool.started"),
     {
       type: "tool.started",
-      protocolVersion: 1,
+      protocolVersion: 2,
       agent: "codex",
       invocationId: "inv-tool",
       toolName: "web_search",
@@ -418,11 +419,20 @@ test("codex runtime maps mcp tools as tool.* only (no subagent events)", () => {
   assert.equal(taskStarted[0].toolName, "task");
   assert.ok(!taskStarted.some((e) => String(e.type).startsWith("subagent.")));
 
-  assert.equal(taskDone.some((e) => e.type === "tool.finished"), true);
-  assert.match(String(taskDone.find((e) => e.type === "tool.finished").result.summary || ""), /session-runtime/);
+  assert.equal(
+    taskDone.some((e) => e.type === "tool.finished"),
+    true
+  );
+  assert.match(
+    String(taskDone.find((e) => e.type === "tool.finished").result.summary || ""),
+    /session-runtime/
+  );
   assert.ok(!taskDone.some((e) => String(e.type).startsWith("subagent.")));
 
-  assert.equal(taskFailed.some((e) => e.type === "tool.finished" && e.status === "error"), true);
+  assert.equal(
+    taskFailed.some((e) => e.type === "tool.finished" && e.status === "error"),
+    true
+  );
   assert.ok(!taskFailed.some((e) => String(e.type).startsWith("subagent.")));
 });
 
@@ -439,6 +449,33 @@ test("codex runtime maps reasoning items to thinking.delta", () => {
   );
   assert.ok(events.some((e) => e.type === "run.started"));
   assert.ok(events.some((e) => e.type === "thinking.delta" && /trade-offs/.test(e.text)));
+});
+
+test("codex turn.completed maps usage to canonical fields", () => {
+  const runtime = createProviderRuntime({
+    providerId: "codex",
+    id: "codex",
+    model: "gpt-5.6-sol",
+  });
+  const events = runtime.transform(
+    {
+      type: "turn.completed",
+      usage: {
+        input_tokens: 1000,
+        cached_input_tokens: 600,
+        output_tokens: 120,
+        reasoning_output_tokens: 40,
+      },
+    },
+    { invocationId: "inv-codex-usage", agent: "codex" }
+  );
+  const usage = events.find((event) => event.type === "usage.update");
+  assert.ok(usage);
+  assert.equal(usage.scope, "turn");
+  assert.equal(usage.mode, "cumulative");
+  assert.equal(usage.totalTokens, 1120);
+  assert.equal(usage.cachedInputTokens, 600);
+  assert.equal(usage.reasoningTokens, 40);
 });
 
 test("opencode runtime maps tool/task parts into tool events only", () => {
@@ -479,10 +516,22 @@ test("opencode runtime maps tool/task parts into tool events only", () => {
     ctx
   );
 
-  assert.equal(started.some((e) => e.type === "tool.started"), true);
-  assert.equal(started.some((e) => String(e.type).startsWith("subagent.")), false);
-  assert.equal(done.some((e) => e.type === "tool.finished"), true);
-  assert.equal(done.some((e) => String(e.type).startsWith("subagent.")), false);
+  assert.equal(
+    started.some((e) => e.type === "tool.started"),
+    true
+  );
+  assert.equal(
+    started.some((e) => String(e.type).startsWith("subagent.")),
+    false
+  );
+  assert.equal(
+    done.some((e) => e.type === "tool.finished"),
+    true
+  );
+  assert.equal(
+    done.some((e) => String(e.type).startsWith("subagent.")),
+    false
+  );
 });
 
 test("opencode runtime maps real tool_use events from current CLI schema", () => {
@@ -522,11 +571,26 @@ test("opencode runtime maps real tool_use events from current CLI schema", () =>
     ctx
   );
 
-  assert.equal(events.some((e) => e.type === "tool.started" && e.toolName === "task"), true);
-  assert.equal(events.some((e) => e.type === "tool.finished" && e.status === "ok"), true);
-  assert.equal(events.some((e) => String(e.type).startsWith("subagent.")), false);
-  assert.equal(events.find((e) => e.type === "tool.started").toolId, "call_424f09b8b6e04590b7a594f5");
-  assert.match(String(events.find((e) => e.type === "tool.finished").result || ""), /git status ok/);
+  assert.equal(
+    events.some((e) => e.type === "tool.started" && e.toolName === "task"),
+    true
+  );
+  assert.equal(
+    events.some((e) => e.type === "tool.finished" && e.status === "ok"),
+    true
+  );
+  assert.equal(
+    events.some((e) => String(e.type).startsWith("subagent.")),
+    false
+  );
+  assert.equal(
+    events.find((e) => e.type === "tool.started").toolId,
+    "call_424f09b8b6e04590b7a594f5"
+  );
+  assert.match(
+    String(events.find((e) => e.type === "tool.finished").result || ""),
+    /git status ok/
+  );
 });
 
 test("opencode runtime maps read/bash tools and nests state.input", () => {
@@ -725,7 +789,10 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   assert.equal(startedTool.toolName, "command_execution");
   assert.equal(startedTool.args.command, "Get-Content -Raw skill.md");
   assert.equal(startedTool.state, "running");
-  assert.equal(commandStarted.some((e) => e.type === "command.started"), false);
+  assert.equal(
+    commandStarted.some((e) => e.type === "command.started"),
+    false
+  );
 
   assert.equal(commandFinished.length, 1);
   assert.equal(commandFinished[0].type, "tool.finished");
@@ -738,7 +805,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   assert.deepEqual(fileChanged, [
     {
       type: "file.changed",
-      protocolVersion: 1,
+      protocolVersion: 2,
       agent: "codex",
       invocationId: "inv-1b",
       path: "C:\\worktree\\temp.txt",
@@ -748,7 +815,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   assert.deepEqual(transportError, [
     {
       type: "stderr",
-      protocolVersion: 1,
+      protocolVersion: 2,
       agent: "codex",
       invocationId: "inv-1b",
       text: "Reconnecting... 2/5 (request timed out)",
@@ -757,7 +824,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   assert.deepEqual(itemError, [
     {
       type: "stderr",
-      protocolVersion: 1,
+      protocolVersion: 2,
       agent: "codex",
       invocationId: "inv-1b",
       text: "Falling back from WebSockets to HTTPS transport. request timed out",
@@ -925,12 +992,7 @@ test("opencode runtime maps reasoning events (from --thinking) to thinking.delta
 
 test("provider registry lists codex, grok, opencode, and antigravity", () => {
   const { listSupportedProviders, createProviderRuntime } = require("../../src/agents/providers");
-  assert.deepEqual(listSupportedProviders().sort(), [
-    "antigravity",
-    "codex",
-    "grok",
-    "opencode",
-  ]);
+  assert.deepEqual(listSupportedProviders().sort(), ["antigravity", "codex", "grok", "opencode"]);
   assert.ok(createProviderRuntime({ providerId: "codex" }));
   assert.ok(createProviderRuntime({ providerId: "grok", model: "grok-4.5" }));
   assert.ok(
@@ -1050,10 +1112,7 @@ test("remembers workspace key from stream events when provided", () => {
   const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
   assert.equal(sessionFile.codex.sessionId, "codex-session-1");
   assert.equal(sessionFile.codex.workspaceKey, "base:test-workspace");
-  assert.equal(
-    sessionFile.codex.byWorkspace["base:test-workspace"].sessionId,
-    "codex-session-1"
-  );
+  assert.equal(sessionFile.codex.byWorkspace["base:test-workspace"].sessionId, "codex-session-1");
 });
 
 test("persists provider sessions per workspace without overwriting the other", () => {

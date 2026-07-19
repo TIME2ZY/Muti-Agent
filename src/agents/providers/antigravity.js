@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { makeEvent } = require("../event-protocol");
+const { makeUsageEvent } = require("../usage");
 const { resolveProxy } = require("../proxy");
 
 /**
@@ -220,6 +221,11 @@ function createAntigravityRuntime(cli) {
 
         const stepType = String(step.step_type || step.stepType || "").toLowerCase();
         const state = String(step.state || "").toUpperCase();
+        const stepUsage = makeUsageEvent(base, step.usage || event.usage, {
+          scope: "step",
+          mode: "delta",
+        });
+        if (stepUsage) out.push(stepUsage);
 
         if (stepType === "agent_response") {
           const delta =
@@ -257,7 +263,12 @@ function createAntigravityRuntime(cli) {
             return out;
           }
 
-          if (state === "DONE" || state === "COMPLETED" || state === "ERROR" || state === "FAILED") {
+          if (
+            state === "DONE" ||
+            state === "COMPLETED" ||
+            state === "ERROR" ||
+            state === "FAILED"
+          ) {
             const failed = state === "ERROR" || state === "FAILED";
             out.push(
               makeEvent("tool.finished", {
@@ -327,6 +338,10 @@ function createAntigravityRuntime(cli) {
       if (event.event === "result") {
         const result = event.result && typeof event.result === "object" ? event.result : event;
         ensureStarted(sessionIdFromEvent(event) || sessionIdFromEvent({ result }));
+        const usage = makeUsageEvent(base, result.usage || event.usage, {
+          scope: "run",
+          mode: "cumulative",
+        });
 
         // Avoid double-emitting response when agent_response text_delta already streamed.
         if (!sawTextDelta && typeof result.response === "string" && result.response) {
@@ -345,6 +360,7 @@ function createAntigravityRuntime(cli) {
             })
           );
         }
+        if (usage) out.push(usage);
         return out;
       }
 
@@ -359,6 +375,11 @@ function createAntigravityRuntime(cli) {
           sawTextDelta = true;
           out.push(makeEvent("text.delta", { ...base, text: event.response }));
         }
+        const usage = makeUsageEvent(base, event.usage, {
+          scope: "run",
+          mode: "cumulative",
+        });
+        if (usage) out.push(usage);
         return out;
       }
 
@@ -409,6 +430,7 @@ const antigravityProvider = {
     // No thinking text stream (only thinking_tokens / opaque thinkingSignature).
     thinking: false,
     tools: true,
+    usage: true,
     reasoning: "levels",
   },
   allowedProviderOptions: [

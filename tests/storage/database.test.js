@@ -23,7 +23,7 @@ test("memory database applies schema and safety pragmas", () => {
     assert.equal(db.pragma("busy_timeout", { simple: true }), 5000);
     assert.equal(
       db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version,
-      3
+      4
     );
     for (const name of [
       "threads",
@@ -38,8 +38,8 @@ test("memory database applies schema and safety pragmas", () => {
       assert.ok(tables.has(name), `expected ${name} table`);
     }
 
-    assert.equal(applyMigrations(db), 3);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 3);
+    assert.equal(applyMigrations(db), 4);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 4);
     const memoryColumns = new Set(
       db
         .prepare("PRAGMA table_info(memory_entries)")
@@ -48,6 +48,21 @@ test("memory database applies schema and safety pragmas", () => {
     );
     for (const column of ["metadata_json", "window_id", "capture_key", "supersession_key"]) {
       assert.ok(memoryColumns.has(column), `expected memory_entries.${column}`);
+    }
+    const windowColumns = new Set(
+      db
+        .prepare("PRAGMA table_info(context_windows)")
+        .all()
+        .map((column) => column.name)
+    );
+    for (const column of [
+      "reserve_ratio",
+      "context_used_tokens",
+      "context_usage_source",
+      "billing_total_tokens",
+      "billing_cost_usd",
+    ]) {
+      assert.ok(windowColumns.has(column), `expected context_windows.${column}`);
     }
   } finally {
     db.close();
@@ -80,15 +95,15 @@ test("storage refuses a database created by newer code", () => {
   const db = openMemoryDatabase({ file: ":memory:" });
   try {
     db.prepare(
-      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (4, 'future', 'now')"
+      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (5, 'future', 'now')"
     ).run();
-    assert.throws(() => applyMigrations(db), /newer than supported version 3/);
+    assert.throws(() => applyMigrations(db), /newer than supported version 4/);
   } finally {
     db.close();
   }
 });
 
-test("memory enrichment migration upgrades a version 2 database without losing rows", () => {
+test("later migrations upgrade a version 2 database without losing memory rows", () => {
   const db = openMemoryDatabase({ file: ":memory:", migrations: MIGRATIONS.slice(0, 2) });
   try {
     db.prepare(
@@ -102,7 +117,7 @@ test("memory enrichment migration upgrades a version 2 database without losing r
     `
     ).run();
 
-    assert.equal(applyMigrations(db), 3);
+    assert.equal(applyMigrations(db), 4);
     const memory = db.prepare("SELECT * FROM memory_entries WHERE id = 'memory-1'").get();
     assert.equal(memory.content, "keep me");
     assert.equal(memory.capture_key, null);
@@ -110,6 +125,35 @@ test("memory enrichment migration upgrades a version 2 database without losing r
     assert.equal(
       db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 3").get().count,
       1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("context usage migration rebases only legacy active model capacities", () => {
+  const db = openMemoryDatabase({ file: ":memory:", migrations: MIGRATIONS.slice(0, 3) });
+  try {
+    db.prepare("INSERT INTO threads (id, created_at, updated_at) VALUES ('t', 'now', 'now')").run();
+    const insert = db.prepare(`
+      INSERT INTO context_windows
+        (id, thread_id, agent_id, provider_key, workspace_key, generation, state,
+         capacity_tokens, created_at)
+      VALUES (?, 't', ?, ?, 'base', 1, ?, ?, 'now')
+    `);
+    insert.run("active-codex", "codex", "codex", "active", 200000);
+    insert.run("sealed-gemini", "gemini", "antigravity", "sealed", 200000);
+
+    assert.equal(applyMigrations(db), 4);
+    assert.equal(
+      db.prepare("SELECT capacity_tokens FROM context_windows WHERE id = 'active-codex'").get()
+        .capacity_tokens,
+      258000
+    );
+    assert.equal(
+      db.prepare("SELECT capacity_tokens FROM context_windows WHERE id = 'sealed-gemini'").get()
+        .capacity_tokens,
+      200000
     );
   } finally {
     db.close();

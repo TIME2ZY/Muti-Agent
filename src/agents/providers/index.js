@@ -10,6 +10,7 @@ const {
   createRunLifecycle,
 } = require("../event-protocol");
 const { resolveProxy, proxyEnvVars } = require("../proxy");
+const { createUsageAccumulator } = require("../usage");
 
 const REQUIRED_ADAPTER_METHODS = ["createRuntime", "buildInvocation"];
 
@@ -74,9 +75,9 @@ function validateProviderOptions(adapter, providerOptions) {
   const unknown = Object.keys(options).filter((key) => !allowed.has(key));
   if (unknown.length) {
     throw new Error(
-      `Unknown providerOptions for "${adapter.id}": ${unknown.join(", ")}. Allowed: ${[
-        ...allowed,
-      ].join(", ") || "(none)"}.`
+      `Unknown providerOptions for "${adapter.id}": ${unknown.join(", ")}. Allowed: ${
+        [...allowed].join(", ") || "(none)"
+      }.`
     );
   }
   return options;
@@ -116,6 +117,7 @@ function createProviderRuntime(config, options = {}) {
     throw new Error(`Provider runtime "${adapter.id}" must implement transform().`);
   }
   const lifecycle = options.lifecycle || createRunLifecycle();
+  const usageAccumulator = options.usageAccumulator || createUsageAccumulator();
 
   const validateEvents = (events, context, sessionId = "") => {
     if (!Array.isArray(events)) {
@@ -143,8 +145,10 @@ function createProviderRuntime(config, options = {}) {
 
     const accepted = [];
     for (const event of normalized) {
-      if (!lifecycle.accept(event.type)) continue;
-      accepted.push(assertCanonicalEvent(event));
+      const acceptedUsage = usageAccumulator.accept(event);
+      if (!acceptedUsage) continue;
+      if (!lifecycle.accept(acceptedUsage.type)) continue;
+      accepted.push(assertCanonicalEvent(acceptedUsage));
     }
     return accepted;
   };

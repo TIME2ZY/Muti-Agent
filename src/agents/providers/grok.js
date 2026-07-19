@@ -1,4 +1,5 @@
 const { makeEvent } = require("../event-protocol");
+const { makeUsageEvent } = require("../usage");
 const fs = require("node:fs");
 const path = require("node:path");
 const { firstNonEmpty, resolveProxy } = require("../proxy");
@@ -20,7 +21,7 @@ const { firstNonEmpty, resolveProxy } = require("../proxy");
  * Tools run inside the CLI agent loop (local write/shell/etc.) but are NOT
  * emitted on streaming-json stdout — so capabilities.tools is false. File
  * side-effects are visible via session worktree git status/diff, not tool.*.
- * end.usage is left unmapped until a platform-wide usage protocol exists.
+ * end.usage maps to the platform-wide usage.update protocol.
  *
  * Without coalescing, a short reply with high reasoning can emit 200+ NDJSON
  * lines → 200+ SSE/agent-events. We batch consecutive thought/text chunks.
@@ -132,6 +133,11 @@ function createGrokRuntime(cli) {
         case "done": {
           ensureStarted(event.sessionId);
           flushAll();
+          const usage = makeUsageEvent(base, event.usage, {
+            scope: "run",
+            mode: "cumulative",
+          });
+          if (usage) out.push(usage);
           return out;
         }
 
@@ -150,9 +156,10 @@ function createGrokRuntime(cli) {
         case "tool_call": {
           ensureStarted(event.sessionId);
           flushAll();
-          const toolName = String(
-            event.name || event.tool || event.toolName || event.tool_name || "tool"
-          ).trim() || "tool";
+          const toolName =
+            String(
+              event.name || event.tool || event.toolName || event.tool_name || "tool"
+            ).trim() || "tool";
           const toolId = String(
             event.id || event.toolId || event.callID || event.call_id || toolName
           );
@@ -177,9 +184,10 @@ function createGrokRuntime(cli) {
         case "tool.finished": {
           ensureStarted(event.sessionId);
           flushAll();
-          const toolName = String(
-            event.name || event.tool || event.toolName || event.tool_name || "tool"
-          ).trim() || "tool";
+          const toolName =
+            String(
+              event.name || event.tool || event.toolName || event.tool_name || "tool"
+            ).trim() || "tool";
           const toolId = String(
             event.id || event.toolId || event.callID || event.call_id || toolName
           );
@@ -271,6 +279,7 @@ const grokProvider = {
     thinking: true,
     // streaming-json has no tool/file events; edits show via worktree git.
     tools: false,
+    usage: true,
     reasoning: "levels",
   },
   allowedProviderOptions: ["alwaysApprove", "autoUpdate", "proxy", "noSubagents"],

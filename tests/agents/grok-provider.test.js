@@ -8,7 +8,7 @@ const {
   TEXT_FLUSH_CHARS,
   resolveGrokCommand,
 } = require("../../src/agents/providers/grok");
-const { AGENTS } = require("../../src/agents/catalog");
+const { AGENTS, getAgentModelProfile } = require("../../src/agents/catalog");
 const { buildInvocation } = require("../../src/agents/invoke-cli");
 const { createProviderRuntime, listSupportedProviders } = require("../../src/agents/providers");
 
@@ -24,7 +24,8 @@ test("AGENTS.grok is catalogued with grok-4.5 high", () => {
   assert.equal(AGENTS.grok.providerId, "grok");
   assert.equal(AGENTS.grok.model, "grok-4.5");
   assert.equal(AGENTS.grok.reasoningEffort, "high");
-  assert.equal(AGENTS.grok.capacityTokens, 500_000);
+  assert.equal(AGENTS.grok.capacityTokens, undefined);
+  assert.equal(getAgentModelProfile("grok").contextTokens, 500_000);
 });
 
 test("buildInvocation for grok spawns local grok CLI headless", () => {
@@ -115,7 +116,10 @@ test("createGrokRuntime coalesces many tiny thought tokens", () => {
   assert.equal(started, 1);
   assert.equal(combined, pieces.join(""));
   // Must be far fewer than one event per token
-  assert.ok(thinkingEvents < pieces.length, `expected coalesce, got ${thinkingEvents} for ${pieces.length} tokens`);
+  assert.ok(
+    thinkingEvents < pieces.length,
+    `expected coalesce, got ${thinkingEvents} for ${pieces.length} tokens`
+  );
   assert.ok(thinkingEvents >= 1);
 });
 
@@ -136,10 +140,18 @@ test("createGrokRuntime flushes thinking before text and coalesces text", () => 
   assert.ok(earlyText.length <= 1);
 
   events = runtime.transform({ type: "text", data: "lo world, this is enough text." }, ctx);
-  const textParts = events.filter((e) => e.type === "text.delta").map((e) => e.text).join("");
+  const textParts = events
+    .filter((e) => e.type === "text.delta")
+    .map((e) => e.text)
+    .join("");
 
   events = runtime.transform({ type: "end", sessionId: "s2" }, ctx);
-  const finalText = textParts + events.filter((e) => e.type === "text.delta").map((e) => e.text).join("");
+  const finalText =
+    textParts +
+    events
+      .filter((e) => e.type === "text.delta")
+      .map((e) => e.text)
+      .join("");
   assert.match(finalText, /Hello world/);
 });
 
@@ -153,6 +165,32 @@ test("createGrokRuntime extracts session id from end", () => {
     }),
     "019f50e8-88a0-7ee1-b525-df3b193ced6b"
   );
+});
+
+test("grok end maps usage without double-counting token subsets", () => {
+  const runtime = createProviderRuntime({ providerId: "grok", model: "grok-4.5" });
+  const events = runtime.transform(
+    {
+      type: "end",
+      sessionId: "grok-usage",
+      usage: {
+        input_tokens: 100,
+        cache_read_input_tokens: 40,
+        output_tokens: 30,
+        reasoning_tokens: 10,
+        total_tokens: 130,
+        cost: 0.25,
+      },
+    },
+    { agent: "grok", invocationId: "inv-usage" }
+  );
+  const usage = events.find((event) => event.type === "usage.update");
+  assert.ok(usage);
+  assert.equal(usage.inputTokens, 100);
+  assert.equal(usage.cachedInputTokens, 40);
+  assert.equal(usage.reasoningTokens, 10);
+  assert.equal(usage.totalTokens, 130);
+  assert.equal(usage.costUsd, 0.25);
 });
 
 test("coalesce thresholds are positive", () => {

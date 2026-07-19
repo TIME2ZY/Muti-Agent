@@ -22,7 +22,10 @@ test("makeEvent stamps protocolVersion", () => {
 });
 
 test("canonical protocol rejects removed event types", () => {
-  const { CANONICAL_EVENT_TYPES, validateCanonicalEvent } = require("../../src/agents/event-protocol");
+  const {
+    CANONICAL_EVENT_TYPES,
+    validateCanonicalEvent,
+  } = require("../../src/agents/event-protocol");
   for (const type of [
     "subagent.started",
     "subagent.progress",
@@ -83,6 +86,24 @@ test("diagnostic and optional fields validate", () => {
   });
   assert.equal(file.changeType, "add");
   assert.doesNotThrow(() => assertCanonicalEvent(file));
+});
+
+test("usage.update validates normalized provider-neutral fields", () => {
+  const usage = makeEvent("usage.update", {
+    agent: "codex",
+    invocationId: "inv-usage",
+    scope: "turn",
+    mode: "cumulative",
+    inputTokens: "100",
+    outputTokens: 20,
+    totalTokens: 120,
+  });
+  assert.equal(usage.inputTokens, 100);
+  assert.doesNotThrow(() => assertCanonicalEvent(usage));
+  const invalid = validateCanonicalEvent({ ...usage, scope: "session" });
+  assert.ok(invalid.some((error) => /scope/.test(error)));
+  const negativeContext = validateCanonicalEvent({ ...usage, contextTokens: -1 });
+  assert.ok(negativeContext.some((error) => /contextTokens/.test(error)));
 });
 
 test("normalize coerces loose field types before validation", () => {
@@ -194,4 +215,20 @@ test("shared lifecycle across recreated runtimes suppresses second run.started",
     attempt2.finish(ctx, { terminal: true, ok: true, exitCode: 0 }).map((e) => e.type),
     ["run.finished"]
   );
+});
+
+test("shared usage accumulator suppresses replayed cumulative usage after retry", () => {
+  const { createUsageAccumulator } = require("../../src/agents/usage");
+  const lifecycle = createRunLifecycle();
+  const usageAccumulator = createUsageAccumulator();
+  const config = { providerId: "codex", model: "gpt-5.6-sol" };
+  const ctx = { agent: "codex", invocationId: "inv-usage-retry" };
+  const raw = {
+    type: "turn.completed",
+    usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 },
+  };
+  const first = createProviderRuntime(config, { lifecycle, usageAccumulator }).transform(raw, ctx);
+  assert.equal(first.filter((event) => event.type === "usage.update").length, 1);
+  const retry = createProviderRuntime(config, { lifecycle, usageAccumulator }).transform(raw, ctx);
+  assert.equal(retry.filter((event) => event.type === "usage.update").length, 0);
 });

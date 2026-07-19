@@ -1,6 +1,7 @@
 const { spawn } = require("node:child_process");
 const readline = require("node:readline");
 const { createRunLifecycle } = require("./event-protocol");
+const { createUsageAccumulator } = require("./usage");
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_KILL_GRACE_MS = 5000;
@@ -14,7 +15,10 @@ const STDERR_BUFFER_LIMIT = 8192;
  * recreate decoder/runtime state per attempt while reusing the same lifecycle:
  *
  *   const lifecycle = createRunLifecycle(); // or omit — supervisor creates one
- *   createRuntime: (lifecycle) => createProviderRuntime(config, { lifecycle })
+ *   createRuntime: (lifecycle, shared) => createProviderRuntime(config, {
+ *     lifecycle,
+ *     usageAccumulator: shared.usageAccumulator,
+ *   })
  */
 function superviseProviderProcess({
   command,
@@ -41,13 +45,14 @@ function superviseProviderProcess({
 
   // One lifecycle per invocation — survives retries.
   const lifecycle = externalLifecycle || createRunLifecycle();
+  const sharedRuntimeState = { usageAccumulator: createUsageAccumulator() };
   let firstChild;
   let attempt = 0;
 
   const startAttempt = () => {
     attempt += 1;
     // Decoder/runtime state is per-attempt; lifecycle is shared.
-    const providerRuntime = createRuntime(lifecycle);
+    const providerRuntime = createRuntime(lifecycle, sharedRuntimeState);
 
     const child = spawnFn(command, args, {
       env,

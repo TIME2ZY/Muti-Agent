@@ -4,7 +4,7 @@
  * protocol — cross-agent work uses platform @ / handoff (see collaboration-rules).
  * Shell/command executions map to tool.* (toolName often "command_execution" / "bash").
  */
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
 
 const CANONICAL_EVENT_FIELDS = {
   "run.started": ["agent", "invocationId", "provider", "model"],
@@ -15,6 +15,7 @@ const CANONICAL_EVENT_FIELDS = {
   stderr: ["agent", "invocationId", "text"],
   "file.changed": ["agent", "invocationId", "path"],
   "progress.update": ["agent", "invocationId", "items"],
+  "usage.update": ["agent", "invocationId", "scope", "mode"],
   "tool.started": ["agent", "invocationId", "toolName", "toolId"],
   "tool.finished": ["agent", "invocationId", "toolName", "toolId"],
   /** Unrecognized / non-UI diagnostics (debug & durable optional). */
@@ -47,6 +48,17 @@ const FIELD_TYPES = {
   message: "string",
   rawType: "string",
   args: "object",
+  scope: "string",
+  mode: "string",
+  inputTokens: "number",
+  cachedInputTokens: "number",
+  outputTokens: "number",
+  reasoningTokens: "number",
+  totalTokens: "number",
+  costUsd: "number",
+  contextTokens: "nonNegativeNumberOrNull",
+  contextTokensExact: "boolean",
+  providerRaw: "object",
 };
 
 const CANONICAL_EVENT_TYPES = new Set(Object.keys(CANONICAL_EVENT_FIELDS));
@@ -67,6 +79,8 @@ const STRING_COERCE_FIELDS = [
   "code",
   "message",
   "rawType",
+  "scope",
+  "mode",
 ];
 
 function normalizeProgressItem(item, index) {
@@ -132,6 +146,22 @@ function normalizeCanonicalEvent(event) {
     const failed = next.status === "error" || next.status === "failed";
     next.state = failed ? "failed" : "completed";
   }
+  if (next.type === "usage.update") {
+    const numericFields = [
+      "inputTokens",
+      "cachedInputTokens",
+      "outputTokens",
+      "reasoningTokens",
+      "totalTokens",
+      "costUsd",
+      "contextTokens",
+    ];
+    for (const field of numericFields) {
+      if (next[field] === undefined || next[field] === null) continue;
+      const value = Number(next[field]);
+      if (Number.isFinite(value) && value >= 0) next[field] = value;
+    }
+  }
   return next;
 }
 
@@ -163,6 +193,22 @@ function checkFieldType(field, value) {
     }
     return null;
   }
+  if (kind === "nonNegativeNumberOrNull") {
+    if (value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+      return typeError(field, "a non-negative number or null", value);
+    }
+    return null;
+  }
+  if (kind === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      return typeError(field, "a non-negative number", value);
+    }
+    return null;
+  }
+  if (kind === "boolean") {
+    if (typeof value !== "boolean") return typeError(field, "a boolean", value);
+    return null;
+  }
   if (kind === "stringOrNull") {
     if (value !== null && typeof value !== "string") {
       return typeError(field, "a string or null", value);
@@ -187,13 +233,8 @@ function validateCanonicalEvent(event) {
   ) {
     errors.push("protocolVersion must be a positive number");
   }
-  if (
-    typeof event.protocolVersion === "number" &&
-    event.protocolVersion > PROTOCOL_VERSION
-  ) {
-    errors.push(
-      `unsupported protocolVersion ${event.protocolVersion} (max ${PROTOCOL_VERSION})`
-    );
+  if (typeof event.protocolVersion === "number" && event.protocolVersion > PROTOCOL_VERSION) {
+    errors.push(`unsupported protocolVersion ${event.protocolVersion} (max ${PROTOCOL_VERSION})`);
   }
 
   for (const field of CANONICAL_EVENT_FIELDS[event.type]) {
@@ -214,6 +255,27 @@ function validateCanonicalEvent(event) {
     if (!FIELD_TYPES[field]) continue;
     const typeErr = checkFieldType(field, value);
     if (typeErr) errors.push(`${event.type}.${typeErr}`);
+  }
+
+  if (event.type === "usage.update") {
+    if (!["step", "turn", "run"].includes(event.scope)) {
+      errors.push("usage.update.scope must be one of step, turn, run");
+    }
+    if (!["delta", "cumulative"].includes(event.mode)) {
+      errors.push("usage.update.mode must be one of delta, cumulative");
+    }
+    const tokenFields = [
+      "inputTokens",
+      "cachedInputTokens",
+      "outputTokens",
+      "reasoningTokens",
+      "totalTokens",
+      "costUsd",
+      "contextTokens",
+    ];
+    if (!tokenFields.some((field) => event[field] !== undefined && event[field] !== null)) {
+      errors.push("usage.update must include at least one usage value");
+    }
   }
 
   return errors;

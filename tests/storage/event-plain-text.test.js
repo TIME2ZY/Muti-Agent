@@ -4,7 +4,10 @@ const test = require("node:test");
 const { eventPlainText } = require("../../src/storage/event-plain-text");
 
 test("eventPlainText extracts text.delta body instead of JSON shell", () => {
-  const plain = eventPlainText("text.delta", { text: "hello durable world", meta: { nested: true } });
+  const plain = eventPlainText("text.delta", {
+    text: "hello durable world",
+    meta: { nested: true },
+  });
   assert.equal(plain, "hello durable world");
   assert.doesNotMatch(plain, /"meta"/);
 });
@@ -38,4 +41,18 @@ test("eventPlainText summarizes tool events without dumping huge JSON", () => {
 test("eventPlainText accepts payload_json strings", () => {
   const plain = eventPlainText("stderr", JSON.stringify({ text: "warn: disk full" }));
   assert.equal(plain, "warn: disk full");
+});
+
+test("eventPlainText renders usage fields for recall diagnostics", () => {
+  const plain = eventPlainText("usage.update", {
+    scope: "turn",
+    inputTokens: 100,
+    cachedInputTokens: 40,
+    outputTokens: 20,
+    reasoningTokens: 5,
+    totalTokens: 120,
+  });
+  assert.match(plain, /usage turn/);
+  assert.match(plain, /cached=40/);
+  assert.match(plain, /total=120/);
 });

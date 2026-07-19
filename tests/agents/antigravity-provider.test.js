@@ -274,7 +274,12 @@ test("stream-json init + text + tool + result maps to canonical events", () => {
     },
     ctx
   );
-  assert.deepEqual(result.map((e) => e.type), []);
+  assert.deepEqual(
+    result.map((e) => e.type),
+    ["usage.update"]
+  );
+  assert.equal(result[0].reasoningTokens, 100);
+  assert.equal(result[0].scope, "run");
 });
 
 test("result emits text when no agent_response deltas were seen", () => {
@@ -299,6 +304,46 @@ test("result emits text when no agent_response deltas were seen", () => {
   assert.equal(events[0].text, "only final\n");
 });
 
+test("step and result usage expose delta and cumulative scopes", () => {
+  const runtime = createProviderRuntime({
+    providerId: "antigravity",
+    model: "gemini-3.5-flash",
+  });
+  const ctx = { agent: "gemini", invocationId: "inv-agy-usage" };
+  const step = runtime.transform(
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: "agy-usage",
+        step_type: "unknown",
+        state: "ACTIVE",
+        usage: { input_tokens: 100, output_tokens: 20, thinking_tokens: 5 },
+      },
+    },
+    ctx
+  );
+  const stepUsage = step.find((event) => event.type === "usage.update");
+  assert.equal(stepUsage.scope, "step");
+  assert.equal(stepUsage.mode, "delta");
+  assert.equal(stepUsage.totalTokens, 120);
+
+  const result = runtime.transform(
+    {
+      event: "result",
+      result: {
+        conversation_id: "agy-usage",
+        status: "SUCCESS",
+        usage: { input_tokens: 150, output_tokens: 30, thinking_tokens: 8 },
+      },
+    },
+    ctx
+  );
+  const runUsage = result.find((event) => event.type === "usage.update");
+  assert.equal(runUsage.scope, "run");
+  assert.equal(runUsage.mode, "cumulative");
+  assert.equal(runUsage.totalTokens, 180);
+});
+
 test("final json blob maps conversation_id and response", () => {
   const runtime = createAntigravityRuntime(AGENTS.gemini);
   const ctx = { agent: "gemini", invocationId: "inv-json" };
@@ -315,6 +360,8 @@ test("final json blob maps conversation_id and response", () => {
   assert.equal(events[0].sessionId, "json-conv");
   assert.equal(events[1].type, "text.delta");
   assert.equal(events[1].text, "FMT_json\n");
+  assert.equal(events[2].type, "usage.update");
+  assert.equal(events[2].reasoningTokens, 10);
 });
 
 test("user_input and unknown DONE steps are quiet", () => {
@@ -326,7 +373,12 @@ test("user_input and unknown DONE steps are quiet", () => {
       .transform(
         {
           event: "step_update",
-          step_update: { conversation_id: "q1", step_index: 0, state: "DONE", step_type: "user_input" },
+          step_update: {
+            conversation_id: "q1",
+            step_index: 0,
+            state: "DONE",
+            step_type: "user_input",
+          },
         },
         ctx
       )
@@ -338,7 +390,12 @@ test("user_input and unknown DONE steps are quiet", () => {
       .transform(
         {
           event: "step_update",
-          step_update: { conversation_id: "q1", step_index: 1, state: "DONE", step_type: "unknown" },
+          step_update: {
+            conversation_id: "q1",
+            step_index: 1,
+            state: "DONE",
+            step_type: "unknown",
+          },
         },
         ctx
       )

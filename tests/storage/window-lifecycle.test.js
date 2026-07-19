@@ -150,9 +150,29 @@ test("sealed windows accept final usage accounting from their active invocation"
       storage.windows.addUsage("window-usage", { inputChars: 120, outputChars: 80 }),
       true
     );
+    assert.equal(
+      storage.windows.setUsageSnapshot("window-usage", {
+        contextUsedTokens: 50,
+        contextUsageSource: "char_estimated",
+        billing: {
+          inputTokens: 100,
+          cachedInputTokens: 40,
+          outputTokens: 20,
+          reasoningTokens: 5,
+          totalTokens: 120,
+          costUsd: 0.02,
+        },
+      }),
+      true
+    );
     const sealed = storage.windows.get("window-usage");
     assert.equal(sealed.inputChars, 120);
     assert.equal(sealed.outputChars, 80);
+    assert.equal(sealed.contextUsedTokens, 50);
+    assert.equal(sealed.billingInputTokens, 100);
+    assert.equal(sealed.billingCachedInputTokens, 40);
+    assert.equal(sealed.billingReasoningTokens, 5);
+    assert.equal(sealed.billingCostUsd, 0.02);
   } finally {
     storage.close();
   }

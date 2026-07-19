@@ -1,21 +1,17 @@
-const { AGENTS, DEFAULT_CONTEXT_TOKENS, getAgentModelProfile } = require("../agents/catalog");
+const {
+  AGENTS,
+  DEFAULT_CONTEXT_TOKENS,
+  DEFAULT_RESERVE_RATIO,
+  getAgentModelProfile,
+} = require("../agents/catalog");
 const { ENV } = require("../shared/brand");
 
-// Rough rule of thumb: 1 token ≈ 4 characters for English/CJK-mixed text.
-// This is intentionally conservative — overestimating token count means we
-// seal slightly too early, which is the safer direction.
 const CHARS_PER_TOKEN = 4;
-
-// All known agents currently use 200k token context windows. Override per
-// agent via AGENTS[id].capacityTokens, or per call via makeTracker options.
 const DEFAULT_CAPACITY_TOKENS = DEFAULT_CONTEXT_TOKENS;
 
 function getAgentCapacity(agentId) {
-  // Test override: lets integration tests force tiny capacities to exercise
-  // warn/action thresholds without producing megabytes of stdout.
   const envOverride = Number(process.env[ENV.TEST_CAPACITY]);
   if (Number.isFinite(envOverride) && envOverride > 0) return envOverride;
-
   const agent = AGENTS[agentId];
   if (!agent) return DEFAULT_CAPACITY_TOKENS;
   if (agent.capacityTokens) return agent.capacityTokens;
@@ -23,10 +19,42 @@ function getAgentCapacity(agentId) {
   return modelProfile ? modelProfile.contextTokens : DEFAULT_CAPACITY_TOKENS;
 }
 
+function getAgentReserveRatio(agentId) {
+  const modelProfile = getAgentModelProfile(agentId);
+  return modelProfile && typeof modelProfile.reserveRatio === "number"
+    ? modelProfile.reserveRatio
+    : DEFAULT_RESERVE_RATIO;
+}
+
 function makeTracker(agentId, opts = {}) {
   const capacityTokens = opts.capacityTokens || getAgentCapacity(agentId);
+  const reserveRatio = validRatio(opts.reserveRatio, getAgentReserveRatio(agentId));
+  const reserveTokens = Math.floor(capacityTokens * reserveRatio);
+  const usableContextTokens = Math.max(1, capacityTokens - reserveTokens);
   let inputChars = nonNegativeNumber(opts.inputChars);
   let outputChars = nonNegativeNumber(opts.outputChars);
+  const persistedContextSource = opts.contextUsageSource || "char_estimated";
+  let providerContextTokens =
+    persistedContextSource !== "char_estimated" ? nonNegativeNumber(opts.contextUsedTokens) : 0;
+  let contextUsageSource = providerContextTokens > 0 ? persistedContextSource : "char_estimated";
+  const billing = {
+    inputTokens: nonNegativeNumber(opts.billingInputTokens),
+    cachedInputTokens: nonNegativeNumber(opts.billingCachedInputTokens),
+    outputTokens: nonNegativeNumber(opts.billingOutputTokens),
+    reasoningTokens: nonNegativeNumber(opts.billingReasoningTokens),
+    totalTokens: nonNegativeNumber(opts.billingTotalTokens),
+    costUsd: nonNegativeNumber(opts.billingCostUsd),
+  };
+  const usageFields = [
+    "inputTokens",
+    "cachedInputTokens",
+    "outputTokens",
+    "reasoningTokens",
+    "totalTokens",
+    "costUsd",
+  ];
+  const accountedInvocation = Object.fromEntries(usageFields.map((field) => [field, 0]));
+  let highestUsageScope = -1;
   const startedAt = Date.now();
 
   function addInput(n) {
@@ -41,19 +69,71 @@ function makeTracker(agentId, opts = {}) {
     return inputChars + outputChars;
   }
 
+  function getEstimatedTokens() {
+    return Math.floor(getUsedChars() / CHARS_PER_TOKEN);
+  }
+
+  function getUsedTokens() {
+    return providerContextTokens > 0 ? providerContextTokens : getEstimatedTokens();
+  }
+
+  function getPhysicalFillRatio() {
+    return getUsedTokens() / capacityTokens;
+  }
+
   function getFillRatio() {
-    return getUsedChars() / (capacityTokens * CHARS_PER_TOKEN);
+    return getUsedTokens() / usableContextTokens;
+  }
+
+  function applyUsage(event) {
+    if (!event || event.type !== "usage.update") return false;
+    if (event.contextTokensExact === true && typeof event.contextTokens === "number") {
+      providerContextTokens = event.contextTokens;
+      contextUsageSource = "provider_exact";
+    }
+
+    const scopeRank = { step: 0, turn: 1, run: 2 }[event.scope] ?? 0;
+    if (scopeRank < highestUsageScope) return true;
+
+    if (event.mode === "cumulative") {
+      for (const field of usageFields) {
+        if (typeof event[field] !== "number") continue;
+        const delta = event[field] - accountedInvocation[field];
+        billing[field] = Math.max(0, billing[field] + delta);
+        accountedInvocation[field] = event[field];
+      }
+      highestUsageScope = scopeRank;
+    } else if (scopeRank === highestUsageScope || highestUsageScope < 0) {
+      for (const field of usageFields) {
+        if (typeof event[field] !== "number") continue;
+        billing[field] += event[field];
+        accountedInvocation[field] += event[field];
+      }
+      highestUsageScope = scopeRank;
+    }
+    return true;
   }
 
   function snapshot() {
+    const usedTokens = getUsedTokens();
     return {
       agentId,
       capacityTokens,
+      contextWindowTokens: capacityTokens,
+      reserveRatio,
+      reserveTokens,
+      usableContextTokens,
       inputChars,
       outputChars,
       usedChars: getUsedChars(),
-      usedTokens: Math.floor(getUsedChars() / CHARS_PER_TOKEN),
+      estimatedTokens: getEstimatedTokens(),
+      usedTokens,
+      contextUsedTokens: usedTokens,
+      contextUsageSource,
+      physicalFillRatio: getPhysicalFillRatio(),
+      budgetFillRatio: getFillRatio(),
       fillRatio: getFillRatio(),
+      billing: { ...billing },
       elapsedMs: Date.now() - startedAt,
     };
   }
@@ -61,12 +141,22 @@ function makeTracker(agentId, opts = {}) {
   return {
     agentId,
     capacityTokens,
+    reserveRatio,
+    reserveTokens,
+    usableContextTokens,
     addInput,
     addOutput,
+    applyUsage,
     getUsedChars,
+    getUsedTokens,
+    getPhysicalFillRatio,
     getFillRatio,
     snapshot,
   };
+}
+
+function validRatio(value, fallback) {
+  return typeof value === "number" && value >= 0 && value < 1 ? value : fallback;
 }
 
 function nonNegativeNumber(value) {
@@ -76,6 +166,8 @@ function nonNegativeNumber(value) {
 module.exports = {
   makeTracker,
   getAgentCapacity,
+  getAgentReserveRatio,
   CHARS_PER_TOKEN,
   DEFAULT_CAPACITY_TOKENS,
+  DEFAULT_RESERVE_RATIO,
 };

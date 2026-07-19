@@ -316,9 +316,7 @@
     } = processHelpers;
     const markdownLite = resolveMarkdownLite() || {};
     const paintMarkdown =
-      typeof markdownLite.paintMarkdown === "function"
-        ? markdownLite.paintMarkdown
-        : null;
+      typeof markdownLite.paintMarkdown === "function" ? markdownLite.paintMarkdown : null;
 
     /**
      * Final markdown paint with length-based deferral.
@@ -369,11 +367,7 @@
     const badgeText = L.badge || {};
     // Shared renderer: same DOM path as recall panel (locale injected).
     const processPanel = createProcessPanelRenderer({ locale: L });
-    const {
-      wrapProcessDetails,
-      updateProcessDetailsLabel,
-      renderProcessPanel,
-    } = processPanel;
+    const { wrapProcessDetails, updateProcessDetailsLabel, renderProcessPanel } = processPanel;
 
     function sessionRuntime(sessionId) {
       return runtimeStore.getOrCreate(sessionId || state.currentSessionId || "_pending");
@@ -1044,6 +1038,7 @@
           diagnostics: [],
           fileChanges: [],
           stderr: [],
+          usage: null,
           status: "thinking",
         });
       }
@@ -1098,6 +1093,11 @@
         } else if (item) {
           item.progressItems = run.progressItems;
         }
+        return;
+      }
+
+      if (event.type === "usage.update") {
+        run.usage = { ...event };
         return;
       }
 
@@ -1239,8 +1239,7 @@
     function focusProcessPanel(wrapper, options = {}) {
       if (!wrapper) return false;
       const process =
-        wrapper.querySelector(".msg-process") ||
-        wrapper.querySelector(".live-subagents");
+        wrapper.querySelector(".msg-process") || wrapper.querySelector(".live-subagents");
       if (!process) return false;
       if (process.tagName === "DETAILS" || process.classList.contains("msg-process")) {
         process.open = true;

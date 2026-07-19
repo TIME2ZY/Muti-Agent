@@ -62,7 +62,29 @@ function eventPlainText(kind, payload) {
 
   if (eventKind === "sealed" || eventKind === "context-warning") {
     return truncate(
-      [eventKind, data.agent || "", data.reason || "", data.ratio != null ? `ratio=${data.ratio}` : ""]
+      [
+        eventKind,
+        data.agent || "",
+        data.reason || "",
+        data.ratio != null ? `ratio=${data.ratio}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+  }
+
+  if (eventKind === "usage.update") {
+    return truncate(
+      [
+        "usage",
+        data.scope || "",
+        data.inputTokens != null ? `input=${data.inputTokens}` : "",
+        data.cachedInputTokens != null ? `cached=${data.cachedInputTokens}` : "",
+        data.outputTokens != null ? `output=${data.outputTokens}` : "",
+        data.reasoningTokens != null ? `reasoning=${data.reasoningTokens}` : "",
+        data.totalTokens != null ? `total=${data.totalTokens}` : "",
+        data.costUsd != null ? `cost_usd=${data.costUsd}` : "",
+      ]
         .filter(Boolean)
         .join(" ")
     );

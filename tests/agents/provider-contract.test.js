@@ -54,6 +54,12 @@ test("every provider implements the complete adapter contract", () => {
   }
 });
 
+test("all active providers advertise canonical usage support", () => {
+  for (const adapter of Object.values(PROVIDERS)) {
+    assert.equal(adapter.capabilities.usage, true, `${adapter.id} should expose usage`);
+  }
+});
+
 test("unknown providers fail fast instead of falling through to Codex", () => {
   assert.throws(
     () => buildProviderInvocation({ providerId: "claude", model: "x" }, "hello"),
@@ -82,7 +88,7 @@ test("canonical event validator rejects missing fields and unknown event types",
     invocationId: "inv-1",
     text: "hello",
   });
-  assert.equal(ok.protocolVersion, 1);
+  assert.equal(ok.protocolVersion, 2);
   assert.equal(typeof ok.text, "string");
 });
 

@@ -5,10 +5,16 @@ function createWindowRepository(db) {
     INSERT INTO context_windows
       (id, thread_id, agent_id, provider_key, workspace_key, generation,
        provider_session_id, state, capacity_tokens, input_chars, output_chars,
+       reserve_ratio, context_used_tokens, context_usage_source,
+       billing_input_tokens, billing_cached_input_tokens, billing_output_tokens,
+       billing_reasoning_tokens, billing_total_tokens, billing_cost_usd,
        seal_reason, created_at, sealed_at)
     VALUES
       (@id, @threadId, @agentId, @providerKey, @workspaceKey, @generation,
        @providerSessionId, @state, @capacityTokens, @inputChars, @outputChars,
+       @reserveRatio, @contextUsedTokens, @contextUsageSource,
+       @billingInputTokens, @billingCachedInputTokens, @billingOutputTokens,
+       @billingReasoningTokens, @billingTotalTokens, @billingCostUsd,
        @sealReason, @createdAt, @sealedAt)
   `);
   const findById = db.prepare("SELECT * FROM context_windows WHERE id = ?");
@@ -42,6 +48,18 @@ function createWindowRepository(db) {
     UPDATE context_windows
     SET input_chars = input_chars + ?, output_chars = output_chars + ?
     WHERE id = ?
+  `);
+  const setUsageSnapshot = db.prepare(`
+    UPDATE context_windows
+    SET context_used_tokens = @contextUsedTokens,
+        context_usage_source = @contextUsageSource,
+        billing_input_tokens = @billingInputTokens,
+        billing_cached_input_tokens = @billingCachedInputTokens,
+        billing_output_tokens = @billingOutputTokens,
+        billing_reasoning_tokens = @billingReasoningTokens,
+        billing_total_tokens = @billingTotalTokens,
+        billing_cost_usd = @billingCostUsd
+    WHERE id = @id
   `);
   const markSealing = db.prepare(`
     UPDATE context_windows
@@ -81,6 +99,30 @@ function createWindowRepository(db) {
         capacityTokens: positiveInteger(input.capacityTokens, "capacity tokens"),
         inputChars: nonNegativeInteger(input.inputChars || 0, "input chars"),
         outputChars: nonNegativeInteger(input.outputChars || 0, "output chars"),
+        reserveRatio: ratio(input.reserveRatio, 0.2),
+        contextUsedTokens: nonNegativeInteger(input.contextUsedTokens || 0, "context used tokens"),
+        contextUsageSource: input.contextUsageSource || "char_estimated",
+        billingInputTokens: nonNegativeInteger(
+          input.billingInputTokens || 0,
+          "billing input tokens"
+        ),
+        billingCachedInputTokens: nonNegativeInteger(
+          input.billingCachedInputTokens || 0,
+          "billing cached input tokens"
+        ),
+        billingOutputTokens: nonNegativeInteger(
+          input.billingOutputTokens || 0,
+          "billing output tokens"
+        ),
+        billingReasoningTokens: nonNegativeInteger(
+          input.billingReasoningTokens || 0,
+          "billing reasoning tokens"
+        ),
+        billingTotalTokens: nonNegativeInteger(
+          input.billingTotalTokens || 0,
+          "billing total tokens"
+        ),
+        billingCostUsd: nonNegativeNumber(input.billingCostUsd || 0, "billing cost USD"),
         sealReason: nullableString(input.sealReason),
         createdAt: now,
         sealedAt: nullableString(input.sealedAt),
@@ -119,6 +161,38 @@ function createWindowRepository(db) {
       const input = nonNegativeInteger(inputChars, "input chars");
       const output = nonNegativeInteger(outputChars, "output chars");
       return addUsage.run(input, output, id).changes > 0;
+    },
+
+    setUsageSnapshot(id, usage = {}) {
+      const billing = usage.billing || {};
+      return (
+        setUsageSnapshot.run({
+          id,
+          contextUsedTokens: nonNegativeInteger(
+            usage.contextUsedTokens || 0,
+            "context used tokens"
+          ),
+          contextUsageSource: requiredString(
+            usage.contextUsageSource || "char_estimated",
+            "context usage source"
+          ),
+          billingInputTokens: nonNegativeInteger(billing.inputTokens || 0, "billing input tokens"),
+          billingCachedInputTokens: nonNegativeInteger(
+            billing.cachedInputTokens || 0,
+            "billing cached input tokens"
+          ),
+          billingOutputTokens: nonNegativeInteger(
+            billing.outputTokens || 0,
+            "billing output tokens"
+          ),
+          billingReasoningTokens: nonNegativeInteger(
+            billing.reasoningTokens || 0,
+            "billing reasoning tokens"
+          ),
+          billingTotalTokens: nonNegativeInteger(billing.totalTokens || 0, "billing total tokens"),
+          billingCostUsd: nonNegativeNumber(billing.costUsd || 0, "billing cost USD"),
+        }).changes > 0
+      );
     },
 
     markSealing(id) {
@@ -167,6 +241,7 @@ function createWindowRepository(db) {
           ...coordinate,
           generation: this.nextGeneration(coordinate),
           capacityTokens: positiveInteger(input.capacityTokens, "capacity tokens"),
+          reserveRatio: ratio(input.reserveRatio, 0.2),
           providerSessionId: null,
           state: "active",
           createdAt: input.createdAt,
@@ -191,6 +266,15 @@ function mapWindow(row) {
     capacityTokens: row.capacity_tokens,
     inputChars: row.input_chars,
     outputChars: row.output_chars,
+    reserveRatio: row.reserve_ratio,
+    contextUsedTokens: row.context_used_tokens,
+    contextUsageSource: row.context_usage_source,
+    billingInputTokens: row.billing_input_tokens,
+    billingCachedInputTokens: row.billing_cached_input_tokens,
+    billingOutputTokens: row.billing_output_tokens,
+    billingReasoningTokens: row.billing_reasoning_tokens,
+    billingTotalTokens: row.billing_total_tokens,
+    billingCostUsd: row.billing_cost_usd,
     sealReason: row.seal_reason,
     createdAt: row.created_at,
     sealedAt: row.sealed_at,
@@ -225,6 +309,17 @@ function nonNegativeInteger(value, label) {
     throw new Error(`${label} must be a non-negative integer.`);
   }
   return value;
+}
+
+function nonNegativeNumber(value, label) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative number.`);
+  }
+  return value;
+}
+
+function ratio(value, fallback) {
+  return typeof value === "number" && value >= 0 && value < 1 ? value : fallback;
 }
 
 module.exports = { createWindowRepository, ALLOWED_STATES };

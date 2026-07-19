@@ -56,6 +56,7 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
         ...coordinate,
         generation: storage.windows.nextGeneration(coordinate),
         capacityTokens: input.capacityTokens,
+        reserveRatio: input.reserveRatio,
         providerSessionId: null,
       });
     });
@@ -82,6 +83,7 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
         providerKey: input.providerKey,
         workspaceKey: input.workspaceKey,
         capacityTokens: input.capacityTokens,
+        reserveRatio: input.reserveRatio,
         reason: input.reason || "context overflow",
         windowId: input.windowId || null,
         nextId: input.nextId || crypto.randomUUID(),
@@ -277,6 +279,14 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
     return attempt("update window usage", () => storage.windows.addUsage(windowId, usage)) === true;
   }
 
+  function setWindowUsageSnapshot(windowId, usage) {
+    return (
+      attempt("set window usage snapshot", () =>
+        storage.windows.setUsageSnapshot(windowId, usage)
+      ) === true
+    );
+  }
+
   function deleteThread(threadId) {
     if (!threadId) return null;
     deletedThreads.add(threadId);
@@ -355,6 +365,7 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
     finishInvocation,
     bindProviderSession,
     addWindowUsage,
+    setWindowUsageSnapshot,
     deleteThread,
     close,
   };
