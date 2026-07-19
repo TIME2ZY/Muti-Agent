@@ -59,6 +59,15 @@ function isInside(parent, child) {
   return rel && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
+function registeredWorktreePaths(gitRoot) {
+  return new Set(
+    runGit(["worktree", "list", "--porcelain"], gitRoot)
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("worktree "))
+      .map((line) => path.resolve(line.slice("worktree ".length)))
+  );
+}
+
 function writeWorktreeEnv(meta) {
   const envPath = path.join(meta.worktreeDir, ".env.local");
   const lines = [
@@ -196,19 +205,28 @@ function createWorktreeManager(opts = {}) {
     const meta = state.worktrees[safeSessionId];
     if (!meta) throw new Error(`No managed worktree for session ${safeSessionId}.`);
 
-    const worktreesRoot = path.resolve(opts.worktreesRoot || `${meta.baseDir}.worktrees`);
+    // Treat the persisted state as untrusted input. Re-validate the repository
+    // and require Git to recognize the exact target before any recursive fallback.
+    const trustedBaseDir = ensureGitRoot(meta.baseDir);
+    if (trustedBaseDir !== path.resolve(meta.baseDir)) {
+      throw new Error(`Refusing worktree with invalid base repository: ${meta.baseDir}`);
+    }
+    const worktreesRoot = path.resolve(opts.worktreesRoot || `${trustedBaseDir}.worktrees`);
     const resolvedDir = path.resolve(meta.worktreeDir);
     if (!isInside(worktreesRoot, resolvedDir)) {
       throw new Error(`Refusing to remove unmanaged path: ${resolvedDir}`);
     }
+    if (!registeredWorktreePaths(trustedBaseDir).has(resolvedDir)) {
+      throw new Error(`Refusing to remove unregistered worktree: ${resolvedDir}`);
+    }
 
     if (fs.existsSync(resolvedDir)) {
       try {
-        runGit(["worktree", "remove", "--force", resolvedDir], meta.baseDir);
+        runGit(["worktree", "remove", "--force", resolvedDir], trustedBaseDir);
       } catch {
         fs.rmSync(resolvedDir, { recursive: true, force: true });
         try {
-          runGit(["worktree", "prune"], meta.baseDir);
+          runGit(["worktree", "prune"], trustedBaseDir);
         } catch {}
       }
     }

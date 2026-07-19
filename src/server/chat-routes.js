@@ -204,6 +204,16 @@ function createChatRoutes({
       }
     }
 
+    // Claim ownership before the first asynchronous preparation step. Otherwise
+    // an older request that finishes recall/bootstrap later can abort a newer run.
+    const existing = activeInvocations.get(sessionId);
+    if (existing) existing.abort();
+    const invocationController = new AbortController();
+    activeInvocations.set(sessionId, invocationController);
+    res.once("close", () => {
+      invocationController.abort();
+    });
+
     if (
       useWorktree &&
       sessionWorktree &&
@@ -252,12 +262,25 @@ function createChatRoutes({
       workspaceKey,
       capacityTokens: contextHealth.getAgentCapacity(requestedAgent),
     });
-    await memories.replayThread(sessionId);
-
-    const existing = activeInvocations.get(sessionId);
-    if (existing) existing.abort();
-    const invocationController = new AbortController();
-    activeInvocations.set(sessionId, invocationController);
+    try {
+      await memories.replayThread(sessionId);
+    } catch (error) {
+      if (activeInvocations.get(sessionId) === invocationController) {
+        activeInvocations.delete(sessionId);
+      }
+      throw error;
+    }
+    if (
+      invocationController.signal.aborted ||
+      activeInvocations.get(sessionId) !== invocationController ||
+      res.destroyed ||
+      res.writableEnded
+    ) {
+      if (!res.destroyed && !res.writableEnded) {
+        sendJson(res, 409, { error: "Chat request was superseded by a newer request." });
+      }
+      return true;
+    }
 
     const { augmentedPrompt, skillNames } = augmentPrompt(rawPrompt, useWorktree);
     const protocol = req.headers["x-forwarded-proto"] || "http";
@@ -265,6 +288,40 @@ function createChatRoutes({
     const callbackInstructions = callbacks.buildCallbackInstructions(apiUrl, sessionId);
     const worklist = [requestedAgent];
     const maxDepth = getMaxA2ADepth();
+
+    // Session bootstrap (coords + digest + recall) is built once for the first turn.
+    // Agent persona identity is re-rendered every turn so A2A handoffs still know "who I am".
+    // Wave R: Memory Card uses retrieveForTurn(recency + related) when recallService supports it.
+    let bootstrapPacket;
+    try {
+      bootstrapPacket = await sessionBootstrap.buildBootstrapPacket({
+        threadId: sessionId,
+        sessionId,
+        agent: AGENTS[requestedAgent],
+        generation: initialWindow?.generation || 1,
+        prompt: rawPrompt,
+        invocationSource: recallService || transcript,
+        retrieveSource: recallService || null,
+        memorySource: memoryService || null,
+      });
+    } catch (error) {
+      if (activeInvocations.get(sessionId) === invocationController) {
+        activeInvocations.delete(sessionId);
+      }
+      throw error;
+    }
+
+    if (
+      invocationController.signal.aborted ||
+      activeInvocations.get(sessionId) !== invocationController ||
+      res.destroyed ||
+      res.writableEnded
+    ) {
+      if (!res.destroyed && !res.writableEnded) {
+        sendJson(res, 409, { error: "Chat request was superseded by a newer request." });
+      }
+      return true;
+    }
 
     appendToSession(
       options.sessionsFile || undefined,
@@ -284,27 +341,10 @@ function createChatRoutes({
       activeSkills: skillNames,
     });
 
-    // Session bootstrap (coords + digest + recall) is built once for the first turn.
-    // Agent persona identity is re-rendered every turn so A2A handoffs still know "who I am".
-    // Wave R: Memory Card uses retrieveForTurn(recency + related) when recallService supports it.
-    const bootstrapPacket = await sessionBootstrap.buildBootstrapPacket({
-      threadId: sessionId,
-      sessionId,
-      agent: AGENTS[requestedAgent],
-      generation: initialWindow?.generation || 1,
-      prompt: rawPrompt,
-      invocationSource: recallService || transcript,
-      retrieveSource: recallService || null,
-      memorySource: memoryService || null,
-    });
-
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-store",
       connection: "keep-alive",
-    });
-    res.once("close", () => {
-      invocationController.abort();
     });
     sendSse(res, "session", { sessionId });
     sendSse(res, "skills-active", { skills: skillNames });

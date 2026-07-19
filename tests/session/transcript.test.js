@@ -48,6 +48,20 @@ test("appendEvent ignores invalid arguments (no throw, no file created)", withTe
   assert.equal(files.length, 0, "no files should be created for invalid input");
 }));
 
+test("deleteSessionData cannot be undone by queued transcript writes", withTempDir(async (tmpDir) => {
+  for (let i = 0; i < 100; i++) {
+    transcript.appendEvent("delete-race", "inv-1", "stdout", { text: `chunk-${i}` });
+  }
+
+  await transcript.deleteSessionData("delete-race");
+  await transcript.flush();
+
+  assert.equal(fs.existsSync(path.join(tmpDir, "delete-race")), false);
+  transcript.appendEvent("delete-race", "inv-1", "stdout", { text: "late" });
+  await transcript.flush();
+  assert.equal(fs.existsSync(path.join(tmpDir, "delete-race")), false);
+}));
+
 test("readInvocation returns [] for unknown session/invocation", withTempDir(async () => {
   const events = await transcript.readInvocation("nonexistent", "i1");
   assert.deepEqual(events, []);

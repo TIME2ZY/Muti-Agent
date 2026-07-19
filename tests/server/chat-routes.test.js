@@ -149,3 +149,47 @@ test("handleChatRoutes rejects unsupported agents before starting chat", async (
   assert.equal(res.statusCode, 400);
   assert.deepEqual(res.body, { error: 'Unsupported agent "unknown".' });
 });
+
+test("a slower older chat request cannot abort the newer request", async () => {
+  const activeInvocations = new Map();
+  const pendingReplays = [];
+  const appended = [];
+  const memoryCapture = {
+    replayThread: () => new Promise((resolve) => pendingReplays.push(resolve)),
+  };
+  const res1 = makeRes();
+  const deps = baseDeps(res1, {
+    activeInvocations,
+    memoryCapture,
+    contextHealth: {
+      getAgentCapacity: () => 1000,
+      makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }),
+    },
+    readJsonBody: async (req) => req.body,
+    appendToSession: (...args) => appended.push(args),
+  });
+  const handler = chatRoutes.createChatRoutes(deps);
+  const req1 = makeReq("POST");
+  req1.body = { sessionId: "s1", agent: "codex", prompt: "older" };
+  const first = handler(req1, res1, { pathname: "/api/chat" });
+  await Promise.resolve();
+
+  const res2 = makeRes();
+  deps.sendJson = makeSendJson(res2);
+  const handler2 = chatRoutes.createChatRoutes(deps);
+  const req2 = makeReq("POST");
+  req2.body = { sessionId: "s1", agent: "codex", prompt: "newer" };
+  const second = handler2(req2, res2, { pathname: "/api/chat" });
+  await Promise.resolve();
+
+  assert.equal(pendingReplays.length, 2);
+  pendingReplays[1]();
+  await second;
+  pendingReplays[0]();
+  await first;
+
+  assert.equal(res1.statusCode, 409);
+  assert.match(res1.body.error, /superseded/);
+  assert.equal(appended.length, 1);
+  assert.equal(appended[0][2].content, "newer");
+});
