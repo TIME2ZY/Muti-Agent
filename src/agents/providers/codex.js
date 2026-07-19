@@ -9,6 +9,11 @@ const {
   toolItemId,
 } = require("../tool-classification");
 
+function buildCodexEnvironment(_options = {}, env = process.env) {
+  const codexHome = String(env.INVOKE_CODEX_HOME || "").trim();
+  return codexHome ? { CODEX_HOME: codexHome } : {};
+}
+
 function createCodexRuntime(cli) {
   function fileChangeEvents(base, item) {
     const changes = item && Array.isArray(item.changes) ? item.changes : [];
@@ -288,6 +293,7 @@ const codexProvider = {
   allowedProviderOptions: ["sandbox", "approvalPolicy"],
   createRuntime: createCodexRuntime,
   resolveProxy,
+  buildEnvironment: buildCodexEnvironment,
   buildInvocation(config, prompt) {
     const providerOptions = config.providerOptions || {};
     const args = [
@@ -310,6 +316,7 @@ const codexProvider = {
 };
 
 module.exports = {
+  buildCodexEnvironment,
   createCodexRuntime,
   codexProvider,
 };
