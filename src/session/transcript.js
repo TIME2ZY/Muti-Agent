@@ -9,6 +9,7 @@ const MAX_LINE_BYTES = 256 * 1024;
 // eliminates mkdir/appendFile race conditions on Windows where two
 // concurrent mkdir(recursive:true) calls on the same path can collide.
 let writeChain = Promise.resolve();
+const deletedSessions = new Set();
 
 function getTranscriptDir() {
   return process.env[ENV.TRANSCRIPT_DIR] || DEFAULT_TRANSCRIPT_DIR;
@@ -35,20 +36,36 @@ function getSessionDir(sessionId) {
   return resolveInside(getTranscriptDir(), sanitizeId(sessionId));
 }
 
-function deleteSessionData(sessionId) {
-  if (!sessionId) return;
-  fs.rmSync(getSessionDir(sessionId), { recursive: true, force: true });
+function sessionDeleteKey(sessionId) {
+  return `${path.resolve(getTranscriptDir())}\0${sanitizeId(sessionId)}`;
 }
 
-function enqueueWrite(filePath, content) {
+function deleteSessionData(sessionId) {
+  if (!sessionId) return Promise.resolve();
+  const key = sessionDeleteKey(sessionId);
+  deletedSessions.add(key);
+  const sessionDir = getSessionDir(sessionId);
+  return enqueueTask(() => fs.promises.rm(sessionDir, { recursive: true, force: true }));
+}
+
+function enqueueTask(task) {
   const next = writeChain
-    .then(() => fs.promises.mkdir(path.dirname(filePath), { recursive: true }))
-    .then(() => fs.promises.appendFile(filePath, content, "utf8"))
+    .then(task)
     .catch((err) => {
-      console.error(`[transcript] write failed for ${filePath}: ${err.message}`);
+      console.error(`[transcript] queued operation failed: ${err.message}`);
     });
   writeChain = next;
   return next;
+}
+
+function enqueueWrite(sessionId, filePath, content) {
+  const key = sessionDeleteKey(sessionId);
+  return enqueueTask(async () => {
+    if (deletedSessions.has(key)) return;
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    if (deletedSessions.has(key)) return;
+    await fs.promises.appendFile(filePath, content, "utf8");
+  });
 }
 
 function truncatePayload(event, maxBytes) {
@@ -80,7 +97,7 @@ function appendEvent(sessionId, invocationId, kind, payload) {
     line = JSON.stringify(event);
   }
   const filePath = getInvocationPath(sessionId, invocationId);
-  enqueueWrite(filePath, line + "\n");
+  enqueueWrite(sessionId, filePath, line + "\n");
 }
 
 async function flush() {

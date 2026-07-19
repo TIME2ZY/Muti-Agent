@@ -1,6 +1,5 @@
-const fs = require("node:fs");
-const path = require("node:path");
 const { upsertAgentProviderSession, providerKeyFromConfig } = require("../shared/session-map");
+const { updateJsonAtomic } = require("../shared/atomic-json-file");
 
 /**
  * Write the session ID for this agent to the per-chat-session file so the
@@ -16,21 +15,10 @@ function persistProviderSession({
 }) {
   if (!file || !sessionId || !agentKey) return;
 
-  let sessions = {};
-  try {
-    if (fs.existsSync(file)) {
-      sessions = JSON.parse(fs.readFileSync(file, "utf8"));
-    }
-  } catch {
-    // corrupted file → start fresh
-  }
-  if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
-    sessions = {};
-  }
-
-  upsertAgentProviderSession(sessions, agentKey, sessionId, workspaceKey, providerKey);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(sessions, null, 2)}\n`, "utf8");
+  updateJsonAtomic(file, (sessions) => {
+    upsertAgentProviderSession(sessions, agentKey, sessionId, workspaceKey, providerKey);
+    return sessions;
+  });
 }
 
 function persistSessionId(cli, sessionId, env = process.env) {

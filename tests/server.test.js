@@ -118,6 +118,30 @@ test("serves fixed agent list", async () => {
   });
 });
 
+test("top-level request errors return 500 without stopping the server", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "invoke-server-error-test-"));
+  const blocker = path.join(dir, "not-a-directory");
+  fs.writeFileSync(blocker, "block\n", "utf8");
+  try {
+    await withServer(
+      {
+        sessionsFile: path.join(blocker, "sessions.json"),
+        logger: { error() {}, warn() {}, log() {} },
+      },
+      async (baseUrl) => {
+        const failed = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+        assert.equal(failed.status, 500);
+        assert.deepEqual(await failed.json(), { error: "Internal server error." });
+
+        const healthy = await fetch(`${baseUrl}/api/agents`);
+        assert.equal(healthy.status, 200);
+      }
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("index injects the per-process UI token and loads the authenticated API client", async () => {
   await withServer({}, async (baseUrl) => {
     const response = await nativeFetch(`${baseUrl}/`);

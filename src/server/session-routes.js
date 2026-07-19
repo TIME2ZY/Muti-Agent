@@ -96,7 +96,7 @@ function createSessionRoutes({
       }
 
       if (req.method === "DELETE") {
-        cleanupSessionRuntime(sessionId);
+        await cleanupSessionRuntime(sessionId);
         const deleted = deleteSession(sessionsFile, sessionId);
         if (!deleted) {
           sendJson(res, 404, { error: "Session not found." });

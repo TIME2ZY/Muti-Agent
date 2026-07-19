@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { assertValidOpaqueId, resolveInside } = require("./id-policy");
+const { updateJsonAtomic, writeJsonAtomic } = require("../shared/atomic-json-file");
 const {
   LEGACY_WORKSPACE_KEY,
   getByWorkspaceMap,
@@ -29,8 +30,7 @@ function readSessionMap(chatSessionId, sessionMapRoot) {
 
 function writeSessionMap(chatSessionId, sessionMapRoot, sessions) {
   const file = getSessionMapPath(chatSessionId, sessionMapRoot);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(sessions || {}, null, 2)}\n`, "utf8");
+  writeJsonAtomic(file, sessions || {});
   return file;
 }
 
@@ -39,10 +39,11 @@ function writeSessionMap(chatSessionId, sessionMapRoot, sessions) {
  * next invocation does not resume the abandoned provider chain.
  */
 function abandonProviderSession(chatSessionId, sessionMapRoot, agentKey, workspaceKey = "") {
-  const sessions = readSessionMap(chatSessionId, sessionMapRoot);
-  clearAgentProviderSession(sessions, agentKey, workspaceKey);
-  writeSessionMap(chatSessionId, sessionMapRoot, sessions);
-  return sessions;
+  const file = getSessionMapPath(chatSessionId, sessionMapRoot);
+  return updateJsonAtomic(file, (sessions) => {
+    clearAgentProviderSession(sessions, agentKey, workspaceKey);
+    return sessions;
+  });
 }
 
 function deleteSessionMap(chatSessionId, sessionMapRoot) {

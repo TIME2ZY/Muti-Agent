@@ -89,6 +89,30 @@ test("discardWorktree removes only a managed worktree directory", () => {
   );
 });
 
+test("discardWorktree refuses a state-file path that Git has not registered", () => {
+  const baseDir = makeGitRepo();
+  const stateFile = path.join(baseDir, "worktrees-state.json");
+  const manager = worktrees.createWorktreeManager({ rootDir: baseDir, stateFile });
+  const meta = manager.ensureWorktree({ baseDir, sessionId: "tampered-session" });
+  const ordinaryDir = path.join(`${baseDir}.worktrees`, "ordinary-dir");
+  fs.mkdirSync(ordinaryDir, { recursive: true });
+  fs.writeFileSync(path.join(ordinaryDir, "keep.txt"), "keep\n", "utf8");
+
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  state.worktrees["tampered-session"].worktreeDir = ordinaryDir;
+  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+  assert.throws(
+    () => manager.discardWorktree("tampered-session"),
+    /unregistered worktree/
+  );
+  assert.equal(fs.existsSync(path.join(ordinaryDir, "keep.txt")), true);
+
+  state.worktrees["tampered-session"] = meta;
+  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  manager.discardWorktree("tampered-session");
+});
+
 test("ensureWorktree rejects non-git base directories", () => {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "worktree-manager-not-git-"));
   const manager = worktrees.createWorktreeManager({ rootDir: baseDir });

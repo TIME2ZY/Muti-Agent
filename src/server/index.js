@@ -22,7 +22,7 @@ const { createSessionRoutes } = require("./session-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const skills = require("./skills");
-const { sendJson, sendSse, readJsonBody } = require("./http-transport");
+const { createSafeRequestListener, sendJson, sendSse, readJsonBody } = require("./http-transport");
 const { serveIndex, serveStatic } = require("./static-assets");
 const { createInvokeArgsBuilder } = require("./invoke-args");
 const { createInvocationRegistry } = require("./invocation-registry");
@@ -204,7 +204,7 @@ function createServer(options = {}) {
     return deleted;
   }
 
-  function cleanupSessionRuntime(sessionId) {
+  async function cleanupSessionRuntime(sessionId) {
     const controller = activeInvocations.get(sessionId);
     if (controller) {
       controller.abort();
@@ -223,7 +223,7 @@ function createServer(options = {}) {
       worktreeManager.discardWorktree(sessionId);
     } catch {}
     deleteSessionMap(sessionId, sessionMapRoot);
-    transcript.deleteSessionData(sessionId);
+    await transcript.deleteSessionData(sessionId);
     invocationRegistry.deleteForSession(sessionId);
   }
 
@@ -301,7 +301,7 @@ function createServer(options = {}) {
     logger,
   });
 
-  const server = http.createServer(async (req, res) => {
+  async function handleRequest(req, res) {
     const url = new URL(req.url, "http://127.0.0.1");
 
     if (req.method === "GET" && url.pathname === "/") {
@@ -351,7 +351,9 @@ function createServer(options = {}) {
     }
 
     sendJson(res, 404, { error: "Not found." });
-  });
+  }
+
+  const server = http.createServer(createSafeRequestListener(handleRequest, { sendJson, sendSse, logger }));
   server.once("close", () => {
     _previewManagers.delete(worktreeManager);
     storageContext.close();
@@ -378,7 +380,6 @@ module.exports = {
   augmentPrompt,
   parseSkillFrontmatter,
   buildAugmentedPrompt,
-  // Session store
   readSessions,
   writeSessions,
   createSession,
@@ -388,7 +389,6 @@ module.exports = {
   setSessionWorktree,
   deleteSession,
   appendToSession,
-  // Invocation event store
   readInvocationsFile,
   writeInvocationsFile,
   recordInvocationEvent,

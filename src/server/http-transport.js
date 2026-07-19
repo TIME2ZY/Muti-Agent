@@ -36,8 +36,28 @@ function readJsonBody(req, maxBodyChars = DEFAULT_MAX_BODY_CHARS) {
   });
 }
 
+function createSafeRequestListener(handleRequest, { sendJson, sendSse, logger = console }) {
+  return (req, res) => {
+    handleRequest(req, res).catch((error) => {
+      logger.error?.("[http] unhandled request error", error);
+      if (res.destroyed || res.writableEnded) return;
+      if (!res.headersSent) {
+        sendJson(res, 500, { error: "Internal server error." });
+        return;
+      }
+      try {
+        sendSse(res, "error", { error: "Internal server error." });
+        res.end();
+      } catch {
+        res.destroy();
+      }
+    });
+  };
+}
+
 module.exports = {
   DEFAULT_MAX_BODY_CHARS,
+  createSafeRequestListener,
   sendJson,
   sendSse,
   readJsonBody,
