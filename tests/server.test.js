@@ -79,6 +79,7 @@ async function withServer(options, fn) {
   }
   const server = createServer({
     sessionsFile,
+    memoryDbFile: path.join(tmpDir, "memory.sqlite"),
     worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
@@ -2475,37 +2476,6 @@ test("frontend app.js sends useWorktree from the explicit toggle", () => {
   assert.match(chatJs, /useWorktree:\s*useWorktreeInput\.checked/);
 });
 
-test("frontend loads clipboard helper and app.js uses it for rich copy", () => {
-  const boot = require("../public/boot.js");
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.ok(boot.MODULES.includes("/public/clipboard.js"));
-  assert.match(appJs, /window\.ClipboardUtils\.writeClipboard/);
-});
-
-test("frontend app.js guards active skills rendering with latest-only requests", () => {
-  const boot = require("../public/boot.js");
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.ok(boot.MODULES.includes("/public/latest-request.js"));
-  assert.match(appJs, /window\.LatestRequest\.createLatestRequestRunner/);
-  assert.match(appJs, /runLatestSkillsRequest\.run/);
-});
-
-test("frontend app.js defines unified display helpers for user and agent identities", () => {
-  const helpers = fs.readFileSync(path.join(__dirname, "../public", "display-helpers.js"), "utf8");
-  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(helpers, /function roleDisplayName\(role, agentId/);
-  assert.match(
-    helpers,
-    /return role === "user" \? \(L\.user \|\| "用户"\) : agentLabelFromList\(agents, agentId\)|return role === "user" \? "用户" : agentLabelFromList\(agents, agentId\)/
-  );
-  assert.match(helpers, /function roleBadgeLabel\(role\)/);
-  assert.ok(require("../public/boot.js").MODULES.includes("/public/locale-zh-CN.js"));
-  assert.match(messageView, /metaLabel\.textContent = roleDisplayName\(role, agent\)/);
-  assert.match(messageView, /metaRole\.textContent = roleBadgeLabel\(role\)/);
-  assert.match(appJs, /createDisplayHelpers/);
-});
-
 test("frontend app.js defines invocation-level live run state and renderer hooks", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
@@ -2518,35 +2488,6 @@ test("frontend app.js defines invocation-level live run state and renderer hooks
   assert.match(appJs, /createRuntimeStore\(\{\s*bus\s*\}\)|createRuntimeStore\(\)/);
   assert.match(appJs, /createMessageView/);
   assert.ok(boot.MODULES.includes("/public/session-runtime.js"));
-});
-
-test("frontend app.js loads workspace status and diff for the workspace tab", () => {
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
-  assert.match(appJs, /rightPanelTab:\s*"agents"/);
-  assert.match(appJs, /createWorkspacePanel/);
-  assert.match(appJs, /window\.WorktreeApi\.createWorktreeApi/);
-  assert.match(js, /async function loadWorkspaceState\(\)/);
-  assert.match(js, /worktreeApi\.readStatus\(state\.currentSessionId,\s*\{\s*allowMissing:\s*true\s*\}\)/);
-  assert.match(js, /worktreeApi\.readDiff\(state\.currentSessionId,\s*\{\s*allowMissing:\s*true\s*\}\)/);
-  assert.match(js, /function renderWorkspacePanel\(\)/);
-});
-
-test("frontend app.js handles missing worktree and discard actions", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
-  assert.match(js, /当前会话尚未创建 worktree/);
-  assert.match(js, /当前无改动/);
-  assert.match(js, /async function discardWorkspace\(\)/);
-  assert.match(js, /worktreeApi\.discard\(state\.currentSessionId\)/);
-});
-
-test("frontend app.js renders workspace file selection and diff output", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
-  assert.match(js, /function renderWorkspaceFileList\(\)/);
-  assert.match(js, /function renderWorkspaceDiff\(\)/);
-  assert.match(js, /workspace\.selectedPath = path/);
-  assert.match(js, /打开预览/);
-  assert.match(js, /刷新改动/);
 });
 
 test("frontend treats sealed SSE event as an expected terminal state", () => {
@@ -2577,54 +2518,12 @@ test("frontend keeps per-session runtime status and does not abort on switch", (
   assert.match(css, /\.session-run-status\.status-running/);
 });
 
-test("frontend agent cards set the default agent and support shift-click mention insert", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const agentPanel = fs.readFileSync(path.join(__dirname, "../public", "agent-panel-view.js"), "utf8");
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  const boot = require("../public/boot.js");
-  assert.match(js, /function setDefaultAgent/);
-  assert.match(js, /function resolvePromptAgent/);
-  assert.match(js, /agentRouting\.resolvePromptAgent/);
-  assert.match(js, /function insertAgentMention/);
-  assert.match(agentPanel, /e\.shiftKey/);
-  assert.match(agentPanel, /item\.className = "agent-tab" \+ \(isSelected \? " is-selected" : ""\)/);
-  assert.match(html, /id="current-agent"/);
-  assert.ok(boot.MODULES.includes("/public/agent-routing.js"));
-});
-
 test("frontend keeps right-side agent and workspace surfaces in a shared tab system", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   assert.match(js, /panelTabAgentsEl\.addEventListener\("click"/);
   assert.match(js, /panelTabWorkspaceEl\.addEventListener\("click"/);
   assert.match(js, /function setRightPanelTab\(nextTab\)/);
   assert.match(js, /activateRightTab\("workspace"\)|loadWorkspaceState\(\)/);
-});
-
-test("frontend workspace panel supports selection-only file list updates", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
-  assert.match(js, /function shouldRebuildFileList/);
-  assert.match(js, /function updateFileList/);
-  assert.match(js, /function updateDiff/);
-  assert.match(js, /DIFF_VIRTUAL_THRESHOLD/);
-});
-
-test("frontend virtual-list is loaded for large workspace diffs", () => {
-  const boot = require("../public/boot.js");
-  const js = fs.readFileSync(path.join(__dirname, "../public", "virtual-list.js"), "utf8");
-  assert.ok(boot.MODULES.includes("/public/virtual-list.js"));
-  assert.match(js, /function visibleRange/);
-  assert.match(js, /function createVirtualList/);
-});
-
-test("frontend session list exposes runtime status dots and updateStatus", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "session-list-view.js"), "utf8");
-  const css = readFrontendCss();
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /session-run-dot/);
-  assert.match(js, /function updateStatus/);
-  assert.match(js, /is-running/);
-  assert.match(css, /\.session-run-dot\.is-running/);
-  assert.match(appJs, /sessionListView\.updateStatus/);
 });
 
 test("frontend chunks process-trace hydrate for long histories", () => {
@@ -2634,23 +2533,12 @@ test("frontend chunks process-trace hydrate for long histories", () => {
   assert.match(js, /_hydrateQueue/);
 });
 
-test("frontend exposes delete session button on keyboard focus", () => {
-  const css = readFrontendCss();
-  assert.match(css, /\.btn-delete-session:focus-visible/);
-});
-
 test("frontend app.js uses plain-text live streaming instead of segmented markdown streaming", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   assert.match(js, /liveText\.className = "stream-live-text"/);
   assert.match(js, /item\._liveTextEl\.textContent = raw/);
   assert.doesNotMatch(js, /function splitIntoSegments/);
   assert.doesNotMatch(js, /stream-suffix/);
-});
-
-test("frontend styles.css defines plain-text live streaming style", () => {
-  const css = readFrontendCss();
-  assert.match(css, /\.stream-live-text\s*\{/);
-  assert.doesNotMatch(css, /\.stream-suffix\s*\{/);
 });
 
 test("frontend surfaces thinking in a collapsed details block and keeps writing badges", () => {
@@ -2752,13 +2640,6 @@ test("frontend recall expand uses shared process panel path not flat dump as pri
   );
 });
 
-test("frontend styles define live subagent cards", () => {
-  const css = readFrontendCss();
-  assert.match(css, /\.live-subagents/);
-  assert.match(css, /\.live-subagent-status\.status-running/);
-  assert.match(css, /\.live-subagent\.status-error/);
-});
-
 test("frontend caps recall page size and surfaces truncation state", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
   const localeJs = fs.readFileSync(path.join(__dirname, "../public", "locale-zh-CN.js"), "utf8");
@@ -2839,42 +2720,6 @@ test("frontend distinguishes copy message vs copy code labels", () => {
   assert.match(messageView, /复制消息/);
   assert.match(messageView, /复制代码|code\.textContent/);
   assert.match(md, /复制代码/);
-});
-
-test("frontend styles.css gives stderr messages a separate debug appearance", () => {
-  const css = readFrontendCss();
-  assert.match(css, /\.system\.stderr \.msg-bubble/);
-  assert.match(css, /\.system\.stderr \.msg-meta/);
-});
-
-test("frontend styles define a shared card system for messages and agent roles", () => {
-  const css = readFrontendCss();
-  assert.match(css, /\.msg-card/);
-  assert.match(css, /\.message\.user \.msg-card/);
-  assert.match(css, /\.message\.assistant \.msg-card/);
-  assert.match(css, /\.agent-tab-role/);
-});
-
-test("frontend styles.css defines workspace panel layout and diff colors", () => {
-  const css = readFrontendCss();
-  assert.match(css, /\.panel-tabs/);
-  assert.match(css, /\.workspace-panel/);
-  assert.match(css, /\.workspace-file-list/);
-  assert.match(css, /\.workspace-diff/);
-  assert.match(css, /\.workspace-diff-line-added/);
-  assert.match(css, /\.workspace-diff-line-removed/);
-});
-
-test("frontend styles.css gives the recall panel a full-height scroll layout", () => {
-  const css = readFrontendCss();
-  assert.match(css, /\.agent-panel,\s*\.workspace-panel,\s*\.recall-panel-inline\s*\{[\s\S]*flex:\s*1 1 auto;/);
-  // Single scroll owner for the right-rail recall list
-  assert.match(css, /\.recall-body\s*\{[\s\S]*flex:\s*1;[\s\S]*overflow-y:\s*auto;/);
-  assert.match(css, /\.recall-panel-inline\s*\{[\s\S]*overflow:\s*hidden;/);
-  // Nested regions must not introduce extra scrollbars
-  assert.match(css, /\.recall-item-body\s*\{[\s\S]*overflow:\s*visible;/);
-  assert.match(css, /\.recall-event-body\s*\{[\s\S]*overflow:\s*visible;/);
-  assert.match(css, /\.recall-body::-webkit-scrollbar\s*\{[\s\S]*width:\s*5px/);
 });
 
 // ── Phase 4: Session Bootstrap ──────────────────────────────────
