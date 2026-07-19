@@ -7,35 +7,35 @@
   color-scheme: light dark;
 
   /* ── Base surfaces (legacy aliases kept) ── */
-  --surface:        light-dark(#f5f6f4, #16181a);
-  --surface-raised: light-dark(#eceef0, #1e2226);
-  --surface-inset:  light-dark(#eef0ee, #121416);
+  --surface:        light-dark(#f5f6f8, #171923);
+  --surface-raised: light-dark(#e9ebf0, #202330);
+  --surface-inset:  light-dark(#e6e8ed, #10121a);
 
   /* ── Regional surfaces (panel differentiation) ── */
-  --surface-rail:        light-dark(#e8ebe8, #111314);
-  --surface-canvas:      light-dark(#f8f9f7, #1a1d1f);
-  --surface-instrument:  light-dark(#f0f2f1, #1c1f22);
-  --surface-instrument-raised: light-dark(#e6e9e7, #24282c);
+  --surface-rail:        light-dark(#e9ebf0, #11131b);
+  --surface-canvas:      light-dark(#fbfbfa, #181a24);
+  --surface-instrument:  light-dark(#f2f3f6, #1c1f2a);
+  --surface-instrument-raised: light-dark(#e7e9ef, #252837);
 
   /* Text */
-  --text-primary:   light-dark(#1c1f1d, #eef1ef);
-  --text-secondary: light-dark(#5c6360, #9aa3a0);
-  --text-tertiary:  light-dark(#868e89, #6a7370);
+  --text-primary:   light-dark(#1e2230, #f0f1f5);
+  --text-secondary: light-dark(#5b6170, #a8adbb);
+  --text-tertiary:  light-dark(#7a8190, #737989);
 
   /* Borders */
-  --border:         light-dark(#cdd2ce, #3a4140);
-  --border-subtle:  light-dark(#dde2de, #2a3030);
-  --border-hard:    light-dark(#b8beb9, #4a5250);
+  --border:         light-dark(#c9cdd6, #3c4050);
+  --border-subtle:  light-dark(#dde0e6, #2b2e3c);
+  --border-hard:    light-dark(#b7bcc7, #4b5060);
 
   /* Primary CTA / focus (electric blue — sole solid fill accent) */
-  --accent:         light-dark(#2563eb, #60a5fa);
-  --accent-hover:   light-dark(#1d4ed8, #93c5fd);
-  --accent-text:    light-dark(#f8fafc, #0b1220);
+  --accent:         light-dark(#5148d8, #8f87ff);
+  --accent-hover:   light-dark(#4038be, #aaa4ff);
+  --accent-text:    light-dark(#ffffff, #10111a);
 
   /* Nav selection (left rail — cooler, does not compete with CTA) */
-  --accent-nav:     light-dark(#475569, #94a3b8);
-  --accent-nav-bg:  light-dark(color-mix(in srgb, #64748b 12%, var(--surface-rail)),
-                               color-mix(in srgb, #94a3b8 10%, var(--surface-rail)));
+  --accent-nav:     light-dark(#5148d8, #8f87ff);
+  --accent-nav-bg:  light-dark(color-mix(in srgb, #5148d8 9%, var(--surface-rail)),
+                               color-mix(in srgb, #8f87ff 11%, var(--surface-rail)));
 
   /* Semantic */
   --danger:         light-dark(#b91c1c, #f07178);
@@ -45,8 +45,8 @@
   --success:        light-dark(#15803d, #6ba87a);
 
   /* Message roles */
-  --user-bg:        light-dark(#e8eef9, #1a2438);
-  --assistant-line: light-dark(#94a3b8, #4a5568);
+  --user-bg:        light-dark(#eeedff, #292845);
+  --assistant-line: light-dark(#969cac, #555b6d);
 
   /* Per-agent palette (identity only — not chrome chrome) */
   --agent-1: light-dark(#0d9488, #2dd4bf);
@@ -94,9 +94,9 @@
   --space-10: 40px;
 
   /* Sizing */
-  --sidebar-w: 240px;
+  --sidebar-w: 252px;
   --sidebar-w-narrow: 196px;
-  --instrument-w: 288px;
+  --instrument-w: 304px;
   --instrument-w-narrow: 228px;
 
   /* Radius — regional defaults applied in sheets; tokens are the scale */

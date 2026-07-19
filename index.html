@@ -19,6 +19,7 @@
     <script src="/public/vendor/prism/prism-markup.min.js"></script>
   </head>
   <body>
+    <a class="skip-link" href="#messages">跳到对话内容</a>
     <div class="app">
       <!-- Mobile sidebar toggle -->
       <button
@@ -44,8 +45,24 @@
 
       <!-- Sidebar -->
       <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand" aria-label="Shift 交班台">
+          <span class="brand-mark" aria-hidden="true">
+            <svg class="icon-svg" width="22" height="22" viewBox="0 0 24 24" focusable="false">
+              <path d="M5 6.5h8.5M10.5 3l3.5 3.5-3.5 3.5M19 17.5h-8.5M13.5 14l-3.5 3.5 3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+          <span class="brand-copy">
+            <strong>SHIFT</strong>
+            <small>多智能体交班台</small>
+          </span>
+        </div>
         <div class="sidebar-head">
-          <button class="btn-new-chat" id="btn-new-chat" type="button">+ 新对话</button>
+          <button class="btn-new-chat" id="btn-new-chat" type="button">
+            <svg class="icon-svg" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+            新建会话
+          </button>
         </div>
         <nav class="session-list" id="session-list" aria-label="对话列表"></nav>
       </aside>
@@ -57,7 +74,10 @@
       <main class="main">
         <div class="main-header">
           <div class="main-identity">
-            <span class="main-title" title="SHIFT AGENTS · 交班台">SHIFT AGENTS</span>
+            <span class="main-title" title="SHIFT AGENTS · 交班台">
+              <small>当前会话</small>
+              <strong>协作线程</strong>
+            </span>
             <button
               type="button"
               class="current-agent"
@@ -65,7 +85,7 @@
               title="当前默认 Agent；点击打开 Agents，消息行首 @ 可单次覆盖"
               aria-label="当前默认 Agent"
             >
-              <span class="current-agent-label">@</span
+              <span class="current-agent-label">路由至</span
               ><strong id="current-agent-name">codex</strong>
             </button>
             <button
@@ -131,17 +151,26 @@
           </div>
         </div>
 
-        <div class="skills-bar" id="skills-bar" hidden>
-          <span class="skills-bar-label">已激活能力</span>
-        </div>
+        <details class="skills-bar" id="skills-bar" hidden>
+          <summary class="skills-bar-label">
+            <span>本会话规则</span>
+            <strong id="skills-count">0</strong>
+            <span class="skills-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="skills-tags" id="skills-tags"></div>
+        </details>
 
         <div class="messages-column" id="messages-column">
           <section class="messages" id="messages" aria-live="polite" aria-label="消息列表">
             <div class="empty-state" id="empty-state">
-              <div class="empty-state-icon" aria-hidden="true">✦</div>
-              <p class="empty-state-title">选择默认 Agent 后直接发送，或用 @ 单次指定模型</p>
+              <div class="empty-state-icon" aria-hidden="true">
+                <svg class="icon-svg" width="28" height="28" viewBox="0 0 32 32" focusable="false">
+                  <path d="M7 9h11M14 5l4 4-4 4M25 23H14M18 19l-4 4 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <p class="empty-state-title">今天想推进什么？</p>
               <p class="empty-state-hint">
-                Enter 发送 · Shift + Enter 换行 · 右侧卡片切换默认 Agent
+                直接描述任务；需要特定协作者时输入 @
               </p>
               <div
                 class="empty-state-chips"
@@ -222,7 +251,6 @@
             role="tabpanel"
             aria-labelledby="panel-tab-agents"
           >
-            <div class="usage-summary" id="usage-summary" aria-live="polite"></div>
             <div class="agent-tabs" id="agent-tabs" aria-label="可用 Agents"></div>
           </section>
 
@@ -271,7 +299,7 @@
               ></div>
               <textarea
                 id="prompt"
-                placeholder="直接输入消息，或用 @Agent 单次指定模型…"
+                placeholder="描述任务；输入 @ 可指定协作者…"
                 rows="1"
                 aria-autocomplete="list"
                 aria-controls="mention-menu"

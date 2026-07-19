@@ -12,7 +12,6 @@
       currentAgentEl,
       currentAgentNameEl,
       contextStatusEl,
-      usageSummaryEl,
       state,
       agentLabel,
       agentMention,
@@ -67,43 +66,20 @@
       };
     }
 
-    function renderSessionUsage() {
-      if (!usageSummaryEl) return;
-      const billing = state.usageSummary?.session || {};
-      const total = Number(billing.totalTokens || 0);
-      usageSummaryEl.innerHTML = `
-        <div class="usage-summary-head">
-          <span class="usage-summary-label">本次对话累计</span>
-          <strong class="usage-summary-total"></strong>
-        </div>
-        <dl class="usage-summary-grid">
-          <div><dt>输入</dt><dd data-usage="input"></dd></div>
-          <div><dt>输出</dt><dd data-usage="output"></dd></div>
-          <div><dt>缓存</dt><dd data-usage="cached"></dd></div>
-          <div><dt>推理</dt><dd data-usage="reasoning"></dd></div>
-        </dl>`;
-      usageSummaryEl.querySelector(".usage-summary-total").textContent =
-        `${compactTokens(total)} tokens`;
-      usageSummaryEl.querySelector('[data-usage="input"]').textContent = compactTokens(
-        billing.inputTokens
-      );
-      usageSummaryEl.querySelector('[data-usage="output"]').textContent = compactTokens(
-        billing.outputTokens
-      );
-      usageSummaryEl.querySelector('[data-usage="cached"]').textContent = compactTokens(
-        billing.cachedInputTokens
-      );
-      usageSummaryEl.querySelector('[data-usage="reasoning"]').textContent = compactTokens(
-        billing.reasoningTokens
-      );
-      const cost = Number(billing.costUsd || 0);
-      usageSummaryEl.title =
-        cost > 0 ? `供应商已报告费用：$${cost.toFixed(4)}` : "费用仅在供应商报告时统计";
-    }
-
     function renderBudget(item, agent) {
       const entry = usageEntry(agent);
       const context = entry.context;
+      const billing = entry.billing || {};
+      const sessionUsage = item.querySelector(".agent-session-usage");
+      const sessionTotal = Number(billing.totalTokens || 0);
+      sessionUsage.querySelector("strong").textContent =
+        sessionTotal > 0 ? `${compactTokens(sessionTotal)} tokens` : "—";
+      sessionUsage.title = [
+        `本会话输入 ${compactTokens(billing.inputTokens)}`,
+        `输出 ${compactTokens(billing.outputTokens)}`,
+        `缓存 ${compactTokens(billing.cachedInputTokens)}`,
+        `推理 ${compactTokens(billing.reasoningTokens)}`,
+      ].join(" · ");
       const { usedPercent, remainingPercent } = budgetRailSegments(context.budgetFillRatio);
       const budget = item.querySelector(".agent-tab-budget");
       const rail = item.querySelector(".context-rail");
@@ -179,6 +155,7 @@
           item.innerHTML = `
           <span class="agent-tab-name"></span>
           <span class="agent-tab-model"></span>
+          <span class="agent-session-usage"><span>本会话</span><strong></strong></span>
           <span class="agent-tab-role"></span>
           <div class="agent-tab-budget" hidden>
             <div class="context-rail" role="progressbar" aria-label="上下文可用预算" aria-valuemin="0">
@@ -217,7 +194,6 @@
           return item;
         })
       );
-      renderSessionUsage();
       renderCurrentAgent();
     }
 

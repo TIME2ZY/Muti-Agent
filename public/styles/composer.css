@@ -9,7 +9,7 @@
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
-  background: color-mix(in srgb, var(--surface-canvas) 88%, var(--surface-raised));
+  background: var(--surface-canvas);
 }
 
 /* Active run strip above the input */
@@ -92,11 +92,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  padding: 10px 10px 10px 14px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--surface-canvas);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 8px 28px color-mix(in srgb, #171923 7%, transparent);
   transition:
     border-color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);

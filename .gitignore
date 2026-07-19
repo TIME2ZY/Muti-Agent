@@ -44,4 +44,6 @@ desktop.ini
 # Build output
 dist/
 build/
+output/
+.playwright-cli/
 *.tsbuildinfo

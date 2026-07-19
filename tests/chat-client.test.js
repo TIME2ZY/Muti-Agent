@@ -345,11 +345,14 @@ test("agent-exit finalizes the agent so handoffs clear writing state", () => {
       agent: "codex",
       code: 0,
       signal: null,
+      usage: { totalTokens: 321 },
     },
     { sessionId: "s1" }
   );
 
-  assert.deepEqual(finalized, [["codex", "s1", { error: false }]]);
+  assert.deepEqual(finalized, [
+    ["codex", "s1", { error: false, usage: { totalTokens: 321 } }],
+  ]);
 });
 
 test("sendPrompt abort finalizes live agents instead of sync innerHTML wipe", async () => {

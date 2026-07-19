@@ -9,6 +9,26 @@ const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
 
+const BILLING_FIELDS = Object.freeze([
+  "inputTokens",
+  "cachedInputTokens",
+  "outputTokens",
+  "reasoningTokens",
+  "totalTokens",
+  "costUsd",
+]);
+
+function invocationUsageDelta(current = {}, baseline = {}) {
+  const usage = {};
+  for (const field of BILLING_FIELDS) {
+    usage[field] = Math.max(0, Number(current[field] || 0) - Number(baseline[field] || 0));
+  }
+  if (usage.totalTokens === 0 && usage.inputTokens + usage.outputTokens > 0) {
+    usage.totalTokens = usage.inputTokens + usage.outputTokens;
+  }
+  return usage;
+}
+
 const NOOP_DURABLE_RECORDER = Object.freeze({
   ensureWindow: () => null,
   sealWindow: () => null,
@@ -372,6 +392,7 @@ function createChatRoutes({
           billingTotalTokens: durableRun?.window?.billingTotalTokens,
           billingCostUsd: durableRun?.window?.billingCostUsd,
         });
+        const billingAtStart = { ...healthTracker.snapshot().billing };
         const sealer = sessionSealer.makeSealer();
         threadCtx.sealer = sealer;
         sendSse(res, "agent-start", { agent, invocationId });
@@ -637,6 +658,11 @@ function createChatRoutes({
         persistInvocations();
         durable.finishInvocation(invocationId, code, signal);
 
+        const invocationUsage = invocationUsageDelta(
+          healthTracker.snapshot().billing,
+          billingAtStart
+        );
+
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
           aborted = true;
           break;
@@ -652,6 +678,7 @@ function createChatRoutes({
             exitCode: code,
             signal,
             invocationId,
+            usage: invocationUsage,
           },
           { allowCreate: false, windowId: durableRun?.window.id }
         );
@@ -660,10 +687,11 @@ function createChatRoutes({
           code,
           signal,
           contentBytes: assistantContent.length,
+          usage: invocationUsage,
           fillRatioAtEnd: healthTracker.getFillRatio(),
           sealerState: sealer.getState(),
         });
-        sendSse(res, "agent-exit", { agent, code, signal, invocationId });
+        sendSse(res, "agent-exit", { agent, code, signal, invocationId, usage: invocationUsage });
 
         // Parse structured handoff once per turn (soft — never blocks routing).
         const primaryHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
@@ -741,4 +769,5 @@ function createChatRoutes({
 module.exports = {
   createChatRoutes,
   resolveResumeSessionId,
+  invocationUsageDelta,
 };

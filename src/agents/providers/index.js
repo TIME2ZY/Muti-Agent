@@ -217,6 +217,8 @@ function createProviderRuntime(config, options = {}) {
  * Collect startup diagnostics across all registered adapters (no provider hardcoding).
  */
 function collectProviderStartupDiagnostics(env = process.env) {
+  if (!isTruthyEnv(env.INVOKE_CLI_PROXY_LOG)) return [];
+
   const messages = [];
   const globalProxy = resolveProxy({}, env);
   if (globalProxy) {

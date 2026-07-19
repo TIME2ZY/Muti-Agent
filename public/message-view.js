@@ -8,6 +8,68 @@
   const HYDRATE_CHUNK_SIZE = 4;
   /** px: user is "stuck to bottom" when within this distance of the end */
   const STICK_BOTTOM_PX = 96;
+  const USAGE_FIELDS = Object.freeze([
+    "inputTokens",
+    "cachedInputTokens",
+    "outputTokens",
+    "reasoningTokens",
+    "totalTokens",
+    "costUsd",
+  ]);
+
+  function normalizedUsage(input = {}) {
+    const usage = {};
+    for (const field of USAGE_FIELDS) {
+      const value = Number(input && input[field]);
+      usage[field] = Number.isFinite(value) && value > 0 ? value : 0;
+    }
+    if (usage.totalTokens === 0 && usage.inputTokens + usage.outputTokens > 0) {
+      usage.totalTokens = usage.inputTokens + usage.outputTokens;
+    }
+    return usage;
+  }
+
+  function compactUsageTokens(value) {
+    const count = Number(value || 0);
+    if (!Number.isFinite(count)) return "—";
+    if (count >= 1_000_000)
+      return `${(count / 1_000_000).toFixed(count >= 10_000_000 ? 1 : 2).replace(/\.0+$/, "")}M`;
+    if (count >= 1_000)
+      return `${(count / 1_000).toFixed(count >= 100_000 ? 0 : 1).replace(/\.0$/, "")}k`;
+    return String(Math.round(count));
+  }
+
+  function aggregateInvocationUsage(events = []) {
+    const billing = normalizedUsage();
+    const accounted = normalizedUsage();
+    let highestScope = -1;
+    const scopeRank = { step: 0, turn: 1, run: 2 };
+
+    for (const record of Array.isArray(events) ? events : []) {
+      const event = record && record.payload && typeof record.payload === "object"
+        ? record.payload
+        : record;
+      if (!event || (record.kind !== "usage.update" && event.type !== "usage.update")) continue;
+      const rank = scopeRank[event.scope] ?? 0;
+      if (rank < highestScope) continue;
+      if (event.mode === "cumulative") {
+        for (const field of USAGE_FIELDS) {
+          if (typeof event[field] !== "number") continue;
+          billing[field] = Math.max(0, billing[field] + event[field] - accounted[field]);
+          accounted[field] = event[field];
+        }
+        highestScope = rank;
+      } else if (rank === highestScope || highestScope < 0) {
+        for (const field of USAGE_FIELDS) {
+          if (typeof event[field] !== "number") continue;
+          billing[field] += event[field];
+          accounted[field] += event[field];
+        }
+        highestScope = rank;
+      }
+    }
+    return normalizedUsage(billing);
+  }
 
   function resolveProcessHelpers() {
     if (globalScope.MessageProcessHelpers) return globalScope.MessageProcessHelpers;
@@ -486,6 +548,54 @@
         });
     }
 
+    function renderMessageUsage(wrapper, input) {
+      if (!wrapper) return null;
+      const previous = wrapper.querySelector(".msg-usage");
+      const usage = normalizedUsage(input);
+      if (usage.totalTokens <= 0) {
+        if (previous) previous.remove();
+        return null;
+      }
+
+      const details = previous || document.createElement("details");
+      details.className = "msg-usage";
+      details.setAttribute("aria-label", "本轮 Token 用量");
+      details.replaceChildren();
+
+      const summary = document.createElement("summary");
+      summary.textContent = `本轮 · ${compactUsageTokens(usage.totalTokens)} tokens`;
+      const breakdown = document.createElement("dl");
+      breakdown.className = "msg-usage-breakdown";
+      const rows = [
+        ["输入", usage.inputTokens],
+        ["输出", usage.outputTokens],
+        ["缓存", usage.cachedInputTokens],
+        ["推理", usage.reasoningTokens],
+      ];
+      for (const [label, value] of rows) {
+        if (value <= 0) continue;
+        const row = document.createElement("div");
+        const term = document.createElement("dt");
+        const amount = document.createElement("dd");
+        term.textContent = label;
+        amount.textContent = compactUsageTokens(value);
+        row.append(term, amount);
+        breakdown.appendChild(row);
+      }
+      if (usage.costUsd > 0) {
+        const row = document.createElement("div");
+        const term = document.createElement("dt");
+        const amount = document.createElement("dd");
+        term.textContent = "费用";
+        amount.textContent = `$${usage.costUsd.toFixed(4)}`;
+        row.append(term, amount);
+        breakdown.appendChild(row);
+      }
+      details.append(summary, breakdown);
+      if (!previous) wrapper.appendChild(details);
+      return details;
+    }
+
     function makeSetBadge(badgeEl) {
       return function setBadge(badgeState) {
         if (!badgeState) {
@@ -512,6 +622,8 @@
       content = "",
       variant = "",
       invocationId = null,
+      usage = null,
+      showUsage = true,
       scroll = true,
     }) {
       hideEmpty();
@@ -522,6 +634,9 @@
       if (role === "assistant" && agent && typeof agentColorIndex === "function") {
         wrapper.dataset.agentColor = String(agentColorIndex(agent));
         wrapper.dataset.agentId = String(agent);
+      }
+      if (role === "assistant") {
+        wrapper.dataset.usageEligible = showUsage === false ? "false" : "true";
       }
 
       const meta = document.createElement("div");
@@ -594,6 +709,7 @@
       bubble.appendChild(contentEl);
 
       wrapper.append(meta, card);
+      if (role === "assistant" && showUsage !== false) renderMessageUsage(wrapper, usage);
       messagesEl.insertBefore(wrapper, spacerEl);
       if (scroll !== false) scheduleScrollDown(true);
 
@@ -1260,11 +1376,19 @@
 
     async function hydrateProcessTrace(bubble, invocationId) {
       if (!bubble || !invocationId) return;
-      if (bubble.querySelector(".msg-process, .live-subagents")) return;
       if (typeof fetchInvocationEvents !== "function") return;
+      const wrapper = bubble.closest ? bubble.closest(".message") : null;
+      const needsUsage =
+        wrapper &&
+        wrapper.dataset.usageEligible !== "false" &&
+        !wrapper.querySelector(".msg-usage");
+      const needsProcess = !bubble.querySelector(".msg-process, .live-subagents");
+      if (!needsUsage && !needsProcess) return;
       try {
         const page = await fetchInvocationEvents(invocationId);
         if (!page.events || page.events.length === 0) return;
+        if (needsUsage) renderMessageUsage(wrapper, aggregateInvocationUsage(page.events));
+        if (!needsProcess) return;
         // History hydrate: always collapsed so the answer is primary.
         const panel = buildProcessPanelFromTranscriptEvents(page.events, {
           from: page.from || 0,
@@ -1444,6 +1568,8 @@
       // Deferred MD for long replies — keeps finalize off the critical path.
       paintFinalMarkdown(content, item.rawText || "", { copyBtn: copy, host: item });
 
+      if (item.showUsage !== false) renderMessageUsage(item.wrapper, options.usage);
+
       if (item.invocationId && typeof attachRecallToggle === "function") {
         attachRecallToggle(item.wrapper, item.invocationId);
       }
@@ -1466,6 +1592,7 @@
       if (invId && rt.liveRuns.has(invId)) {
         const run = rt.liveRuns.get(invId);
         run.status = options.error === true ? "error" : "done";
+        if (!options.usage && run.usage) options.usage = run.usage;
       }
       const item = rt.liveMessages.get(agent);
       if (!item) return;
@@ -1702,6 +1829,9 @@
   const api = {
     createMessageView,
     createProcessPanelRenderer,
+    normalizedUsage,
+    aggregateInvocationUsage,
+    compactUsageTokens,
     MESSAGE_VIRTUAL_THRESHOLD,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

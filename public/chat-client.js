@@ -147,7 +147,7 @@
           // Per-agent finalize so A2A handoffs don't leave the prior agent on "输出中".
           // Also drops the agent from liveMessages to avoid remount/history duplicates.
           if (typeof finalizeLiveAgent === "function") {
-            finalizeLiveAgent(data.agent, sessionId, { error: failed });
+            finalizeLiveAgent(data.agent, sessionId, { error: failed, usage: data.usage || null });
           } else {
             const item = rt.liveMessages.get(data.agent);
             if (item && item.setBadge) item.setBadge(failed ? "error" : "done");

@@ -3,6 +3,37 @@ const test = require("node:test");
 
 const chatRoutes = require("../../src/server/chat-routes.js");
 
+test("invocationUsageDelta isolates one run from cumulative window billing", () => {
+  assert.deepEqual(
+    chatRoutes.invocationUsageDelta(
+      {
+        inputTokens: 1500,
+        cachedInputTokens: 600,
+        outputTokens: 320,
+        reasoningTokens: 80,
+        totalTokens: 1820,
+        costUsd: 0.12,
+      },
+      {
+        inputTokens: 1000,
+        cachedInputTokens: 400,
+        outputTokens: 200,
+        reasoningTokens: 50,
+        totalTokens: 1200,
+        costUsd: 0.08,
+      }
+    ),
+    {
+      inputTokens: 500,
+      cachedInputTokens: 200,
+      outputTokens: 120,
+      reasoningTokens: 30,
+      totalTokens: 620,
+      costUsd: 0.039999999999999994,
+    }
+  );
+});
+
 function makeReq(method, headers = {}) {
   return { method, headers, once() {} };
 }

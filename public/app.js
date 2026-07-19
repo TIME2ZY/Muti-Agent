@@ -26,7 +26,8 @@
   const workspacePanelEl = $("#workspace-panel");
   const emptyStateEl = $("#empty-state");
   const spacerEl = messagesEl.querySelector(".messages-spacer");
-  const skillsLabel = skillsBarEl.querySelector(".skills-bar-label");
+  const skillsTagsEl = $("#skills-tags");
+  const skillsCountEl = $("#skills-count");
   const themeToggle = $("#theme-toggle");
   const projectDirEl = $("#project-dir");
   const projectDirPath = $("#project-dir-path");
@@ -44,7 +45,6 @@
   const currentAgentEl = $("#current-agent");
   const currentAgentNameEl = $("#current-agent-name");
   const contextStatusEl = $("#context-status");
-  const usageSummaryEl = $("#usage-summary");
   const runBarEl = $("#run-bar");
   const runBarLabelEl = $("#run-bar-label");
   const runBarTimeEl = $("#run-bar-time");
@@ -427,6 +427,7 @@
   let renderAgentTabs = () => {};
   let renderCurrentAgent = () => {};
   let usageLoadToken = 0;
+  let usageRefreshTimer = null;
 
   async function loadUsageSummary(sessionId = state.currentSessionId) {
     if (!sessionId) {
@@ -673,20 +674,28 @@
     if (!skillsBarEl) return;
     const set = new Set(active || []);
     const meta = Array.isArray(state.skillsMetadata) ? state.skillsMetadata : [];
-    if (meta.length === 0) {
+    const enabled = meta.filter((skill) => set.has(skill.name));
+    if (enabled.length === 0) {
       skillsBarEl.hidden = true;
-      skillsBarEl.replaceChildren(skillsLabel);
+      if (skillsTagsEl) skillsTagsEl.replaceChildren();
       return;
     }
-    const tags = meta.map((s) => {
+    const tags = enabled.map((s) => {
       const tag = document.createElement("span");
-      tag.className = "skill-tag" + (set.has(s.name) ? "" : " inactive");
+      tag.className = "skill-tag";
       tag.textContent = s.name;
       tag.title = s.description;
       return tag;
     });
     skillsBarEl.hidden = false;
-    skillsBarEl.replaceChildren(skillsLabel, ...tags);
+    if (skillsCountEl) skillsCountEl.textContent = String(enabled.length);
+    if (skillsTagsEl) skillsTagsEl.replaceChildren(...tags);
+  }
+
+  function scheduleUsageSummary(sessionId) {
+    if (!sessionId || sessionId !== state.currentSessionId) return;
+    clearTimeout(usageRefreshTimer);
+    usageRefreshTimer = setTimeout(() => loadUsageSummary(sessionId), 300);
   }
 
   function updateActiveSkills(prompt) {
@@ -734,7 +743,6 @@
     currentAgentEl,
     currentAgentNameEl,
     contextStatusEl,
-    usageSummaryEl,
     state,
     agentLabel,
     agentMention,
@@ -818,7 +826,7 @@
     agentLabel,
     syncComposerControls,
     onRuntimeStatusChange,
-    onUsageEvent: (_event, sessionId) => loadUsageSummary(sessionId),
+    onUsageEvent: (_event, sessionId) => scheduleUsageSummary(sessionId),
   });
 
   /* ═══════════════════════════════════════════════════════════

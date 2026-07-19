@@ -7,6 +7,7 @@ const {
   memoryCardHasActiveItems,
   buildA2AInjectMetrics,
   formatA2AInjectMetricsLine,
+  isHandoffMetricsLogEnabled,
   logFinalizeMetrics,
 } = require("../../src/agents/handoff-metrics");
 const { finalizeA2ARoutes } = require("../../src/agents/a2a-finalize");
@@ -80,7 +81,7 @@ test("buildA2AInjectMetrics flags a2a_prompt_has_memory", () => {
   assert.match(formatA2AInjectMetricsLine(full), /a2a_prompt_has_memory=1/);
 });
 
-test("finalizeA2ARoutes logs metrics and returns them", () => {
+test("finalizeA2ARoutes keeps terminal metrics silent and returns SSE metrics", () => {
   const lines = [];
   const events = [];
   const result = finalizeA2ARoutes({
@@ -116,7 +117,7 @@ test("finalizeA2ARoutes logs metrics and returns them", () => {
   assert.equal(result.metrics.capture_rate, 1);
   assert.equal(result.metrics.ok_rate, 1);
   assert.equal(result.enqueued.length, 1);
-  assert.ok(lines.some((line) => line.includes("[handoff-metrics]") && line.includes("capture_rate=1")));
+  assert.deepEqual(lines, []);
   assert.ok(events.some((e) => e.kind === "handoff-metrics" && e.payload.kind === "finalize"));
 });
 
@@ -139,11 +140,30 @@ test("finalizeA2ARoutes repair path reports repair_rate=1", () => {
   assert.equal(result.metrics.repair_rate, 1);
   assert.equal(result.metrics.enqueued, 0);
   assert.equal(result.repairs[0].policy, DECISIONS.REQUEST_REPAIR);
-  assert.ok(lines.some((line) => /repair_rate=1/.test(line)));
+  assert.deepEqual(lines, []);
 });
 
 test("logFinalizeMetrics is a no-op for null metrics", () => {
   const lines = [];
   logFinalizeMetrics(null, { info: (line) => lines.push(line) });
   assert.deepEqual(lines, []);
+});
+
+test("handoff terminal metrics are opt-in", () => {
+  const metrics = buildFinalizeMetrics({
+    mentions: ["opencode"],
+    enqueued: [{ to: "opencode" }],
+    handoffQualityByTarget: { opencode: { ok: true, hasBlock: true } },
+  });
+  const lines = [];
+  const logger = { info: (line) => lines.push(line) };
+
+  assert.equal(isHandoffMetricsLogEnabled({}), false);
+  logFinalizeMetrics(metrics, logger, {});
+  assert.deepEqual(lines, []);
+
+  assert.equal(isHandoffMetricsLogEnabled({ SHIFT_HANDOFF_METRICS_LOG: "true" }), true);
+  logFinalizeMetrics(metrics, logger, { SHIFT_HANDOFF_METRICS_LOG: "1" });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /\[handoff-metrics\].*kind=finalize/);
 });

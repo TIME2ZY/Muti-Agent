@@ -8,6 +8,7 @@ const {
   resolveProviderRunOptions,
   buildProviderEnvironment,
   getProviderDiagnostics,
+  collectProviderStartupDiagnostics,
   validateProviderConfig,
 } = require("../../src/agents/providers");
 const { MODEL_PROFILES, getModelProfile } = require("../../src/agents/catalog");
@@ -200,6 +201,17 @@ test("grok adapter owns missing-proxy diagnostics and GROK_PROXY env patch", () 
   );
   assert.equal(env.GROK_PROXY, "http://127.0.0.1:7892");
   assert.equal(env.HTTPS_PROXY, "http://127.0.0.1:7892");
+});
+
+test("provider startup diagnostics are opt-in", () => {
+  const proxyEnv = { INVOKE_CLI_PROXY: "http://127.0.0.1:7892" };
+  assert.deepEqual(collectProviderStartupDiagnostics(proxyEnv), []);
+
+  const messages = collectProviderStartupDiagnostics({
+    ...proxyEnv,
+    INVOKE_CLI_PROXY_LOG: "1",
+  });
+  assert.ok(messages.some((line) => line.includes("CLI proxy: http://127.0.0.1:7892")));
 });
 
 test("invoke-cli entry stays free of provider special cases and server imports", () => {

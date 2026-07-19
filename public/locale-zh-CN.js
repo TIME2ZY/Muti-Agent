@@ -58,15 +58,15 @@
     },
 
     empty: {
-      title: "选择默认 Agent 后直接发送，或用 @ 单次指定模型",
-      hint: "Enter 发送 · Shift + Enter 换行 · 右侧卡片切换默认 Agent",
+      title: "今天想推进什么？",
+      hint: "直接描述任务；需要特定协作者时输入 @",
     },
 
     composer: {
       send: "发送",
       stop: "停止",
       stopGenerate: "停止生成",
-      placeholder: "直接输入消息，或用 @Agent 单次指定模型…",
+      placeholder: "描述任务；输入 @ 可指定协作者…",
       draftWhileRunning: "生成中仍可编辑草稿；完成后 Enter 发送",
     },
 
@@ -88,7 +88,7 @@
 
     shell: {
       title: "Shift · 交班台",
-      skillsActive: "已激活能力",
+      skillsActive: "本会话规则",
       tabAgents: "Agents",
       tabWorkspace: "工作区",
       tabRecall: "回忆",

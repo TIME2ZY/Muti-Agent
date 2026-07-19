@@ -1,10 +1,15 @@
 /**
- * Handoff observability metrics (log-driven, not a second product surface).
+ * Handoff observability metrics.
  *
- * Emits compact `[handoff-metrics]` lines so ops can track:
+ * Metrics continue to flow through SSE. Optional terminal logs let ops track:
  *   degraded_rate, repair_rate, capture_rate, a2a_prompt_has_memory
- * without stacking more agent-facing prose.
+ * without stacking more agent-facing prose. Terminal output is opt-in via
+ * SHIFT_HANDOFF_METRICS_LOG.
  */
+
+function isHandoffMetricsLogEnabled(env = process.env) {
+  return /^(1|true|yes|on)$/i.test(String(env.SHIFT_HANDOFF_METRICS_LOG || ""));
+}
 
 function rate(numerator, denominator) {
   const den = Number(denominator) || 0;
@@ -145,18 +150,18 @@ function formatA2AInjectMetricsLine(metrics) {
   );
 }
 
-function logMetricsLine(line, logger = console) {
-  if (!line) return;
+function logMetricsLine(line, logger = console, env = process.env) {
+  if (!line || !isHandoffMetricsLogEnabled(env)) return;
   if (typeof logger.info === "function") logger.info(line);
   else if (typeof logger.log === "function") logger.log(line);
 }
 
-function logFinalizeMetrics(metrics, logger = console) {
-  logMetricsLine(formatFinalizeMetricsLine(metrics), logger);
+function logFinalizeMetrics(metrics, logger = console, env = process.env) {
+  logMetricsLine(formatFinalizeMetricsLine(metrics), logger, env);
 }
 
-function logA2AInjectMetrics(metrics, logger = console) {
-  logMetricsLine(formatA2AInjectMetricsLine(metrics), logger);
+function logA2AInjectMetrics(metrics, logger = console, env = process.env) {
+  logMetricsLine(formatA2AInjectMetricsLine(metrics), logger, env);
 }
 
 module.exports = {
@@ -166,6 +171,7 @@ module.exports = {
   memoryCardHasActiveItems,
   buildA2AInjectMetrics,
   formatA2AInjectMetricsLine,
+  isHandoffMetricsLogEnabled,
   logFinalizeMetrics,
   logA2AInjectMetrics,
   logMetricsLine,

@@ -90,6 +90,8 @@
                 content: msg.content || "",
                 variant: msg.exitCode && msg.exitCode !== 0 ? "error" : "",
                 invocationId: msg.invocationId || null,
+                usage: msg.usage || null,
+                showUsage: msg.source !== "callback",
                 scroll: false,
               });
             }

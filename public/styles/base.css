@@ -10,7 +10,6 @@ html, body {
 }
 
 body {
-  /* Quiet neutral shell — regional surfaces carry hierarchy, not a global glow */
   background: var(--surface-inset);
   color: var(--text-primary);
   font-family: var(--font-body);
@@ -33,6 +32,25 @@ button {
   background: none;
   border: none;
   padding: 0;
+}
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 200;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--accent-text);
+  background: var(--accent);
+  font: 600 13px/1.2 var(--font-ui);
+  text-decoration: none;
+  transform: translateY(-150%);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
 }
 
 :focus { outline: none; }

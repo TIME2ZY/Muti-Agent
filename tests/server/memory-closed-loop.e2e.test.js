@@ -167,14 +167,7 @@ test("memory closed loop e2e: handoff → inject → seal → bootstrap", async 
     assert.ok(injectMetrics, "expected a2a_inject handoff-metrics SSE");
     assert.equal(injectMetrics.a2a_prompt_has_memory, 1);
     assert.ok(injectMetrics.prompt_bytes > 0);
-    assert.ok(
-      metricLogs.some((line) => line.includes("kind=finalize") && line.includes("capture_rate=1"))
-    );
-    assert.ok(
-      metricLogs.some(
-        (line) => line.includes("kind=a2a_inject") && line.includes("a2a_prompt_has_memory=1")
-      )
-    );
+    assert.deepEqual(metricLogs, [], "handoff metrics should be silent in the terminal by default");
 
     // Search must surface the memory layer hit.
     const search = await apiFetch(
