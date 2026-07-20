@@ -1779,11 +1779,15 @@
           pre.classList.add("md-code-pre-expanded");
           btn.textContent = "▲";
           btn.title = "Collapse";
+          btn.setAttribute("aria-label", "Collapse code");
+          btn.setAttribute("aria-expanded", "true");
         } else {
           pre.classList.remove("md-code-pre-expanded");
           pre.classList.add("md-code-pre-collapsed");
           btn.textContent = "▼";
           btn.title = "Expand";
+          btn.setAttribute("aria-label", "Expand code");
+          btn.setAttribute("aria-expanded", "false");
         }
       });
     }

@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "vendor:md": "node scripts/vendor-md.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -23,6 +24,11 @@
     "prettier": "^3.6.2"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "dompurify": "^3.4.12",
+    "isomorphic-dompurify": "^3.19.0",
+    "markdown-it": "^14.3.0",
+    "markdown-it-multimd-table": "^4.2.3",
+    "markdown-it-task-lists": "^2.1.1"
   }
 }

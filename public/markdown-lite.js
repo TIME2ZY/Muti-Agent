@@ -1,170 +1,65 @@
+/**
+ * MarkdownLite — public API for chat message Markdown rendering.
+ *
+ * Internals (Batch 1): markdown-it + GFM plugins → custom token renderers →
+ * DOMPurify → (optional) Prism. Call sites keep renderMd / paintMarkdown.
+ */
 (function initMarkdownLite(globalScope) {
   "use strict";
 
-  const ESC_MAP = { "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" };
+  const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
 
   function escHtml(text) {
     return String(text).replace(/[&<>"']/g, (match) => ESC_MAP[match]);
   }
 
-  function splitTableRow(line) {
-    const inner = line.replace(/^\||\|$/g, "");
-    return inner.split("|").map((cell) => cell.trim());
-  }
-
-  function isTableRowLine(line) {
-    const t = String(line || "").trim();
-    if (!t || t.indexOf("|") === -1) return false;
-    // At least one cell separator; allow missing leading/trailing pipes (GFM).
-    return /^\|?.+\|.+\|?\s*$/.test(t) && !/^[-*]\s+/.test(t) && !/^\d+\.\s+/.test(t);
-  }
-
-  function isTableSepLine(line) {
-    const t = String(line || "").trim();
-    if (!t || t.indexOf("|") === -1) return false;
-    return /^\|?[\s:|-]+\|[\s:|-]+\|?\s*$/.test(t);
-  }
-
-  /** True table starts only when a row is followed by a separator row. */
-  function isTableStartAt(lines, index) {
-    if (!Array.isArray(lines) || index < 0 || index >= lines.length) return false;
-    return isTableRowLine(lines[index]) && index + 1 < lines.length && isTableSepLine(lines[index + 1]);
-  }
-
   /**
    * Normalize newlines before parse. Windows CLIs often emit CRLF; bare CR
-   * also appears in progress rewrites. Leaving \r in HTML breaks continuous
-   * text layout and can confuse line-oriented matchers.
+   * also appears in progress rewrites.
    */
   function normalizeMdNewlines(text) {
     return String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   }
 
-  /**
-   * Blockquote prefix after escHtml: ">" becomes "&gt;".
-   * Accept both so pre-escape call sites (if any) still work.
-   */
-  function isBlockquoteLine(line) {
-    return /^(&gt;|>)\s?/.test(String(line || ""));
-  }
-
-  function stripBlockquotePrefix(line) {
-    return String(line || "").replace(/^(&gt;|>)\s?/, "");
-  }
-
-  function isBlockStartLine(line) {
-    const raw = String(line || "");
-    if (!raw.trim()) return true;
-    if (/^---+\s*$/.test(raw) || /^\*\*\*+\s*$/.test(raw)) return true;
-    if (/^#{1,6}\s+/.test(raw)) return true;
-    if (/^[-*]\s+/.test(raw)) return true;
-    if (/^\d+\.\s+/.test(raw)) return true;
-    if (isBlockquoteLine(raw)) return true;
-    // Do NOT treat bare pipe-rows as block starts — continuous prose like
-    // "A | B" lines would otherwise be split into one <p> per line. Real
-    // tables are detected via isTableStartAt (row + separator look-ahead).
-    return false;
-  }
-
-  /** Hard block that always ends a list (not blank, not a list item). */
-  function isHardBlockStart(line, marker) {
-    const raw = String(line || "");
-    if (!raw.trim()) return false;
-    if (/^---+\s*$/.test(raw) || /^\*\*\*+\s*$/.test(raw)) return true;
-    if (/^#{1,6}\s+/.test(raw)) return true;
-    if (isBlockquoteLine(raw)) return true;
-    if (marker && new RegExp(`^${marker}\\d+${marker}$`).test(raw.trim())) return true;
-    return false;
-  }
-
-  function matchOrderedItem(line) {
-    const m = String(line || "").match(/^(\d+)\.\s+(.*)$/);
-    if (!m) return null;
-    return { n: parseInt(m[1], 10), text: m[2] };
-  }
-
-  function matchTaskItem(line) {
-    const m = String(line || "").match(/^[-*]\s+\[([ xX])\]\s+(.*)$/);
-    if (!m) return null;
-    return { checked: m[1] !== " ", text: m[2] };
-  }
-
-  function matchUnorderedItem(line) {
-    if (matchTaskItem(line)) return null;
-    const m = String(line || "").match(/^[-*]\s+(.*)$/);
-    if (!m) return null;
-    return { text: m[1] };
-  }
-
-  function isAnyListItemLine(line) {
-    return !!(matchOrderedItem(line) || matchTaskItem(line) || matchUnorderedItem(line));
-  }
-
-  function peekNextNonEmpty(lines, from) {
-    let j = from;
-    while (j < lines.length && !String(lines[j]).trim()) j += 1;
-    return j;
-  }
-
-  /**
-   * Consume continuation lines for a list item.
-   * - Indented lines (2+ spaces / tab) stay in the same <li>
-   * - Blank line before the next list item is NOT consumed here (outer loop
-   *   keeps the parent <ol>/<ul> open)
-   * - Blank line then unindented paragraph ends the item (and the list)
-   * @returns {{ body: string, nextIndex: number }}
-   */
-  function consumeListItemBody(lines, itemIndex, firstContent, marker) {
-    const parts = [firstContent];
-    let j = itemIndex + 1;
-    while (j < lines.length) {
-      const line = lines[j];
-
-      if (!String(line).trim()) {
-        const next = peekNextNonEmpty(lines, j + 1);
-        if (next >= lines.length) break;
-        // Sibling list item after blank → stop body; blankContinuesList keeps list open.
-        if (isAnyListItemLine(lines[next])) break;
-        if (isHardBlockStart(lines[next], marker)) break;
-        // Indented text after blank still belongs to this item.
-        if (/^(?: {2,}|\t)\S/.test(lines[next])) {
-          j = next;
-          parts.push(String(lines[j]).replace(/^\s+/, ""));
-          j += 1;
-          continue;
-        }
-        // Unindented paragraph after blank ends the list item.
-        break;
-      }
-
-      if (isAnyListItemLine(line)) break;
-      if (isHardBlockStart(line, marker)) break;
-
-      // Indented continuation (2+ spaces / tab) stays in the item.
-      if (/^(?: {2,}|\t)\S/.test(line)) {
-        parts.push(String(line).replace(/^\s+/, ""));
-        j += 1;
-        continue;
-      }
-
-      // Unindented plain line after a list marker ends the item (new paragraph).
-      break;
+  function tryRequire(name) {
+    if (typeof require !== "function") return null;
+    try {
+      return require(name);
+    } catch {
+      return null;
     }
-    return { body: parts.join("<br>"), nextIndex: j };
   }
 
-  /**
-   * Blank line between same-kind list items must NOT close the list —
-   * otherwise each item becomes its own <ol> and every marker shows "1".
-   */
-  function blankContinuesList(lines, blankIndex, inList, listType) {
-    if (!inList) return false;
-    const next = peekNextNonEmpty(lines, blankIndex + 1);
-    if (next >= lines.length) return false;
-    const line = lines[next];
-    if (inList === "ol") return !!matchOrderedItem(line);
-    if (inList === "ul" && listType === "task") return !!matchTaskItem(line);
-    if (inList === "ul" && listType === "ul") return !!matchUnorderedItem(line);
+  function resolveMarkdownIt() {
+    const fromPkg = tryRequire("markdown-it");
+    if (fromPkg) return fromPkg;
+    return typeof globalScope.markdownit === "function" ? globalScope.markdownit : null;
+  }
+
+  function resolveMultimdTable() {
+    return tryRequire("markdown-it-multimd-table") || globalScope.markdownitMultimdTable || null;
+  }
+
+  function resolveTaskLists() {
+    return tryRequire("markdown-it-task-lists") || globalScope.markdownitTaskLists || null;
+  }
+
+  function resolveDOMPurify() {
+    if (globalScope.DOMPurify && typeof globalScope.DOMPurify.sanitize === "function") {
+      return globalScope.DOMPurify;
+    }
+    return tryRequire("isomorphic-dompurify") || tryRequire("dompurify") || null;
+  }
+
+  function isSafeHttpUrl(href) {
+    const raw = String(href || "").trim();
+    if (!raw) return false;
+    // Block schemes that execute or navigate unsafely.
+    if (/^\/\//.test(raw)) return false;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) {
+      return /^https?:\/\//i.test(raw);
+    }
+    // Relative / fragment — not used for model links we emit; reject.
     return false;
   }
 
@@ -219,12 +114,299 @@
     return count;
   }
 
+  const PURIFY_CONFIG = {
+    ALLOWED_TAGS: [
+      "p",
+      "br",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "ul",
+      "ol",
+      "li",
+      "blockquote",
+      "hr",
+      "table",
+      "thead",
+      "tbody",
+      "tr",
+      "th",
+      "td",
+      "caption",
+      "pre",
+      "code",
+      "strong",
+      "em",
+      "s",
+      "del",
+      "a",
+      "div",
+      "span",
+      "button",
+      "input",
+    ],
+    ALLOWED_ATTR: [
+      "class",
+      "href",
+      "title",
+      "target",
+      "rel",
+      "start",
+      "value",
+      "type",
+      "checked",
+      "disabled",
+      "role",
+      "tabindex",
+      "aria-label",
+      "aria-expanded",
+      "data-prism",
+      "data-copy",
+      "data-toggle",
+      "colspan",
+      "rowspan",
+      "id",
+    ],
+    ALLOW_DATA_ATTR: false,
+    ALLOW_ARIA_ATTR: true,
+    FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form", "svg", "math"],
+    FORBID_ATTR: ["style"],
+  };
+
+  /** @type {import('markdown-it')|null} */
+  let mdEngine = null;
+  let mdEngineReady = false;
+
+  function configureRenderers(md) {
+    const defaultLinkOpen =
+      md.renderer.rules.link_open ||
+      function linkOpen(tokens, idx, options, env, self) {
+        return self.renderToken(tokens, idx, options);
+      };
+
+    md.renderer.rules.link_open = function linkOpen(tokens, idx, options, env, self) {
+      const token = tokens[idx];
+      const href = token.attrGet("href") || "";
+      if (!isSafeHttpUrl(href)) {
+        token.attrSet("href", "#");
+        token.attrSet("data-unsafe-href", "1");
+      }
+      token.attrSet("target", "_blank");
+      token.attrSet("rel", "noopener noreferrer");
+      return defaultLinkOpen(tokens, idx, options, env, self);
+    };
+
+    md.renderer.rules.heading_open = function headingOpen(tokens, idx, options, env, self) {
+      const token = tokens[idx];
+      const level = String(token.tag || "h1").replace(/^h/i, "") || "1";
+      const cls = `md-h md-h${level}`;
+      const existing = token.attrGet("class");
+      token.attrSet("class", existing ? `${existing} ${cls}` : cls);
+      return self.renderToken(tokens, idx, options);
+    };
+
+    md.renderer.rules.blockquote_open = function blockquoteOpen(tokens, idx, options, env, self) {
+      const token = tokens[idx];
+      const existing = token.attrGet("class");
+      token.attrSet("class", existing ? `${existing} md-quote` : "md-quote");
+      return self.renderToken(tokens, idx, options);
+    };
+
+    // Prefer <del> over <s> for existing CSS / semantics.
+    md.renderer.rules.s_open = function sOpen() {
+      return "<del>";
+    };
+    md.renderer.rules.s_close = function sClose() {
+      return "</del>";
+    };
+
+    md.renderer.rules.code_inline = function codeInline(tokens, idx) {
+      return `<code class="md-code-inline">${escHtml(tokens[idx].content)}</code>`;
+    };
+
+    function alignClassFromToken(token) {
+      const style = token.attrGet("style") || "";
+      const m = style.match(/text-align\s*:\s*(left|right|center)/i);
+      if (m) return `ta-${m[1].toLowerCase()}`;
+      return "";
+    }
+
+    function stripStyleAttr(token) {
+      if (!token.attrs) return;
+      token.attrs = token.attrs.filter((pair) => pair[0] !== "style");
+    }
+
+    function cellOpen(tokens, idx, options, env, self) {
+      const token = tokens[idx];
+      const alignCls = alignClassFromToken(token);
+      stripStyleAttr(token);
+      if (alignCls) {
+        const existing = token.attrGet("class");
+        token.attrSet("class", existing ? `${existing} ${alignCls}` : alignCls);
+      }
+      return self.renderToken(tokens, idx, options);
+    }
+
+    md.renderer.rules.th_open = cellOpen;
+    md.renderer.rules.td_open = cellOpen;
+
+    md.renderer.rules.table_open = function tableOpen() {
+      return (
+        '<div class="md-table-scroll" role="region" tabindex="0" aria-label="Markdown table">' +
+        '<table class="md-table">'
+      );
+    };
+    md.renderer.rules.table_close = function tableClose() {
+      return "</table></div>";
+    };
+
+    // Task-list plugin sets contains-task-list; map to existing .md-task styles via CSS.
+    // Keep plugin checkbox HTML (disabled) — sanitized later.
+
+    md.renderer.rules.fence = function fence(tokens, idx, options, env) {
+      const token = tokens[idx];
+      const info = token.info ? String(token.info).trim() : "";
+      const lang = info.split(/\s+/u)[0] || "";
+      const langLabel = lang || "text";
+      const code = String(token.content || "").replace(/\n$/, "");
+      const doHighlight = env && env.highlight !== false;
+
+      let highlightedCode = escHtml(code);
+      let prismDone = false;
+      if (
+        doHighlight &&
+        lang &&
+        globalScope.Prism &&
+        globalScope.Prism.languages &&
+        globalScope.Prism.languages[lang]
+      ) {
+        try {
+          highlightedCode = globalScope.Prism.highlight(
+            code,
+            globalScope.Prism.languages[lang],
+            lang
+          );
+          prismDone = true;
+        } catch {
+          highlightedCode = escHtml(code);
+        }
+      }
+
+      const lineCount = code.length ? code.split("\n").length : 1;
+      const shouldCollapse = lineCount > 20;
+      const prismAttr = prismDone ? ' data-prism="1"' : "";
+      const langClass = lang ? `language-${escHtml(lang)}` : "language-text";
+      const shellClass = shouldCollapse ? "md-code md-code-collapsible" : "md-code";
+      const preClass = shouldCollapse ? ' class="md-code-pre-collapsed"' : "";
+      const toggleBtn = shouldCollapse
+        ? '<button type="button" class="md-code-toggle" data-toggle="1" aria-label="Expand code" aria-expanded="false" title="Expand">▼</button>'
+        : "";
+
+      return (
+        `<div class="${shellClass}">` +
+        `<div class="md-code-head">` +
+        `<span class="md-code-lang">${escHtml(langLabel)}</span>` +
+        `<span class="md-code-lines">${lineCount} lines</span>` +
+        toggleBtn +
+        `<button type="button" class="md-code-copy" data-copy="1" title="复制代码">复制代码</button>` +
+        `</div>` +
+        `<pre${preClass}><code class="${langClass}"${prismAttr}>${highlightedCode}</code></pre>` +
+        `</div>`
+      );
+    };
+  }
+
+  function getMdEngine() {
+    if (mdEngineReady) return mdEngine;
+    mdEngineReady = true;
+    const MarkdownIt = resolveMarkdownIt();
+    if (!MarkdownIt) {
+      mdEngine = null;
+      return null;
+    }
+
+    const md = new MarkdownIt({
+      html: false,
+      linkify: true,
+      breaks: true,
+      typographer: false,
+    });
+
+    const multimd = resolveMultimdTable();
+    if (typeof multimd === "function") {
+      md.use(multimd, {
+        multiline: false,
+        rowspan: false,
+        headerless: false,
+        multibody: true,
+        autolabel: false,
+      });
+    }
+
+    const taskLists = resolveTaskLists();
+    if (typeof taskLists === "function") {
+      md.use(taskLists, { enabled: false, label: false });
+    }
+
+    configureRenderers(md);
+    mdEngine = md;
+    return mdEngine;
+  }
+
+  function hasRenderPipeline() {
+    return !!(getMdEngine() && resolveDOMPurify());
+  }
+
+  /**
+   * Sanitize HTML; fail closed to empty string if purifier missing.
+   * @param {string} dirty
+   * @returns {string}
+   */
+  function sanitizeHtml(dirty) {
+    const purify = resolveDOMPurify();
+    if (!purify || typeof purify.sanitize !== "function") return "";
+    try {
+      return String(purify.sanitize(dirty, PURIFY_CONFIG) || "");
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * @param {string} text
+   * @param {{ highlight?: boolean }} [options] highlight defaults to true
+   * @returns {string} safe HTML, or "" when empty / pipeline unavailable
+   */
+  function renderMd(text, options = {}) {
+    if (!text) return "";
+    const md = getMdEngine();
+    if (!md) return "";
+
+    const doHighlight = options.highlight !== false;
+    const src = normalizeMdNewlines(text);
+    let dirty = "";
+    try {
+      dirty = md.render(src, { highlight: doHighlight });
+    } catch {
+      return "";
+    }
+
+    // Drop accidental data-unsafe-href markers from the token path if any leaked.
+    dirty = dirty.replace(/\sdata-unsafe-href="1"/g, "");
+
+    return sanitizeHtml(dirty);
+  }
+
   /**
    * Paint markdown into a DOM node with deferred work for long replies.
    * Modes:
    *  - sync: parse + highlight immediately (< 12k)
    *  - structure: parse without Prism, highlight on idle (12k–48k)
    *  - plain: textContent first, then structure, then highlight (≥ 48k)
+   *  - fallback: pipeline missing → textContent only (fail closed)
    *
    * @param {HTMLElement} targetEl
    * @param {string} text
@@ -265,6 +447,14 @@
       if (onHtml) onHtml(html);
     }
 
+    function setPlain() {
+      if (cancelled || !targetEl) return;
+      targetEl.classList.add("is-md-plain");
+      targetEl.classList.remove("is-md-pending-highlight");
+      targetEl.textContent = raw;
+      if (onHtml) onHtml("");
+    }
+
     function scheduleHighlight() {
       if (cancelled || !targetEl) return;
       targetEl.classList.add("is-md-pending-highlight");
@@ -281,16 +471,23 @@
       return { cancel, deferred: false, mode: "noop" };
     }
 
+    // Fail closed: no parser/purifier → never assign untrusted structured HTML.
+    if (!hasRenderPipeline()) {
+      setPlain();
+      return { cancel, deferred: false, mode: "fallback" };
+    }
+
     // Super-long: keep the UI responsive — plain text first frame.
     if (raw.length >= plainLimit) {
-      targetEl.classList.add("is-md-plain");
-      targetEl.classList.remove("is-md-pending-highlight");
-      targetEl.textContent = raw;
-      if (onHtml) onHtml("");
+      setPlain();
       cancelFns.push(
         scheduleIdle(() => {
           if (cancelled || !targetEl || !targetEl.isConnected) return;
           const html = renderMd(raw, { highlight: false });
+          if (!html && raw) {
+            setPlain();
+            return;
+          }
           setHtml(html);
           scheduleHighlight();
         }, 200)
@@ -301,288 +498,26 @@
     // Long: structure immediately, Prism later (Prism is the heavy part).
     if (raw.length >= syncLimit) {
       const html = renderMd(raw, { highlight: false });
+      if (!html && raw) {
+        setPlain();
+        return { cancel, deferred: false, mode: "fallback" };
+      }
       setHtml(html);
       scheduleHighlight();
       return { cancel, deferred: true, mode: "structure" };
     }
 
     const html = renderMd(raw, { highlight: true });
+    if (!html && raw) {
+      setPlain();
+      return { cancel, deferred: false, mode: "fallback" };
+    }
     setHtml(html);
     return { cancel, deferred: false, mode: "sync" };
   }
 
-  /**
-   * @param {string} text
-   * @param {{ highlight?: boolean }} [options] highlight defaults to true
-   */
-  function renderMd(text, options = {}) {
-    if (!text) return "";
-    const doHighlight = options.highlight !== false;
-
-    const marker = "\uE000";
-    const codeBlocks = [];
-    const inlineCodes = [];
-    let html = escHtml(normalizeMdNewlines(text));
-
-    // Fenced code: allow optional trailing spaces on the closing fence.
-    html = html.replace(/```([\w+-]*)\r?\n?([\s\S]*?)```/g, (_, lang, code) => {
-      const idx = codeBlocks.length;
-      codeBlocks.push({ lang: lang || "", code: code.replace(/\n$/, "") });
-      return `${marker}${idx}${marker}`;
-    });
-
-    // Unclosed fence (stream abort / model omitted closer): treat rest of
-    // document as a code block so backticks don't leak as raw paragraphs.
-    html = html.replace(
-      /^ {0,3}```([\w+-]*)[ \t]*(?:\n([\s\S]*)|$)/m,
-      (_, lang, code = "") => {
-        const idx = codeBlocks.length;
-        codeBlocks.push({ lang: lang || "", code: code.replace(/\n$/, "") });
-        return `${marker}${idx}${marker}`;
-      }
-    );
-
-    html = html.replace(/`([^`\n]+)`/g, (_, code) => {
-      const idx = inlineCodes.length;
-      inlineCodes.push(code);
-      return `${marker}i${idx}${marker}`;
-    });
-
-    const lines = html.split("\n");
-    const out = [];
-    let i = 0;
-    let inList = null;
-    let listType = null;
-    /** Next expected ordered value (for value= when LLM skips numbers). */
-    let listNextExpected = 1;
-    const closeList = () => {
-      if (inList) {
-        out.push(`</${inList}>`);
-        inList = null;
-        listType = null;
-        listNextExpected = 1;
-      }
-    };
-
-    while (i < lines.length) {
-      const raw = lines[i];
-
-      if (/^---+\s*$/.test(raw) || /^\*\*\*+\s*$/.test(raw)) {
-        closeList();
-        out.push("<hr>");
-        i++;
-        continue;
-      }
-
-      if (isTableRowLine(raw) && i + 1 < lines.length && isTableSepLine(lines[i + 1])) {
-        closeList();
-        const headerCells = splitTableRow(raw);
-        const alignCells = splitTableRow(lines[i + 1]);
-        const aligns = alignCells.map((cell) => {
-          const left = cell.trim().startsWith(":");
-          const right = cell.trim().endsWith(":");
-          if (left && right) return "center";
-          if (right) return "right";
-          if (left) return "left";
-          return "";
-        });
-        const bodyRows = [];
-        let j = i + 2;
-        while (j < lines.length && isTableRowLine(lines[j]) && !isTableSepLine(lines[j]) && lines[j].trim()) {
-          bodyRows.push(splitTableRow(lines[j]));
-          j++;
-        }
-        out.push("<table class=\"md-table\"><thead><tr>");
-        headerCells.forEach((cell, k) => {
-          const align = aligns[k] ? ` class="ta-${aligns[k]}"` : "";
-          out.push(`<th${align}>${cell}</th>`);
-        });
-        out.push("</tr></thead><tbody>");
-        bodyRows.forEach((row) => {
-          out.push("<tr>");
-          row.forEach((cell, k) => {
-            const align = aligns[k] ? ` class="ta-${aligns[k]}"` : "";
-            out.push(`<td${align}>${cell}</td>`);
-          });
-          out.push("</tr>");
-        });
-        out.push("</tbody></table>");
-        i = j;
-        continue;
-      }
-
-      // Headings h1–h6 (was h1–h3 only — #### etc. leaked as raw text).
-      const heading = raw.match(/^(#{1,6})\s+(.+)/);
-      if (heading) {
-        closeList();
-        const level = heading[1].length;
-        out.push(`<h${level} class="md-h md-h${level}">${heading[2]}</h${level}>`);
-        i++;
-        continue;
-      }
-
-      const task = matchTaskItem(raw);
-      if (task) {
-        if (inList !== "ul" || listType !== "task") {
-          closeList();
-          out.push("<ul class=\"md-task\">");
-          inList = "ul";
-          listType = "task";
-        }
-        const { body, nextIndex } = consumeListItemBody(lines, i, task.text, marker);
-        out.push(
-          `<li><input type="checkbox" disabled${task.checked ? " checked" : ""}><span>${body}</span></li>`
-        );
-        i = nextIndex;
-        continue;
-      }
-
-      const ul = matchUnorderedItem(raw);
-      if (ul) {
-        if (inList !== "ul" || listType !== "ul") {
-          closeList();
-          out.push("<ul>");
-          inList = "ul";
-          listType = "ul";
-        }
-        const { body, nextIndex } = consumeListItemBody(lines, i, ul.text, marker);
-        out.push(`<li>${body}</li>`);
-        i = nextIndex;
-        continue;
-      }
-
-      const ol = matchOrderedItem(raw);
-      if (ol) {
-        if (inList !== "ol") {
-          closeList();
-          // Honor non-1 starts (e.g. continued steps "3. …").
-          const startAttr = ol.n !== 1 ? ` start="${ol.n}"` : "";
-          out.push(`<ol${startAttr}>`);
-          inList = "ol";
-          listType = "ol";
-          listNextExpected = ol.n;
-        }
-        // If the source number jumps, set HTML value so markers stay correct.
-        const valueAttr = ol.n !== listNextExpected ? ` value="${ol.n}"` : "";
-        const { body, nextIndex } = consumeListItemBody(lines, i, ol.text, marker);
-        out.push(`<li${valueAttr}>${body}</li>`);
-        listNextExpected = ol.n + 1;
-        i = nextIndex;
-        continue;
-      }
-
-      if (isBlockquoteLine(raw)) {
-        closeList();
-        const quoteLines = [];
-        while (i < lines.length && isBlockquoteLine(lines[i])) {
-          quoteLines.push(stripBlockquotePrefix(lines[i]));
-          i++;
-        }
-        out.push(`<blockquote class="md-quote">${quoteLines.join("<br>")}</blockquote>`);
-        continue;
-      }
-
-      if (raw.trim() === "") {
-        // Keep one <ol>/<ul> across blank lines when the next item continues it.
-        // (Previously closeList() here → N separate <ol> → every item rendered as "1".)
-        if (blankContinuesList(lines, i, inList, listType)) {
-          i++;
-          continue;
-        }
-        closeList();
-        out.push("");
-        i++;
-        continue;
-      }
-
-      // Fenced-code placeholders must stay top-level (not wrapped in <p>).
-      if (new RegExp(`^${marker}\\d+${marker}$`).test(raw.trim())) {
-        closeList();
-        out.push(raw.trim());
-        i++;
-        continue;
-      }
-
-      // Paragraphs: wrap plain lines so newlines/structure survive without
-      // relying on white-space:pre-wrap (which breaks lists/tables styling).
-      // Soft line breaks → <br> (chat-friendly; keeps single-\n agent prose).
-      closeList();
-      const paraLines = [raw];
-      i++;
-      while (
-        i < lines.length
-        && !isBlockStartLine(lines[i])
-        && !isTableStartAt(lines, i)
-        && !new RegExp(`^${marker}\\d+${marker}$`).test(String(lines[i]).trim())
-      ) {
-        paraLines.push(lines[i]);
-        i++;
-      }
-      out.push(`<p>${paraLines.join("<br>")}</p>`);
-    }
-    closeList();
-
-    html = out.join("\n");
-    // Autolink angle-bracket URLs that survived escHtml as &lt;http...&gt;
-    html = html.replace(/&lt;(https?:\/\/[^&\s]+)&gt;/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-    html = html.replace(/&lt;(http[^&\s]+)&gt;/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-    // Also keep the pre-escape form for code-marker paths that reintroduce raw tags.
-    html = html.replace(/<(http[^>\s]+)>/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      (_, label, url) => `<a href="${escHtml(url)}" target="_blank" rel="noopener">${label}</a>`);
-    html = html.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-    // Bold: allow multi-word and CJK without requiring non-* only between stars greedily per segment.
-    html = html.replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/__([^_\n]+?)__/g, "<strong>$1</strong>");
-    html = html.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>");
-
-    html = html.replace(new RegExp(`${marker}i(\\d+)${marker}`, "g"), (_, k) =>
-      `<code class="md-code-inline">${inlineCodes[+k]}</code>`);
-
-    html = html.replace(new RegExp(`${marker}(\\d+)${marker}`, "g"), (_, k) => {
-      const { lang, code } = codeBlocks[+k];
-      const langLabel = lang || "text";
-      let highlightedCode = code;
-      let prismDone = false;
-      if (
-        doHighlight &&
-        lang &&
-        globalScope.Prism &&
-        globalScope.Prism.languages &&
-        globalScope.Prism.languages[lang]
-      ) {
-        try {
-          highlightedCode = globalScope.Prism.highlight(
-            code,
-            globalScope.Prism.languages[lang],
-            lang
-          );
-          prismDone = true;
-        } catch {
-          highlightedCode = code;
-        }
-      }
-      const lineCount = code.split("\n").length;
-      const shouldCollapse = lineCount > 20;
-      const prismAttr = prismDone ? ' data-prism="1"' : "";
-
-      return `<div class="md-code ${shouldCollapse ? "md-code-collapsible" : ""}">
-          <div class="md-code-head">
-            <span class="md-code-lang">${escHtml(langLabel)}</span>
-            <span class="md-code-lines">${lineCount} lines</span>
-            ${shouldCollapse ? '<button type="button" class="md-code-toggle" data-toggle="1">▼</button>' : ""}
-            <button type="button" class="md-code-copy" data-copy="1" title="复制代码">复制代码</button>
-          </div>
-          <pre class="${shouldCollapse ? "md-code-pre-collapsed" : ""}"><code class="language-${escHtml(lang)}"${prismAttr}>${highlightedCode}</code></pre>
-        </div>`;
-    });
-
-    return html;
-  }
-
   const api = {
     escHtml,
-    splitTableRow,
     renderMd,
     paintMarkdown,
     highlightCodeBlocks,
@@ -591,17 +526,14 @@
     scheduleIdle,
     MD_SYNC_HIGHLIGHT_CHARS,
     MD_DEFER_PARSE_CHARS,
-    // helpers (exported for unit tests)
     normalizeMdNewlines,
-    isTableStartAt,
-    isTableRowLine,
-    isBlockquoteLine,
-    stripBlockquotePrefix,
-    matchOrderedItem,
-    matchUnorderedItem,
-    matchTaskItem,
-    blankContinuesList,
-    consumeListItemBody,
+    hasRenderPipeline,
+    isSafeHttpUrl,
+    // Retained no-op-ish helpers for older tests / callers (deprecated).
+    splitTableRow(line) {
+      const inner = String(line || "").replace(/^\||\|$/g, "");
+      return inner.split("|").map((cell) => cell.trim());
+    },
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   globalScope.MarkdownLite = api;

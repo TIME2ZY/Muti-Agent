@@ -230,10 +230,12 @@ test("uses opencode agent for qwen3.7-plus", () => {
     parseOutputEvents(result.stdout).map((event) => event.type),
     ["run.started", "text.delta", "run.finished"]
   );
+  // Do not assert on trailing HTTP_PROXY (mock appends `:${proxy}`): project
+  // .env may load INVOKE_CLI_PROXY by design when invoke-cli runs as main.
   assert.match(
     parseOutputEvents(result.stdout)[1].text,
     new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/qwen3.7-plus hello:undefined`
+      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/qwen3.7-plus hello`
     )
   );
   assert.equal(result.stderr, "");
