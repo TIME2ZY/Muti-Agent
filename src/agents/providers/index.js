@@ -11,6 +11,7 @@ const {
 } = require("../event-protocol");
 const { resolveProxy, proxyEnvVars } = require("../proxy");
 const { createUsageAccumulator } = require("../usage");
+const { windowsUtf8Environment } = require("../windows-runtime");
 
 const REQUIRED_ADAPTER_METHODS = ["createRuntime", "buildInvocation"];
 
@@ -272,6 +273,7 @@ function buildProviderEnvironment(config, options = {}, env = process.env) {
   const { adapter } = validateProviderConfig(config);
   const runOptions = resolveProviderRunOptions(config, options, env);
   const patch = {
+    ...windowsUtf8Environment(env),
     ...proxyEnvVars(runOptions.proxy),
   };
   if (typeof adapter.buildEnvironment === "function") {

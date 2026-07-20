@@ -35,3 +35,63 @@ test("stderr filter removes known startup noise only", () => {
   ].join("\n");
   assert.equal(filterBenignStderr(input), "real failure");
 });
+
+test("child stream preserves UTF-8 split across stdout and stderr chunks", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  const res = new EventEmitter();
+  res.write = () => {};
+  const events = [];
+  let stderr = "";
+  const completed = runChildStream({
+    spawnRunner: () => child,
+    args: [],
+    res,
+    onStdout() {},
+    onEvent: (event) => events.push(event),
+    onStderr: (text) => {
+      stderr += text;
+    },
+  });
+
+  const stdout = Buffer.from('{"type":"text.delta","text":"中文回调"}\n', "utf8");
+  const stdoutSplit = stdout.indexOf(Buffer.from("中")) + 1;
+  child.stdout.emit("data", stdout.subarray(0, stdoutSplit));
+  child.stdout.emit("data", stdout.subarray(stdoutSplit));
+
+  const stderrBytes = Buffer.from("错误信息", "utf8");
+  child.stderr.emit("data", stderrBytes.subarray(0, 2));
+  child.stderr.emit("data", stderrBytes.subarray(2));
+  child.emit("close", 0, null);
+
+  await completed;
+  assert.deepEqual(events, [{ type: "text.delta", text: "中文回调" }]);
+  assert.equal(stderr, "错误信息");
+  assert.doesNotMatch(`${events[0].text}${stderr}`, /�/);
+});
+
+test("child stream parses the final event without a trailing newline", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  const res = new EventEmitter();
+  res.write = () => {};
+  const events = [];
+  const completed = runChildStream({
+    spawnRunner: () => child,
+    args: [],
+    res,
+    onStdout() {},
+    onEvent: (event) => events.push(event),
+    onStderr() {},
+  });
+
+  child.stdout.emit("data", Buffer.from('{"type":"text.delta","text":"完成"}', "utf8"));
+  child.emit("close", 0, null);
+
+  await completed;
+  assert.deepEqual(events, [{ type: "text.delta", text: "完成" }]);
+});

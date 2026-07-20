@@ -207,14 +207,14 @@ function postMessage(
 /**
  * Build the HTTP callback instruction block that gets injected into agent prompts.
  * This teaches agents without native dynamic MCP support (Codex, opencode, etc.)
- * how to call back into the Shift server via curl.
+ * how to call back into the Shift server through the cross-platform Node client.
  *
- * sessionId is the active chat thread id. It is injected both into the curl
- * examples and (by the server) as the SHIFT_THREAD_ID env var, so agents can
- * quote $SHIFT_THREAD_ID instead of hard-coding it.
+ * sessionId is the active chat thread id. The client reads it from the
+ * SHIFT_THREAD_ID env var so agents never need to hard-code it.
  */
-function buildCallbackInstructions(apiUrl, _sessionId) {
-  // Curl examples intentionally use $SHIFT_THREAD_ID so agents do not hard-code ids.
+function buildCallbackInstructions(_apiUrl, _sessionId) {
+  // The Node client avoids shell-specific curl aliases, JSON quoting, and
+  // Windows PowerShell encoding behavior.
   return `<!-- ═══════════════════════════════════════════════════════════ -->
 <!-- MCP 回调工具说明（通过 HTTP 调用）                            -->
 <!-- 你可以在执行过程中主动发消息、查阅历史，不需要等执行结束      -->
@@ -226,9 +226,12 @@ function buildCallbackInstructions(apiUrl, _sessionId) {
 
 ## 发送消息到聊天室
 
-\`\`\`bash
-curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/json" -d "{\\"sessionId\\": \\"$SHIFT_THREAD_ID\\", \\"invocationId\\": \\"$SHIFT_INVOCATION_ID\\", \\"callbackToken\\": \\"$SHIFT_CALLBACK_TOKEN\\", \\"content\\": \\"你的消息\\"}"
+\`\`\`text
+node scripts/callback-client.js post-message --content "你的消息"
 \`\`\`
+
+多行或包含复杂引号时，先把消息以 UTF-8 写入临时文件，再使用
+\`--content-file <路径>\`，不要手工拼 JSON。
 
 用法示例：
 - 发现需要别人处理的问题 → 发消息/回复，行首 @ 对方（不要 spawn 子代理）
@@ -247,28 +250,22 @@ curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/
 
 ## 获取当前对话上下文
 
-\`\`\`bash
-curl -G ${apiUrl}/api/callbacks/thread-context -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" --data-urlencode "sessionId=$SHIFT_THREAD_ID" --data-urlencode "invocationId=$SHIFT_INVOCATION_ID"
+\`\`\`text
+node scripts/callback-client.js thread-context
 \`\`\`
 
 ## 列出本会话所有 invocation（谁跑了什么、什么状态）
 
-\`\`\`bash
-curl -G ${apiUrl}/api/callbacks/list-invocations -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" --data-urlencode "sessionId=$SHIFT_THREAD_ID" --data-urlencode "invocationId=$SHIFT_INVOCATION_ID"
+\`\`\`text
+node scripts/callback-client.js list-invocations
 \`\`\`
 
 返回：\`{ invocations: [{ invocationId, agent, startedAt, endedAt, state, eventCount }] }\`
 
 ## 搜索本会话历史（分层：memory / message / evidence）
 
-\`\`\`bash
-curl -G ${apiUrl}/api/callbacks/session-search \\
-  -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" \\
-  --data-urlencode "sessionId=$SHIFT_THREAD_ID" \\
-  --data-urlencode "invocationId=$SHIFT_INVOCATION_ID" \\
-  --data-urlencode "query=redis 端口" \\
-  --data-urlencode "limit=10" \\
-  --data-urlencode "layers=memory,message,evidence"
+\`\`\`text
+node scripts/callback-client.js session-search --query "redis 端口" --limit 10 --layers memory,message,evidence
 \`\`\`
 
 返回：\`{ query, limit, layers: { memory, message, evidence }, truncated, hits: [{ layer, score, snippet, sourceKind, sourceId, kind, invocationId, eventNo, memoryId? }] }\`。
@@ -280,14 +277,8 @@ curl -G ${apiUrl}/api/callbacks/session-search \\
 
 ## 读取某次 invocation 的完整事件流
 
-\`\`\`bash
-curl -G ${apiUrl}/api/callbacks/read-invocation \\
-  -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" \\
-  --data-urlencode "sessionId=$SHIFT_THREAD_ID" \\
-  --data-urlencode "invocationId=$SHIFT_INVOCATION_ID" \\
-  --data-urlencode "targetInvocationId=<invocationId>" \\
-  --data-urlencode "from=0" \\
-  --data-urlencode "limit=200"
+\`\`\`text
+node scripts/callback-client.js read-invocation --target <invocationId> --from 0 --limit 200
 \`\`\`
 
 返回：\`{ invocationId, events: [...], total, from, limit }\`

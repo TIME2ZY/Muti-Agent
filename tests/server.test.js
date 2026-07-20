@@ -1979,10 +1979,11 @@ test("postMessage allows callbacks for the bound thread (stamped by registerThre
   callbacks.unregisterThread(sessionId);
 });
 
-test("prompt template injects SHIFT_THREAD_ID and sessionId in the curl command", () => {
+test("prompt template uses the cross-platform callback client", () => {
   const instructions = callbacks.buildCallbackInstructions("http://127.0.0.1:8787");
   assert.match(instructions, /\$SHIFT_THREAD_ID/);
-  assert.match(instructions, /\\"sessionId\\": \\"\$SHIFT_THREAD_ID\\"/);
+  assert.match(instructions, /node scripts\/callback-client\.js post-message/);
+  assert.doesNotMatch(instructions, /curl -X POST/);
   assert.match(instructions, /TTL/);
 });
 
@@ -2382,11 +2383,11 @@ test("/api/callbacks/read-invocation pagination slices correctly", async () => {
   });
 });
 
-test("buildCallbackInstructions mentions all 3 new endpoints", () => {
+test("buildCallbackInstructions mentions all 3 recall commands", () => {
   const tpl = callbacks.buildCallbackInstructions("http://127.0.0.1:8787");
-  assert.match(tpl, /\/api\/callbacks\/list-invocations/);
-  assert.match(tpl, /\/api\/callbacks\/session-search/);
-  assert.match(tpl, /\/api\/callbacks\/read-invocation/);
+  assert.match(tpl, /callback-client\.js list-invocations/);
+  assert.match(tpl, /callback-client\.js session-search/);
+  assert.match(tpl, /callback-client\.js read-invocation/);
   assert.match(tpl, /不要凭印象猜/);
 });
 
@@ -3100,17 +3101,16 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
 
 // ── Recall (memory/回忆) tests ────────────────────────────────
 
-test("buildCallbackInstructions includes sessionId, SHIFT_THREAD_ID and recall routes", () => {
+test("buildCallbackInstructions includes SHIFT context and recall commands", () => {
   const instructions = callbacks.buildCallbackInstructions("http://example.test", "session-xyz");
   assert.match(instructions, /\$SHIFT_THREAD_ID/);
-  assert.ok(instructions.includes("sessionId=$SHIFT_THREAD_ID"), "should reference sessionId=$SHIFT_THREAD_ID");
-  assert.ok(instructions.includes('\\"sessionId\\": \\"$SHIFT_THREAD_ID\\"'), "post-message body should include sessionId");
-  assert.match(instructions, /\/api\/callbacks\/list-invocations/);
-  assert.match(instructions, /\/api\/callbacks\/session-search/);
-  assert.match(instructions, /\/api\/callbacks\/read-invocation/);
+  assert.match(instructions, /callback-client\.js post-message/);
+  assert.match(instructions, /callback-client\.js list-invocations/);
+  assert.match(instructions, /callback-client\.js session-search/);
+  assert.match(instructions, /callback-client\.js read-invocation/);
   assert.match(instructions, /layer=memory/);
   assert.match(instructions, /Active Memories/);
-  assert.match(instructions, /layers=memory,message,evidence/);
+  assert.match(instructions, /--layers memory,message,evidence/);
 });
 
 test("chat records invocation events and recall routes expose them (no token = frontend path)", async () => {
