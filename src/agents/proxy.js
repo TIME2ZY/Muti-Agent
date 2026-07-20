@@ -1,19 +1,18 @@
 /**
  * Shared + per-provider proxy resolution for CLI children.
  *
- * Global (all providers), first non-empty wins:
+ * Global (all providers), first non-empty wins — prefer this in .env:
  *   1. explicit option / --proxy
  *   2. INVOKE_CLI_PROXY
  *   3. HTTPS_PROXY / HTTP_PROXY (and lowercase)
  *   4. ALL_PROXY / all_proxy
  *
- * Grok-only (applied only when spawning the grok CLI):
+ * Grok-only override (only when spawning the grok CLI; optional):
  *   GROK_PROXY | INVOKE_GROK_PROXY | GROK_HTTP_PROXY | GROK_HTTPS_PROXY
  *   then falls back to the global list above.
  *
- * Why Grok-only exists: Grok Build CLI often needs an explicit HTTP(S) proxy
- * to reach api.x.ai, while OpenCode (e.g. DeepSeek) and Codex (ChatGPT +
- * Windows system proxy) may work without forcing the same env onto them.
+ * Prefer INVOKE_CLI_PROXY when every CLI should share one proxy. Keep
+ * GROK_PROXY only if Grok needs a different endpoint than Codex/OpenCode.
  */
 
 function firstNonEmpty(...values) {

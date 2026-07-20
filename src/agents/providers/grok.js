@@ -312,7 +312,7 @@ const grokProvider = {
   diagnostics(options = {}) {
     if (options.proxy) return [];
     return [
-      "[invoke-cli] no proxy for grok; if requests hang, set GROK_PROXY=http://127.0.0.1:7892 (Grok-only) or INVOKE_CLI_PROXY / HTTPS_PROXY",
+      "[invoke-cli] no proxy for grok; if requests hang, set INVOKE_CLI_PROXY=http://127.0.0.1:7892 (all CLIs) or GROK_PROXY (Grok-only)",
     ];
   },
   validate(config) {
