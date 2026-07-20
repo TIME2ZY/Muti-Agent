@@ -67,13 +67,13 @@ function createCallbackRoutes({
       const postOptions = { appendToSession };
       if (durableRecorder) postOptions.durableRecorder = durableRecorder;
       if (memoryCapture) postOptions.memoryCapture = memoryCapture;
-      const ok = callbacks.postMessage(sessionId, invocationId, content, postOptions);
-      if (!ok) {
+      const result = callbacks.postMessage(sessionId, invocationId, content, postOptions);
+      if (!result) {
         sendJson(res, 410, { error: "Thread no longer active; message was not delivered." });
         return true;
       }
 
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, result);
       return true;
     }
 

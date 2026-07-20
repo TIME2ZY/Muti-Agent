@@ -132,11 +132,19 @@ async function execute(command, options, env, fetchImpl = globalThis.fetch, cwd 
   return value;
 }
 
+function exitCodeForResult(command, result) {
+  if (command !== "post-message") return 0;
+  if (result?.handoff?.repairRequired) return 2;
+  if (result?.handoff?.detected && !result?.handoff?.accepted) return 3;
+  return 0;
+}
+
 async function main() {
   try {
     const { command, options } = parseArgs(process.argv.slice(2));
     const result = await execute(command, options, process.env);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    process.exitCode = exitCodeForResult(command, result);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
@@ -152,4 +160,5 @@ module.exports = {
   readMessageContent,
   buildRequest,
   execute,
+  exitCodeForResult,
 };

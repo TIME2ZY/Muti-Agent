@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const { finalizeA2ARoutes } = require("../../src/agents/a2a-finalize");
 const { DECISIONS } = require("../../src/agents/handoff-policy");
+const { summarizeHandoffOutcome } = require("../../src/agents/callbacks");
 
 function completeHandoffText(to = "opencode") {
   return [
@@ -141,4 +142,48 @@ test("max depth skips enqueue even when handoff is ok", () => {
   assert.equal(result.skipped.length, 1);
   assert.equal(result.skipped[0].reason, "max_depth");
   assert.deepEqual(worklist, ["codex"]);
+});
+
+test("callback handoff summary separates accepted, repair, and skipped states", () => {
+  assert.deepEqual(
+    summarizeHandoffOutcome({
+      mentions: ["gemini"],
+      enqueued: [{ to: "gemini" }],
+      repairs: [],
+      skipped: [],
+      mode: "balanced",
+    }),
+    {
+      status: "accepted",
+      detected: true,
+      accepted: true,
+      repairRequired: false,
+      mentionedAgents: ["gemini"],
+      queuedAgents: ["gemini"],
+      repairAgents: [],
+      skippedAgents: [],
+      policy: "balanced",
+    }
+  );
+
+  const repair = summarizeHandoffOutcome({
+    mentions: ["gemini"],
+    enqueued: [],
+    repairs: [{ to: "gemini" }],
+    skipped: [],
+    mode: "balanced",
+  });
+  assert.equal(repair.status, "repair_required");
+  assert.equal(repair.repairRequired, true);
+  assert.deepEqual(repair.queuedAgents, []);
+
+  const skipped = summarizeHandoffOutcome({
+    mentions: ["gemini"],
+    enqueued: [],
+    repairs: [],
+    skipped: [{ to: "gemini" }],
+    mode: "balanced",
+  });
+  assert.equal(skipped.status, "skipped");
+  assert.equal(skipped.accepted, false);
 });

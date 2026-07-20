@@ -111,6 +111,36 @@ function validateToken(threadId, invocationId, callbackToken) {
   return record.callbackToken === callbackToken;
 }
 
+function summarizeHandoffOutcome(finalized) {
+  const mentions = finalized?.mentions || [];
+  const enqueued = finalized?.enqueued || [];
+  const repairs = finalized?.repairs || [];
+  const skipped = finalized?.skipped || [];
+  const queuedAgents = enqueued.map((entry) => entry.to);
+  const repairAgents = repairs.map((entry) => entry.to).filter(Boolean);
+  const skippedAgents = skipped.map((entry) => entry.to).filter(Boolean);
+  const detected = mentions.length > 0;
+  const accepted = detected && enqueued.length === mentions.length;
+  const repairRequired = repairs.length > 0;
+  let status = "none";
+  if (accepted) status = "accepted";
+  else if (enqueued.length > 0) status = "partial";
+  else if (repairRequired) status = "repair_required";
+  else if (detected) status = "skipped";
+
+  return {
+    status,
+    detected,
+    accepted,
+    repairRequired,
+    mentionedAgents: mentions,
+    queuedAgents,
+    repairAgents,
+    skippedAgents,
+    policy: finalized?.mode || "",
+  };
+}
+
 /**
  * Post a message from a running agent back to the chat.
  * Enforces Thread Affinity: if the registered thread has an explicit
@@ -120,7 +150,10 @@ function validateToken(threadId, invocationId, callbackToken) {
  * The message is:
  *  - persisted to the session file
  *  - broadcast as an SSE message event
- *  - scanned for @mentions; any new target agents are appended to the worklist
+ *  - scanned for @mentions; accepted target agents are appended to the worklist
+ * Returns false when delivery is rejected, otherwise a structured delivery and
+ * handoff outcome. Message delivery and handoff acceptance are intentionally
+ * separate states.
  */
 function postMessage(
   threadId,
@@ -177,7 +210,7 @@ function postMessage(
     Object.entries(AGENTS).map(([id, config]) => [id, config.label || id])
   );
   const routeInvocationId = currentInvocationId || invocationId;
-  finalizeA2ARoutes({
+  const finalized = finalizeA2ARoutes({
     text: content,
     fromAgent: agent,
     threadId: thread.sessionId || threadId,
@@ -201,7 +234,22 @@ function postMessage(
     logger: console,
   });
 
-  return true;
+  const result = {
+    ok: true,
+    messagePosted: true,
+    handoff: summarizeHandoffOutcome(finalized),
+  };
+  if (currentInvocationId) {
+    transcript.appendEvent(
+      thread.sessionId || threadId,
+      currentInvocationId,
+      "callback-outcome",
+      result
+    );
+    durableRecorder?.appendInvocationEvent(currentInvocationId, "callback-outcome", result);
+  }
+  if (record) record.lastCallbackOutcome = result;
+  return result;
 }
 
 /**
@@ -247,6 +295,8 @@ node scripts/callback-client.js post-message --content "你的消息"
 - 不要 @ 自己
 - \`sessionId\` 必须使用 \`$SHIFT_THREAD_ID\`，不要伪造
 - callbackToken 有 TTL（默认 30 分钟），过期会 401
+- 只有返回的 \`handoff.status=accepted\` 才表示目标 Agent 已入队
+- \`repair_required\` 或退出码 2 表示消息已发布，但交接未成功；必须补全 handoff 后重试
 
 ## 获取当前对话上下文
 
@@ -298,6 +348,7 @@ module.exports = {
   createInvocation,
   validateToken,
   postMessage,
+  summarizeHandoffOutcome,
   buildCallbackInstructions,
   sendSse,
 };

@@ -1643,7 +1643,10 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
     appendToSession: appendFn,
   });
 
-  assert.equal(ok, true);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.messagePosted, true);
+  assert.equal(ok.handoff.status, "accepted");
+  assert.deepEqual(ok.handoff.queuedAgents, ["gemini"]);
   assert.equal(appended.length, 2);
   assert.equal(appended[0].msg.role, "assistant");
   assert.equal(appended[0].msg.agent, "codex");
@@ -1667,7 +1670,7 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   const ok2 = callbacks.postMessage(sessionId, invocationId, "@Gemini 请按补充意见继续", {
     appendToSession: appendFn,
   });
-  assert.equal(ok2, true);
+  assert.equal(ok2.handoff.status, "accepted");
   assert.deepEqual(worklist, ["codex", "gemini", "gemini"]);
   assert.equal(threadCtx.a2aCount, 2);
 
@@ -1716,7 +1719,7 @@ test("callbacks.postMessage captures structured handoff only for an enqueued tar
       },
     });
 
-    assert.equal(ok, true);
+    assert.equal(ok.handoff.status, "accepted");
     assert.equal(captured.length, 1);
     assert.equal(captured[0].fromAgent, "codex");
     assert.equal(captured[0].toAgent, "gemini");
@@ -1774,7 +1777,9 @@ test("callbacks.postMessage captures handoff even when A2A max depth skips enque
       },
     });
 
-    assert.equal(ok, true);
+    assert.equal(ok.handoff.status, "skipped");
+    assert.equal(ok.handoff.accepted, false);
+    assert.deepEqual(ok.handoff.skippedAgents, ["gemini"]);
     assert.equal(captured.length, 1);
     assert.equal(captured[0].toAgent, "gemini");
     assert.equal(captured[0].windowId, "window-depth-1");
@@ -1970,7 +1975,8 @@ test("postMessage allows callbacks for the bound thread (stamped by registerThre
     appendToSession: appendFn,
   });
 
-  assert.equal(ok, true);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.handoff.status, "none");
   assert.equal(appended.length, 1);
   // sendSse writes two lines per event (event: + data:), so count by event name.
   const eventNames = sseEvents.filter((line) => line.startsWith("event: ")).map((line) => line.trim());

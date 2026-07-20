@@ -73,3 +73,35 @@ test("callback client validates required environment and arguments", () => {
     options: { content: "你好" },
   });
 });
+
+test("callback client exit codes distinguish delivery from handoff acceptance", () => {
+  assert.equal(
+    callbackClient.exitCodeForResult("post-message", {
+      handoff: { status: "accepted", detected: true, accepted: true, repairRequired: false },
+    }),
+    0
+  );
+  assert.equal(
+    callbackClient.exitCodeForResult("post-message", {
+      handoff: {
+        status: "repair_required",
+        detected: true,
+        accepted: false,
+        repairRequired: true,
+      },
+    }),
+    2
+  );
+  assert.equal(
+    callbackClient.exitCodeForResult("post-message", {
+      handoff: { status: "skipped", detected: true, accepted: false, repairRequired: false },
+    }),
+    3
+  );
+  assert.equal(
+    callbackClient.exitCodeForResult("post-message", {
+      handoff: { status: "none", detected: false, accepted: false, repairRequired: false },
+    }),
+    0
+  );
+});
