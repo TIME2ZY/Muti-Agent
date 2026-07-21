@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const test = require("node:test");
 
-const runtimePaths = require("../../src/server/runtime-paths");
+const runtimePaths = require("../../src/shared/runtime-paths");
 
 test("runtime paths live under data/runtime", () => {
   const root = path.resolve(__dirname, "../..");
@@ -15,5 +15,18 @@ test("runtime paths live under data/runtime", () => {
   assert.equal(runtimePaths.DEFAULT_SESSION_MAP_ROOT, path.join(runtimeDir, "session-maps"));
   assert.equal(runtimePaths.DEFAULT_TRANSCRIPT_DIR, path.join(runtimeDir, "transcripts"));
   assert.equal(runtimePaths.DEFAULT_WORKTREE_STATE_FILE, path.join(runtimeDir, "worktrees.json"));
+  assert.equal(runtimePaths.DEFAULT_RAW_EVENTS_DIR, path.join(runtimeDir, "raw-events"));
   assert.equal(runtimePaths.DEFAULT_MEMORY_DB_FILE, path.join(runtimeDir, "memory.sqlite"));
+});
+
+test("worktreeStateFileFor nests under root/data/runtime", () => {
+  const tmpRoot = path.join(path.sep === "\\" ? "C:\\tmp" : "/tmp", "shift-root");
+  assert.equal(
+    runtimePaths.worktreeStateFileFor(tmpRoot),
+    path.join(path.resolve(tmpRoot), "data", "runtime", "worktrees.json")
+  );
+  assert.equal(
+    runtimePaths.worktreeStateFileFor(runtimePaths.ROOT),
+    runtimePaths.DEFAULT_WORKTREE_STATE_FILE
+  );
 });

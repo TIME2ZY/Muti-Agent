@@ -1,4 +1,4 @@
-const { ROOT } = require("./runtime-paths");
+const { ROOT } = require("../shared/runtime-paths");
 const { sendSse } = require("./http-transport");
 const { StringDecoder } = require("node:string_decoder");
 
