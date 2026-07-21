@@ -1,12 +1,12 @@
 # Dependencies
 node_modules/
 npm-debug.log*
+*.log
 
 # Environment & secrets
 .env
 .env.*
 !.env.example
-.env.local
 *.pem
 *.key
 *.p12
@@ -16,20 +16,20 @@ npm-debug.log*
 credentials*
 *secret*
 
-# Tool cache & state
+# Local runtime data (created on demand; never commit)
+data/
 .shift/
+src/session/data/
+
+# Legacy root-level state (pre data/runtime migration)
+.invoke-*.json
+
+# Local tool caches / scratch
 .cat-cafe/
 .sisyphus/
-.invoke-chat-invocations.json
-.invoke-cli-session.json
-.invoke-chat-sessions.json
-.invoke-worktrees.json
-
-# Session data (user conversation logs)
-src/session/data/transcripts/
-data/transcripts/
-data/runtime/
-.reasonix/truncated-results/
+.reasonix/
+.playwright-cli/
+output/
 
 # IDE & OS
 .vscode/
@@ -41,9 +41,7 @@ data/runtime/
 Thumbs.db
 desktop.ini
 
-# Build output
+# Build artifacts
 dist/
 build/
-output/
-.playwright-cli/
 *.tsbuildinfo

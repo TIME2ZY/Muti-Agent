@@ -1,6 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { ROOT } = require("./runtime-paths");
+const { ROOT } = require("../shared/runtime-paths");
 const { parseSkillFrontmatter } = require("../shared/frontmatter");
 
 const DEFAULT_SKILLS_DIR = path.join(ROOT, "skills");

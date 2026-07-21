@@ -38,6 +38,19 @@ test("ensureWorktree creates a managed git worktree for a session", () => {
   assert.match(fs.readFileSync(path.join(meta.worktreeDir, ".env.local"), "utf8"), /SHIFT_WORKTREE=1/);
 });
 
+test("default worktree state file is under rootDir/data/runtime", () => {
+  const baseDir = makeGitRepo();
+  const manager = worktrees.createWorktreeManager({ rootDir: baseDir });
+  manager.ensureWorktree({ baseDir, sessionId: "state-path-session" });
+
+  const expectedState = path.join(baseDir, "data", "runtime", "worktrees.json");
+  assert.ok(fs.existsSync(expectedState), `expected state at ${expectedState}`);
+  assert.equal(fs.existsSync(path.join(baseDir, ".invoke-worktrees.json")), false);
+
+  const state = JSON.parse(fs.readFileSync(expectedState, "utf8"));
+  assert.ok(state.worktrees["state-path-session"]);
+});
+
 test("ensureWorktree reuses the same worktree for the same session", () => {
   const baseDir = makeGitRepo();
   const manager = worktrees.createWorktreeManager({ rootDir: baseDir });

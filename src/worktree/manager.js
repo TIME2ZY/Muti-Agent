@@ -4,8 +4,7 @@ const net = require("node:net");
 const path = require("node:path");
 const { assertValidOpaqueId, resolveInside } = require("../server/id-policy");
 const { ENV, LOCAL_STATE_DIR } = require("../shared/brand");
-
-const DEFAULT_STATE_FILE = ".invoke-worktrees.json";
+const { ROOT, worktreeStateFileFor } = require("../shared/runtime-paths");
 
 function sanitizeId(id) {
   return assertValidOpaqueId(id, "sessionId");
@@ -116,8 +115,8 @@ function killProcessTree(pid) {
 }
 
 function createWorktreeManager(opts = {}) {
-  const rootDir = path.resolve(opts.rootDir || __dirname);
-  const stateFile = path.resolve(opts.stateFile || path.join(rootDir, DEFAULT_STATE_FILE));
+  const rootDir = path.resolve(opts.rootDir || ROOT);
+  const stateFile = path.resolve(opts.stateFile || worktreeStateFileFor(rootDir));
 
   function load() {
     return readState(stateFile);

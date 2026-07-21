@@ -10,6 +10,14 @@ const DEFAULT_WORKTREE_STATE_FILE = path.join(RUNTIME_DATA_DIR, "worktrees.json"
 const DEFAULT_RAW_EVENTS_DIR = path.join(RUNTIME_DATA_DIR, "raw-events");
 const DEFAULT_MEMORY_DB_FILE = path.join(RUNTIME_DATA_DIR, "memory.sqlite");
 
+/**
+ * Worktree state file under a given app root (tests may use a temp root).
+ * Production default equals DEFAULT_WORKTREE_STATE_FILE when rootDir is ROOT.
+ */
+function worktreeStateFileFor(rootDir) {
+  return path.join(path.resolve(rootDir), "data", "runtime", "worktrees.json");
+}
+
 module.exports = {
   ROOT,
   RUNTIME_DATA_DIR,
@@ -20,4 +28,5 @@ module.exports = {
   DEFAULT_WORKTREE_STATE_FILE,
   DEFAULT_RAW_EVENTS_DIR,
   DEFAULT_MEMORY_DB_FILE,
+  worktreeStateFileFor,
 };
