@@ -338,6 +338,79 @@
     };
   }
 
+  /**
+   * Adjacent same-kind merge for thinking/text segments (mirrors durable strategy A).
+   * @param {Array<{kind: string, text: string}>|null|undefined} segments
+   * @param {"thinking"|"text"} kind
+   * @param {string} text
+   * @returns {Array<{kind: string, text: string}>}
+   */
+  function appendContentSegment(segments, kind, text) {
+    const list = Array.isArray(segments) ? segments : [];
+    const chunk = typeof text === "string" ? text : "";
+    if (!chunk || (kind !== "thinking" && kind !== "text")) return list;
+    const last = list[list.length - 1];
+    if (last && last.kind === kind) {
+      last.text += chunk;
+      return list;
+    }
+    list.push({ kind, text: chunk });
+    return list;
+  }
+
+  /** Join segment bodies for a kind (read-time full text). */
+  function joinSegmentText(segments, kind) {
+    if (!Array.isArray(segments) || !kind) return "";
+    let out = "";
+    for (const seg of segments) {
+      if (seg && seg.kind === kind && typeof seg.text === "string") out += seg.text;
+    }
+    return out;
+  }
+
+  /**
+   * Build interleaved content segments from durable or live events.
+   * Adjacent same-kind deltas are merged; kind switches open a new segment.
+   * @param {Array<object>} events
+   * @returns {Array<{kind: "thinking"|"text", text: string}>}
+   */
+  function buildContentSegmentsFromEvents(events) {
+    const segments = [];
+    for (const evt of events || []) {
+      if (!evt || typeof evt !== "object") continue;
+      const type = evt.kind || evt.type || "";
+      const payload =
+        evt.payload && typeof evt.payload === "object" && !evt.type ? evt.payload : evt;
+      const text =
+        typeof payload.text === "string"
+          ? payload.text
+          : typeof payload.content === "string"
+            ? payload.content
+            : "";
+      if (!text) continue;
+      if (type === "thinking.delta" || type === "thinking.final" || type === "thinking") {
+        appendContentSegment(segments, "thinking", text);
+      } else if (type === "text.delta" || type === "text.final" || type === "text") {
+        appendContentSegment(segments, "text", text);
+      }
+    }
+    return segments;
+  }
+
+  function fallbackSegmentsFromItem(item) {
+    const segments = [];
+    if (item && Array.isArray(item.segments) && item.segments.length) {
+      return item.segments.map((s) => ({ kind: s.kind, text: s.text || "" }));
+    }
+    if (item && item.thinkingText) {
+      appendContentSegment(segments, "thinking", item.thinkingText);
+    }
+    if (item && item.rawText) {
+      appendContentSegment(segments, "text", item.rawText);
+    }
+    return segments;
+  }
+
   function createMessageView(deps) {
     const {
       messagesEl,
@@ -698,6 +771,7 @@
           setBadge,
           _liveTextEl: liveText,
           thinkingText: "",
+          segments: [],
           progressItems: [],
         };
       }
@@ -722,99 +796,239 @@
       return { wrapper, bubble, meta, setBadge, contentEl };
     }
 
-    function ensureThinkingPanel(liveItem) {
-      if (!liveItem || !liveItem.bubble) return null;
-      let details = liveItem.bubble.querySelector(".msg-thinking");
-      if (details) return details;
-      details = document.createElement("details");
+    function thinkingSummaryLabel(text) {
+      const chars = (text || "").length;
+      const base = msg.thinkingProcess || "思考过程";
+      if (chars <= 0) return base;
+      return typeof msg.thinkingProcessChars === "function"
+        ? msg.thinkingProcessChars(chars)
+        : `${base} · ${chars} 字`;
+    }
+
+    function createThinkingSegmentEl(text, options = {}) {
+      const details = document.createElement("details");
       details.className = "msg-thinking";
-      details.open = false;
+      details.dataset.segKind = "thinking";
+      details.open = options.open === true;
+      if (options.live) details.dataset.live = "true";
+      else details.removeAttribute("data-live");
       const summary = document.createElement("summary");
       summary.className = "msg-thinking-summary";
-      summary.textContent = msg.thinkingProcess || "思考过程";
+      summary.textContent = thinkingSummaryLabel(text);
       const body = document.createElement("pre");
       body.className = "msg-thinking-body";
+      body.textContent = text || "";
       details.append(summary, body);
-      // Place thinking above progress / process / live text.
-      liveItem.bubble.insertBefore(details, liveItem.bubble.firstChild);
       return details;
     }
 
-    function paintThinkingPanel(liveItem, text) {
-      if (!liveItem || !liveItem.bubble) return;
-      const details = ensureThinkingPanel(liveItem);
+    function updateThinkingSegmentEl(details, text, options = {}) {
       if (!details) return;
-      details.dataset.live = "true";
+      if (options.live) details.dataset.live = "true";
+      else details.removeAttribute("data-live");
+      if (options.open === true) details.open = true;
+      if (options.open === false) details.open = false;
       const body = details.querySelector(".msg-thinking-body");
       if (body) body.textContent = text || "";
       const summary = details.querySelector(".msg-thinking-summary");
-      if (summary) {
-        const chars = (text || "").length;
-        const base = msg.thinkingProcess || "思考过程";
-        summary.textContent =
-          chars > 0
-            ? typeof msg.thinkingProcessChars === "function"
-              ? msg.thinkingProcessChars(chars)
-              : `${base} · ${chars} 字`
-            : base;
-      }
+      if (summary) summary.textContent = thinkingSummaryLabel(text);
     }
 
-    let _thinkingRafId = null;
-    /** @type {Map<string, object>} key → liveItem (text on item.thinkingText) */
-    let _thinkingPending = new Map();
-
-    function _flushThinkingRaf() {
-      for (const item of _thinkingPending.values()) {
-        if (item && item.bubble) paintThinkingPanel(item, item.thinkingText || "");
+    /**
+     * Ensure the interleaved stream container exists. Progress / process panels
+     * stay outside so tools do not break the think↔text timeline.
+     */
+    function ensureStreamRoot(liveItem) {
+      if (!liveItem || !liveItem.bubble) return null;
+      let root = liveItem.bubble.querySelector(":scope > .msg-stream-segments");
+      if (root) return root;
+      root = document.createElement("div");
+      root.className = "msg-stream-segments";
+      const process =
+        liveItem.bubble.querySelector(":scope > .msg-process") ||
+        liveItem.bubble.querySelector(":scope > .live-subagents");
+      const progress =
+        liveItem.bubble.querySelector(":scope > .msg-progress") ||
+        liveItem.bubble.querySelector(":scope > .msg-progress-wrap");
+      const status = liveItem.bubble.querySelector(":scope > .live-process-status");
+      const anchor = process || status || null;
+      if (anchor) liveItem.bubble.insertBefore(root, anchor);
+      else if (progress && progress.nextSibling) {
+        liveItem.bubble.insertBefore(root, progress.nextSibling);
+      } else if (progress) {
+        progress.after(root);
+      } else {
+        liveItem.bubble.appendChild(root);
       }
-      _thinkingPending.clear();
-      _thinkingRafId = null;
+      return root;
+    }
+
+    /**
+     * Paint thinking/text segments in timeline order (adjacent same-kind merged).
+     * @param {object} liveItem
+     * @param {{ live?: boolean, markdown?: boolean, copyBtn?: HTMLElement }} [options]
+     */
+    function paintStreamSegments(liveItem, options = {}) {
+      if (!liveItem || !liveItem.bubble) return;
+      const live = options.live !== false;
+      const useMarkdown = options.markdown === true || live === false;
+      const segments = Array.isArray(liveItem.segments) ? liveItem.segments : [];
+      if (segments.length === 0) {
+        liveItem.thinkingText = "";
+        liveItem.rawText = liveItem.rawText || "";
+        return;
+      }
+      const root = ensureStreamRoot(liveItem);
+      if (!root) return;
+
+      // Drop the bootstrap single live-text node once the stream root owns text.
+      if (
+        liveItem._liveTextEl &&
+        liveItem._liveTextEl.parentNode === liveItem.bubble &&
+        segments.length > 0
+      ) {
+        liveItem._liveTextEl.remove();
+      }
+
+      while (root.children.length > segments.length) {
+        root.removeChild(root.lastChild);
+      }
+
+      let lastTextEl = null;
+      for (let i = 0; i < segments.length; i += 1) {
+        const seg = segments[i];
+        const kind = seg && seg.kind === "thinking" ? "thinking" : "text";
+        const text = (seg && seg.text) || "";
+        let el = root.children[i] || null;
+
+        if (kind === "thinking") {
+          if (!el || el.dataset.segKind !== "thinking") {
+            const next = createThinkingSegmentEl(text, {
+              live,
+              open: false,
+            });
+            if (el) root.replaceChild(next, el);
+            else root.appendChild(next);
+            el = next;
+          } else {
+            updateThinkingSegmentEl(el, text, { live, open: false });
+          }
+        } else if (live && !useMarkdown) {
+          if (!el || el.dataset.segKind !== "text" || !el.classList.contains("stream-live-text")) {
+            const next = document.createElement("div");
+            next.className = "stream-live-text";
+            next.dataset.segKind = "text";
+            next.textContent = text;
+            if (el) root.replaceChild(next, el);
+            else root.appendChild(next);
+            el = next;
+          } else {
+            el.textContent = text;
+          }
+          lastTextEl = el;
+        } else {
+          if (!el || el.dataset.segKind !== "text" || !el.classList.contains("msg-final-content")) {
+            const next = document.createElement("div");
+            next.className = "msg-final-content";
+            next.dataset.segKind = "text";
+            next.dataset.segText = text;
+            if (el) root.replaceChild(next, el);
+            else root.appendChild(next);
+            el = next;
+            paintFinalMarkdown(el, text, { copyBtn: options.copyBtn, host: liveItem });
+          } else if (el.dataset.segText !== text) {
+            el.dataset.segText = text;
+            paintFinalMarkdown(el, text, { copyBtn: options.copyBtn, host: liveItem });
+          }
+          lastTextEl = el;
+        }
+      }
+
+      liveItem._liveTextEl = lastTextEl;
+      liveItem.thinkingText = joinSegmentText(segments, "thinking");
+      liveItem.rawText = joinSegmentText(segments, "text");
+    }
+
+    let _streamRafId = null;
+    /** @type {Map<string, object>} key → liveItem */
+    let _streamPending = new Map();
+
+    function _flushStreamRaf() {
+      for (const item of _streamPending.values()) {
+        if (item && item.bubble) paintStreamSegments(item, { live: true, markdown: false });
+      }
+      _streamPending.clear();
+      _streamRafId = null;
       scheduleScrollDown();
     }
 
     function flushPendingThinkingRender() {
-      if (_thinkingRafId != null) {
-        cancelAnimationFrame(_thinkingRafId);
-        _thinkingRafId = null;
-        _flushThinkingRaf();
+      if (_streamRafId != null) {
+        cancelAnimationFrame(_streamRafId);
+        _streamRafId = null;
+        _flushStreamRaf();
       }
     }
 
     /**
+     * Schedule (or immediately paint) interleaved stream segments for a live item.
      * @param {object} liveItem
-     * @param {string} text
      * @param {{ immediate?: boolean, key?: string }} [options]
      */
-    function updateThinkingPanel(liveItem, text, options = {}) {
-      if (!liveItem || !text) return;
-      liveItem.thinkingText = text;
-      if (!liveItem.bubble) return;
+    function scheduleStreamPaint(liveItem, options = {}) {
+      if (!liveItem || !liveItem.bubble) return;
       if (options.immediate === true) {
-        paintThinkingPanel(liveItem, text);
+        paintStreamSegments(liveItem, { live: true, markdown: false });
         return;
       }
       const key =
         options.key ||
         (liveItem.wrapper && liveItem.wrapper.dataset && liveItem.wrapper.dataset.agentId) ||
-        String(liveItem.thinkingText.length);
-      _thinkingPending.set(key, liveItem);
-      if (_thinkingRafId == null) {
-        _thinkingRafId = requestAnimationFrame(_flushThinkingRaf);
+        String((liveItem.segments && liveItem.segments.length) || 0);
+      _streamPending.set(key, liveItem);
+      if (_streamRafId == null) {
+        _streamRafId = requestAnimationFrame(_flushStreamRaf);
       }
+    }
+
+    /**
+     * Legacy helper: set cumulative thinking text as a single segment prefix.
+     * Prefer appendLiveSegment for timeline fidelity.
+     */
+    function updateThinkingPanel(liveItem, text, options = {}) {
+      if (!liveItem || !text) return;
+      liveItem.thinkingText = text;
+      if (!Array.isArray(liveItem.segments)) liveItem.segments = [];
+      // Rebuild: keep text segments, replace thinking as leading blocks is wrong.
+      // If segments empty, just one thinking segment; else if only text, prepend thinking once.
+      if (liveItem.segments.length === 0) {
+        liveItem.segments = [{ kind: "thinking", text }];
+      } else if (liveItem.segments.every((s) => s.kind === "text")) {
+        liveItem.segments = [{ kind: "thinking", text }, ...liveItem.segments];
+      } else {
+        // Update last thinking segment or first if present
+        let found = false;
+        for (let i = liveItem.segments.length - 1; i >= 0; i -= 1) {
+          if (liveItem.segments[i].kind === "thinking") {
+            liveItem.segments[i].text = text;
+            found = true;
+            break;
+          }
+        }
+        if (!found) appendContentSegment(liveItem.segments, "thinking", text);
+      }
+      scheduleStreamPaint(liveItem, options);
     }
 
     function ensureProgressList(liveItem) {
       if (!liveItem || !liveItem.bubble) return null;
-      let list = liveItem.bubble.querySelector(".msg-progress");
+      let list = liveItem.bubble.querySelector(":scope > .msg-progress");
       if (list) return list;
       list = document.createElement("ul");
       list.className = "msg-progress";
-      const thinking = liveItem.bubble.querySelector(".msg-thinking");
-      if (thinking && thinking.nextSibling) {
-        liveItem.bubble.insertBefore(list, thinking.nextSibling);
-      } else if (thinking) {
-        thinking.after(list);
+      const stream = liveItem.bubble.querySelector(":scope > .msg-stream-segments");
+      if (stream) {
+        liveItem.bubble.insertBefore(list, stream);
       } else if (liveItem._liveTextEl && liveItem._liveTextEl.parentNode === liveItem.bubble) {
         liveItem.bubble.insertBefore(list, liveItem._liveTextEl);
       } else {
@@ -854,6 +1068,8 @@
       if (!isViewingSession(sid)) {
         rt.liveMessages.set(agent, {
           rawText: "",
+          thinkingText: "",
+          segments: [],
           invocationId: rt.liveInvocations.get(agent) || null,
           detached: true,
           setBadge() {},
@@ -864,6 +1080,8 @@
       const item = createMessage({ role: "assistant", agent, content: "" });
       item.setBadge("thinking");
       item.rawText = "";
+      item.thinkingText = "";
+      item.segments = [];
       item.invocationId = rt.liveInvocations.get(agent) || null;
       rt.liveMessages.set(agent, item);
     }
@@ -951,7 +1169,11 @@
       summary.textContent = msg.process || "执行过程";
       details.append(summary, panel);
 
-      if (liveItem._liveTextEl && liveItem._liveTextEl.parentNode === liveItem.bubble) {
+      const stream = liveItem.bubble.querySelector(":scope > .msg-stream-segments");
+      if (stream) {
+        // Tools stay outside the think↔text timeline container.
+        stream.after(details);
+      } else if (liveItem._liveTextEl && liveItem._liveTextEl.parentNode === liveItem.bubble) {
         liveItem.bubble.insertBefore(details, liveItem._liveTextEl);
       } else {
         const content = liveItem.bubble.querySelector(".msg-final-content");
@@ -1071,70 +1293,79 @@
       }
     }
 
-    let _rafId = null;
-    let _rafPending = new Map();
-
-    function _flushRaf() {
-      for (const [key, raw] of _rafPending) {
-        const sep = key.indexOf("::");
-        const sid = sep === -1 ? state.currentSessionId : key.slice(0, sep);
-        const agent = sep === -1 ? key : key.slice(sep + 2);
-        if (!isViewingSession(sid)) continue;
-        const item = sessionRuntime(sid).liveMessages.get(agent);
-        if (!item || !item._liveTextEl) continue;
-        item._liveTextEl.textContent = raw;
-      }
-      _rafPending.clear();
-      _rafId = null;
-      scheduleScrollDown();
-    }
-
     function flushPendingLiveRender(sessionId) {
-      if (_rafId) {
-        cancelAnimationFrame(_rafId);
-        _rafId = null;
-        _flushRaf();
-      }
       flushPendingThinkingRender();
       void sessionId;
     }
 
-    function appendLive(agent, text, sessionId) {
+    /**
+     * Ensure a live message item exists (viewing DOM or detached buffer).
+     */
+    function ensureLiveItem(agent, sessionId, options = {}) {
       const sid = sessionId || state.currentSessionId || "_pending";
       const rt = sessionRuntime(sid);
       const viewing = isViewingSession(sid);
+      const existing = rt.liveMessages.get(agent);
+      if (existing && !existing.detached) return existing;
 
-      if (!rt.liveMessages.has(agent) || rt.liveMessages.get(agent)?.detached) {
-        if (viewing) {
-          const item = createMessage({ role: "assistant", agent });
-          item.rawText = rt.liveMessages.get(agent)?.rawText || "";
-          item.invocationId = rt.liveInvocations.get(agent) || null;
-          item.setBadge("writing");
-          rt.liveMessages.set(agent, item);
-        } else {
-          const prev = rt.liveMessages.get(agent);
-          rt.liveMessages.set(agent, {
-            rawText: (prev && prev.rawText) || "",
-            invocationId: rt.liveInvocations.get(agent) || null,
-            detached: true,
-            setBadge() {},
-          });
-        }
+      if (!viewing) {
+        const prev = existing;
+        const item = {
+          rawText: (prev && prev.rawText) || "",
+          thinkingText: (prev && prev.thinkingText) || "",
+          segments: Array.isArray(prev && prev.segments)
+            ? prev.segments.map((s) => ({ kind: s.kind, text: s.text || "" }))
+            : [],
+          invocationId: (prev && prev.invocationId) || rt.liveInvocations.get(agent) || null,
+          detached: true,
+          setBadge() {},
+        };
+        rt.liveMessages.set(agent, item);
+        return item;
       }
 
-      const item = rt.liveMessages.get(agent);
-      item.rawText = (item.rawText || "") + (text || "");
+      const item = createMessage({ role: "assistant", agent });
+      const prev = existing;
+      item.rawText = (prev && prev.rawText) || "";
+      item.thinkingText = (prev && prev.thinkingText) || "";
+      item.segments = Array.isArray(prev && prev.segments)
+        ? prev.segments.map((s) => ({ kind: s.kind, text: s.text || "" }))
+        : [];
+      item.invocationId =
+        (prev && prev.invocationId) || rt.liveInvocations.get(agent) || null;
+      if (options.badge && item.setBadge) item.setBadge(options.badge);
+      rt.liveMessages.set(agent, item);
+      return item;
+    }
+
+    /**
+     * Append a thinking or text streak fragment; merges adjacent same-kind.
+     * Live SSE may be fine-grained — display still coalesces visually.
+     */
+    function appendLiveSegment(agent, kind, text, sessionId) {
+      const chunk = typeof text === "string" ? text : "";
+      if (!chunk || (kind !== "thinking" && kind !== "text")) return;
+      const sid = sessionId || state.currentSessionId || "_pending";
+      const viewing = isViewingSession(sid);
+      const item = ensureLiveItem(agent, sid, {
+        badge: kind === "text" ? "writing" : "thinking",
+      });
+      if (!Array.isArray(item.segments)) item.segments = [];
+      appendContentSegment(item.segments, kind, chunk);
+      item.rawText = joinSegmentText(item.segments, "text");
+      item.thinkingText = joinSegmentText(item.segments, "thinking");
 
       if (!viewing) return;
 
       hideEmpty();
       ensureSpacer();
       if (item.bubble) item.bubble.classList.remove("msg-bubble-live-pending");
-      if (item.setBadge) item.setBadge("writing");
+      if (item.setBadge) item.setBadge(kind === "text" ? "writing" : "thinking");
+      scheduleStreamPaint(item, { key: `${sid}::${agent}` });
+    }
 
-      // DOM text paint + scroll both coalesced to the next animation frame.
-      _rafPending.set(`${sid}::${agent}`, item.rawText);
-      if (!_rafId) _rafId = requestAnimationFrame(_flushRaf);
+    function appendLive(agent, text, sessionId) {
+      appendLiveSegment(agent, "text", text, sessionId);
     }
 
     function ensureLiveRun(event, sessionId) {
@@ -1149,6 +1380,7 @@
           agent: event.agent,
           text: "",
           thinking: "",
+          segments: [],
           progressItems: [],
           tools: [],
           diagnostics: [],
@@ -1174,27 +1406,26 @@
       }
 
       if (event.type === "text.delta") {
-        run.text += event.text || "";
+        const chunk = event.text || "";
+        run.text += chunk;
+        if (!Array.isArray(run.segments)) run.segments = [];
+        appendContentSegment(run.segments, "text", chunk);
         run.status = "writing";
-        appendLive(event.agent, event.text || "", sid);
+        appendLiveSegment(event.agent, "text", chunk, sid);
         return;
       }
 
       if (event.type === "thinking.delta") {
         // Capability-driven: still record text for run state, but skip thinking UI
         // when the provider does not advertise thinking streams.
-        run.thinking += event.text || "";
+        const chunk = event.text || "";
+        run.thinking += chunk;
+        if (!Array.isArray(run.segments)) run.segments = [];
+        appendContentSegment(run.segments, "thinking", chunk);
         if (typeof shouldRenderThinking === "function" && !shouldRenderThinking(caps)) {
           return;
         }
-        const rt = sessionRuntime(sid);
-        if (!rt.liveMessages.has(event.agent)) showThinking(event.agent, sid);
-        const item = rt.liveMessages.get(event.agent);
-        if (item && isViewingSession(sid)) {
-          updateThinkingPanel(item, run.thinking, { key: `${sid}::${event.agent}` });
-        } else if (item) {
-          item.thinkingText = run.thinking;
-        }
+        appendLiveSegment(event.agent, "thinking", chunk, sid);
         return;
       }
 
@@ -1374,6 +1605,42 @@
       return true;
     }
 
+    /**
+     * Replace a history bubble's single content block with L1 interleaved
+     * thinking/text segments when durable events preserve the timeline.
+     */
+    function hydrateInterleavedContent(bubble, events, wrapper) {
+      if (!bubble) return false;
+      const segments = buildContentSegmentsFromEvents(events);
+      const hasThinking = segments.some((s) => s && s.kind === "thinking" && s.text);
+      if (!hasThinking || segments.length === 0) return false;
+
+      const copy = wrapper && wrapper.querySelector ? wrapper.querySelector(".msg-copy") : null;
+      // Remove flat history paint (single content / single thinking).
+      bubble
+        .querySelectorAll(
+          ":scope > .msg-final-content, :scope > .msg-thinking, :scope > .msg-stream-segments, :scope > .stream-live-text"
+        )
+        .forEach((el) => el.remove());
+
+      const item = {
+        bubble,
+        wrapper,
+        segments: segments.map((s) => ({ kind: s.kind, text: s.text || "" })),
+        rawText: joinSegmentText(segments, "text"),
+        thinkingText: joinSegmentText(segments, "thinking"),
+      };
+      paintStreamSegments(item, { live: false, markdown: true, copyBtn: copy || undefined });
+
+      if (copy) {
+        copy.onclick = null;
+        copy.addEventListener("click", () => {
+          copyToClipboard(item.rawText || "", copy, "✓", msg.copyFail || "失败");
+        });
+      }
+      return true;
+    }
+
     async function hydrateProcessTrace(bubble, invocationId) {
       if (!bubble || !invocationId) return;
       if (typeof fetchInvocationEvents !== "function") return;
@@ -1383,11 +1650,17 @@
         wrapper.dataset.usageEligible !== "false" &&
         !wrapper.querySelector(".msg-usage");
       const needsProcess = !bubble.querySelector(".msg-process, .live-subagents");
-      if (!needsUsage && !needsProcess) return;
+      const needsStream =
+        !bubble.querySelector(":scope > .msg-stream-segments") &&
+        Boolean(bubble.querySelector(":scope > .msg-final-content"));
+      if (!needsUsage && !needsProcess && !needsStream) return;
       try {
         const page = await fetchInvocationEvents(invocationId);
         if (!page.events || page.events.length === 0) return;
         if (needsUsage) renderMessageUsage(wrapper, aggregateInvocationUsage(page.events));
+        if (needsStream) {
+          hydrateInterleavedContent(bubble, page.events, wrapper);
+        }
         if (!needsProcess) return;
         // History hydrate: always collapsed so the answer is primary.
         const panel = buildProcessPanelFromTranscriptEvents(page.events, {
@@ -1395,8 +1668,10 @@
         });
         if (!panel) return;
         if (bubble.querySelector(".msg-process, .live-subagents")) return;
+        const stream = bubble.querySelector(":scope > .msg-stream-segments");
         const content = bubble.querySelector(".msg-final-content");
-        if (content) bubble.insertBefore(panel, content);
+        if (stream) bubble.insertBefore(panel, stream);
+        else if (content) bubble.insertBefore(panel, content);
         else bubble.insertBefore(panel, bubble.firstChild);
       } catch (error) {
         console.warn("Process trace hydrate failed:", error);
@@ -1492,30 +1767,41 @@
       if (preservedProcess) preservedProcess.remove();
       else if (preservedSubagents) preservedSubagents.remove();
 
-      const preservedThinking = item.bubble.querySelector(".msg-thinking");
-      if (preservedThinking) {
-        preservedThinking.remove();
-        preservedThinking.removeAttribute("data-live");
-        preservedThinking.open = false;
-      }
-      const preservedProgress = item.bubble.querySelector(".msg-progress");
+      const preservedProgress =
+        item.bubble.querySelector(":scope > .msg-progress-wrap") ||
+        item.bubble.querySelector(":scope > .msg-progress");
       if (preservedProgress) preservedProgress.remove();
 
-      // Rebuild thinking from run state if panel was missing (detached remount).
-      if (!preservedThinking && item.thinkingText) {
-        updateThinkingPanel(item, item.thinkingText, { immediate: true });
+      // Prefer run.segments (full timeline) when the live item was remounted thin.
+      const rt = sessionRuntime(sid);
+      const invId = item.invocationId || rt.liveInvocations.get(agent);
+      const run = invId ? rt.liveRuns.get(invId) : null;
+      if (
+        run &&
+        Array.isArray(run.segments) &&
+        run.segments.length > 0 &&
+        (!Array.isArray(item.segments) || item.segments.length === 0)
+      ) {
+        item.segments = run.segments.map((s) => ({ kind: s.kind, text: s.text || "" }));
       }
-      const thinkingEl = preservedThinking || item.bubble.querySelector(".msg-thinking");
-      if (thinkingEl) {
-        thinkingEl.removeAttribute("data-live");
-        thinkingEl.open = false;
+      if (!Array.isArray(item.segments) || item.segments.length === 0) {
+        item.segments = fallbackSegmentsFromItem(item);
       }
+      item.rawText = joinSegmentText(item.segments, "text") || item.rawText || "";
+      item.thinkingText = joinSegmentText(item.segments, "thinking") || item.thinkingText || "";
 
       if (!preservedProgress && item.progressItems && item.progressItems.length) {
         updateProgressList(item, item.progressItems);
       }
-      let progressEl = preservedProgress || item.bubble.querySelector(".msg-progress");
-      if (progressEl) progressEl = collapseProgressIntoDetails(progressEl);
+      let progressEl =
+        preservedProgress ||
+        item.bubble.querySelector(":scope > .msg-progress-wrap") ||
+        item.bubble.querySelector(":scope > .msg-progress");
+      if (progressEl && progressEl.classList && progressEl.classList.contains("msg-progress")) {
+        progressEl = collapseProgressIntoDetails(progressEl);
+      } else if (progressEl && progressEl.classList && progressEl.classList.contains("msg-progress-wrap")) {
+        progressEl.open = false;
+      }
 
       // Prefer a compact rebuilt process panel (collapsed) over the live expanded dump.
       let processEl = buildProcessTraceFromRun(agent, sid);
@@ -1539,18 +1825,6 @@
         updateProcessDetailsLabel(processEl);
       }
 
-      // Shell first (thinking / process / badge) so the card settles without waiting on MD.
-      const content = document.createElement("div");
-      content.className = "msg-final-content";
-
-      item.bubble.replaceChildren();
-      if (thinkingEl) item.bubble.appendChild(thinkingEl);
-      if (progressEl) item.bubble.appendChild(progressEl);
-      if (processEl) item.bubble.appendChild(processEl);
-      item.bubble.appendChild(content);
-      item.bubble.classList.remove("msg-bubble-live-pending");
-      item.bubble.classList.remove("msg-bubble-live");
-
       let copy = item.wrapper.querySelector(".msg-copy");
       if (!copy) {
         copy = document.createElement("button");
@@ -1565,8 +1839,28 @@
         if (meta) meta.appendChild(copy);
       }
 
-      // Deferred MD for long replies — keeps finalize off the critical path.
-      paintFinalMarkdown(content, item.rawText || "", { copyBtn: copy, host: item });
+      // Shell: progress / process / interleaved stream (timeline order).
+      item.bubble.replaceChildren();
+      if (progressEl) item.bubble.appendChild(progressEl);
+      if (processEl) item.bubble.appendChild(processEl);
+
+      // Clear stale stream root so paint rebuilds finalized markdown segments.
+      item.segments = item.segments.map((s) => ({ kind: s.kind, text: s.text || "" }));
+      paintStreamSegments(item, { live: false, markdown: true, copyBtn: copy });
+
+      // Fallback: no segments but have rawText
+      if (
+        (!item.segments || item.segments.length === 0) &&
+        (item.rawText || "").length > 0
+      ) {
+        const content = document.createElement("div");
+        content.className = "msg-final-content";
+        item.bubble.appendChild(content);
+        paintFinalMarkdown(content, item.rawText || "", { copyBtn: copy, host: item });
+      }
+
+      item.bubble.classList.remove("msg-bubble-live-pending");
+      item.bubble.classList.remove("msg-bubble-live");
 
       if (item.showUsage !== false) renderMessageUsage(item.wrapper, options.usage);
 
@@ -1726,11 +2020,18 @@
         const rebuilt = createMessage({ role: "assistant", agent, content: "" });
         rebuilt.rawText = item.rawText || "";
         rebuilt.thinkingText = item.thinkingText || "";
+        rebuilt.segments = Array.isArray(item.segments)
+          ? item.segments.map((s) => ({ kind: s.kind, text: s.text || "" }))
+          : fallbackSegmentsFromItem(item);
         rebuilt.progressItems = Array.isArray(item.progressItems) ? item.progressItems : [];
         rebuilt.pendingStatus = item.pendingStatus || "";
         rebuilt.invocationId = item.invocationId || rt.liveInvocations.get(agent) || null;
 
-        if (rebuilt.rawText && rebuilt._liveTextEl) {
+        if (rebuilt.segments.length > 0) {
+          paintStreamSegments(rebuilt, { live: true, markdown: false });
+          if (rebuilt.bubble) rebuilt.bubble.classList.remove("msg-bubble-live-pending");
+          rebuilt.setBadge(rebuilt.rawText ? "writing" : "thinking");
+        } else if (rebuilt.rawText && rebuilt._liveTextEl) {
           rebuilt._liveTextEl.textContent = rebuilt.rawText;
           if (rebuilt.bubble) rebuilt.bubble.classList.remove("msg-bubble-live-pending");
           rebuilt.setBadge("writing");
@@ -1739,9 +2040,6 @@
           if (rebuilt.pendingStatus && rebuilt._liveTextEl) {
             rebuilt._liveTextEl.textContent = rebuilt.pendingStatus;
           }
-        }
-        if (rebuilt.thinkingText) {
-          updateThinkingPanel(rebuilt, rebuilt.thinkingText, { immediate: true });
         }
         if (rebuilt.progressItems.length) updateProgressList(rebuilt, rebuilt.progressItems);
 
@@ -1836,6 +2134,10 @@
     normalizedUsage,
     aggregateInvocationUsage,
     compactUsageTokens,
+    appendContentSegment,
+    joinSegmentText,
+    buildContentSegmentsFromEvents,
+    fallbackSegmentsFromItem,
     MESSAGE_VIRTUAL_THRESHOLD,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

@@ -574,8 +574,10 @@ function createChatRoutes({
         });
 
         // Live SSE stays fine-grained; only durable sinks (transcript / registry /
-        // SQLite+recall) go through the coalescer so recall and logs are not
-        // flooded with micro text.delta / thinking.delta fragments.
+        // SQLite+recall) go through the coalescer. Strategy A + A1: merge adjacent
+        // same-kind deltas, flush on kind switch / hard boundary / maxChars /
+        // explicit end; idle off by default so long monologues are not chopped;
+        // usage.update is passthrough and does not end an open streak.
         const persistDurableEvent = (kind, payload) => {
           transcript.appendEvent(sessionId, invocationId, kind, payload);
           recordInvocationEvent(invocationEvents, invocationId, kind, payload);
