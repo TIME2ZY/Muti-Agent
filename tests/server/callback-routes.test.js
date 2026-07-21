@@ -27,7 +27,17 @@ test("handleCallbackRoutes posts callback messages after token validation", asyn
       validateToken: () => true,
       postMessage: (sessionId, invocationId, content, options) => {
         appended = { sessionId, invocationId, content, optionsKeys: Object.keys(options) };
-        return true;
+        return {
+          ok: true,
+          messagePosted: true,
+          handoff: {
+            status: "repair_required",
+            detected: true,
+            accepted: false,
+            repairRequired: true,
+            queuedAgents: [],
+          },
+        };
       },
     },
     transcript: {},
@@ -51,7 +61,9 @@ test("handleCallbackRoutes posts callback messages after token validation", asyn
     optionsKeys: ["appendToSession"],
   });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { ok: true });
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.messagePosted, true);
+  assert.equal(res.body.handoff.status, "repair_required");
 });
 
 test("handleCallbackRoutes lists invocations for a session", async () => {

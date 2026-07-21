@@ -8,6 +8,8 @@ const {
   toolArgsFromItem,
   toolResultFromItem,
   isFailedItem,
+  exitCodeFromItem,
+  shellOutputLooksFailed,
   summarizeResult,
   toolItemId,
 } = require("../tool-classification");
@@ -236,7 +238,12 @@ function createOpencodeRuntime(cli) {
       status !== "partial"
     ) {
       const result = toolResultFromItem(part);
-      const failed = isFailedItem(part) || status === "error" || status === "failed";
+      const failed =
+        isFailedItem(part) ||
+        status === "error" ||
+        status === "failed" ||
+        (isBashLike(toolName) && shellOutputLooksFailed(part));
+      const reportedExitCode = exitCodeFromItem(part);
       const command = commandFromArgs(toolName, args);
       const finishedArgs =
         isBashLike(toolName) && command && !args.command ? { ...args, command } : args;
@@ -251,7 +258,7 @@ function createOpencodeRuntime(cli) {
           ...(isBashLike(toolName)
             ? {
                 output: typeof result === "string" ? result : summarizeResult(result),
-                exitCode: failed ? 1 : 0,
+                exitCode: reportedExitCode ?? (failed ? 1 : 0),
               }
             : {}),
         })

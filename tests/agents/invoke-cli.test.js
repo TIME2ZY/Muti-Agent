@@ -230,10 +230,12 @@ test("uses opencode agent for qwen3.7-plus", () => {
     parseOutputEvents(result.stdout).map((event) => event.type),
     ["run.started", "text.delta", "run.finished"]
   );
+  // Do not assert on trailing HTTP_PROXY (mock appends `:${proxy}`): project
+  // .env may load INVOKE_CLI_PROXY by design when invoke-cli runs as main.
   assert.match(
     parseOutputEvents(result.stdout)[1].text,
     new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/qwen3.7-plus hello:undefined`
+      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/qwen3.7-plus hello`
     )
   );
   assert.equal(result.stderr, "");
@@ -650,6 +652,47 @@ test("opencode runtime maps read/bash tools and nests state.input", () => {
   assert.ok(bashTool);
   assert.equal(bashTool.exitCode, 0);
   assert.equal(bashTool.args.command, "npm test");
+
+  const powershellError = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: {
+        id: "t-powershell-error",
+        type: "tool",
+        tool: "bash",
+        status: "completed",
+        arguments: { command: "curl -H test" },
+        output: [
+          "Invoke-WebRequest : Cannot bind parameter Headers.",
+          "CategoryInfo : InvalidArgument: (:) [Invoke-WebRequest], ParameterBindingException",
+          "FullyQualifiedErrorId : CannotConvertArgumentNoMessage",
+        ].join("\n"),
+      },
+    },
+    ctx
+  );
+  const failedTool = powershellError.find((event) => event.type === "tool.finished");
+  assert.equal(failedTool.status, "error");
+  assert.equal(failedTool.exitCode, 1);
+
+  const reportedExit = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: {
+        id: "t-exit-code",
+        type: "tool",
+        tool: "bash",
+        status: "completed",
+        arguments: { command: "exit 7" },
+        output: "failed",
+        exitCode: 7,
+      },
+    },
+    ctx
+  );
+  const exitedTool = reportedExit.find((event) => event.type === "tool.finished");
+  assert.equal(exitedTool.status, "error");
+  assert.equal(exitedTool.exitCode, 7);
 });
 
 test("opencode runtime emits a single run.started and step progress updates", () => {

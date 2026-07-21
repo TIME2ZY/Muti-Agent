@@ -1,5 +1,6 @@
 const { ROOT } = require("./runtime-paths");
 const { sendSse } = require("./http-transport");
+const { StringDecoder } = require("node:string_decoder");
 
 const DEFAULT_KILL_GRACE_MS = 5000;
 const DEFAULT_SERVER_TIMEOUT_MS = 30 * 60 * 1000;
@@ -34,6 +35,39 @@ function runChildStream({
     let killTimer;
     let lastActivity = Date.now();
     let stdoutBuffer = "";
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
+
+    const decodeChunk = (decoder, chunk) =>
+      typeof chunk === "string" ? chunk : decoder.write(chunk);
+
+    const processStdoutText = (text) => {
+      if (!text) return;
+      if (typeof onEvent !== "function") {
+        onStdout(text);
+        if (onHealth) onHealth(text.length);
+        return;
+      }
+
+      stdoutBuffer += text;
+      let newlineIndex;
+      while ((newlineIndex = stdoutBuffer.indexOf("\n")) !== -1) {
+        const line = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        if (!line) continue;
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch (error) {
+          sendSse(res, "error", { message: `Invalid agent event: ${error.message}` });
+          continue;
+        }
+        onEvent(event);
+        if (onHealth && event.type === "text.delta") {
+          onHealth(String(event.text || "").length);
+        }
+      }
+    };
 
     const stopChild = (reason) => {
       if (closed) return;
@@ -67,31 +101,7 @@ function runChildStream({
         stopChild("Stop requested by caller (context sealed).");
         return;
       }
-      const text = chunk.toString();
-      if (typeof onEvent !== "function") {
-        onStdout(text);
-        if (onHealth) onHealth(text.length);
-        return;
-      }
-
-      stdoutBuffer += text;
-      let newlineIndex;
-      while ((newlineIndex = stdoutBuffer.indexOf("\n")) !== -1) {
-        const line = stdoutBuffer.slice(0, newlineIndex).trim();
-        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-        if (!line) continue;
-        let event;
-        try {
-          event = JSON.parse(line);
-        } catch (error) {
-          sendSse(res, "error", { message: `Invalid agent event: ${error.message}` });
-          continue;
-        }
-        onEvent(event);
-        if (onHealth && event.type === "text.delta") {
-          onHealth(String(event.text || "").length);
-        }
-      }
+      processStdoutText(decodeChunk(stdoutDecoder, chunk));
     });
 
     child.stderr.on("data", (chunk) => {
@@ -100,11 +110,18 @@ function runChildStream({
         stopChild("Stop requested by caller (context sealed).");
         return;
       }
-      onStderr(chunk.toString());
+      const text = decodeChunk(stderrDecoder, chunk);
+      if (text) onStderr(text);
     });
 
     child.on("error", (error) => sendSse(res, "error", { message: error.message }));
     child.on("close", (code, closeSignal) => {
+      processStdoutText(stdoutDecoder.end());
+      if (stdoutBuffer.trim() && typeof onEvent === "function") {
+        processStdoutText("\n");
+      }
+      const stderrRemainder = stderrDecoder.end();
+      if (stderrRemainder) onStderr(stderrRemainder);
       closed = true;
       clearTimeout(killTimer);
       clearInterval(activityTimer);

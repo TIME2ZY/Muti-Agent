@@ -106,7 +106,20 @@ npm start
 
 ## 需要更多配置时
 
-项目开箱即可启动；端口、代理、存储模式、回调地址等高级选项集中在 [`.env.example`](.env.example) 中。应用不会自动加载 `.env`，请通过 shell 或进程管理器注入环境变量。
+项目开箱即可启动；端口、代理、Codex 缓存目录、存储模式等高级选项见 [`.env.example`](.env.example)。
+
+复制为 `.env`（或 `.env.local`）后，`npm start` 会自动加载，不必每次在 shell 里 export：
+
+```bash
+cp .env.example .env
+# 编辑 .env，例如：
+# INVOKE_CLI_PROXY=http://127.0.0.1:7892          # 所有 CLI 共用代理
+# INVOKE_CODEX_HOME=C:\Users\you\.codex-cli       # 与 Codex 桌面版隔离
+npm start
+```
+
+- 全员代理请用 `INVOKE_CLI_PROXY`（会注入到 Codex / OpenCode / Grok 等子进程）。`GROK_PROXY` 仅在「只有 Grok 需要代理」时使用。
+- 已在 shell / CI 中设置的环境变量优先于文件中的同名项。
 
 <details>
 <summary><strong>常用开发命令</strong></summary>

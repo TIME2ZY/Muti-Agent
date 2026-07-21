@@ -1,6 +1,7 @@
 const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
+const { loadProjectEnv } = require("../shared/load-env");
 const { AGENTS, getAgentModelProfile } = require("../agents/catalog");
 const { getProviderAdapter, collectProviderStartupDiagnostics } = require("../agents/providers");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
@@ -38,6 +39,13 @@ const {
   DEFAULT_SESSION_MAP_ROOT,
   DEFAULT_WORKTREE_STATE_FILE,
 } = runtimePaths;
+
+// When started as the main process (npm start), load project .env so local
+// knobs like INVOKE_CLI_PROXY / INVOKE_CODEX_HOME persist without shell export.
+// Tests require this module as a library and skip file loading.
+if (require.main === module) {
+  loadProjectEnv(ROOT);
+}
 const {
   getSkills,
   publicSkills,

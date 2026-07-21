@@ -59,6 +59,11 @@ function superviseProviderProcess({
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    // Decode complete UTF-8 code points across Buffer boundaries. Without a
+    // stream decoder, split multibyte characters become replacement glyphs.
+    child.stdout.setEncoding?.("utf8");
+    child.stderr.setEncoding?.("utf8");
+
     if (!firstChild) firstChild = child;
 
     let failedToStart = false;
@@ -73,7 +78,7 @@ function superviseProviderProcess({
     };
 
     const appendStderr = (chunk) => {
-      stderrTail += chunk.toString();
+      stderrTail += String(chunk);
       if (stderrTail.length > stderrLimit) {
         stderrTail = stderrTail.slice(-stderrLimit);
       }

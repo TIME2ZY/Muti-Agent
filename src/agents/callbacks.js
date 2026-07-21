@@ -111,6 +111,36 @@ function validateToken(threadId, invocationId, callbackToken) {
   return record.callbackToken === callbackToken;
 }
 
+function summarizeHandoffOutcome(finalized) {
+  const mentions = finalized?.mentions || [];
+  const enqueued = finalized?.enqueued || [];
+  const repairs = finalized?.repairs || [];
+  const skipped = finalized?.skipped || [];
+  const queuedAgents = enqueued.map((entry) => entry.to);
+  const repairAgents = repairs.map((entry) => entry.to).filter(Boolean);
+  const skippedAgents = skipped.map((entry) => entry.to).filter(Boolean);
+  const detected = mentions.length > 0;
+  const accepted = detected && enqueued.length === mentions.length;
+  const repairRequired = repairs.length > 0;
+  let status = "none";
+  if (accepted) status = "accepted";
+  else if (enqueued.length > 0) status = "partial";
+  else if (repairRequired) status = "repair_required";
+  else if (detected) status = "skipped";
+
+  return {
+    status,
+    detected,
+    accepted,
+    repairRequired,
+    mentionedAgents: mentions,
+    queuedAgents,
+    repairAgents,
+    skippedAgents,
+    policy: finalized?.mode || "",
+  };
+}
+
 /**
  * Post a message from a running agent back to the chat.
  * Enforces Thread Affinity: if the registered thread has an explicit
@@ -120,7 +150,10 @@ function validateToken(threadId, invocationId, callbackToken) {
  * The message is:
  *  - persisted to the session file
  *  - broadcast as an SSE message event
- *  - scanned for @mentions; any new target agents are appended to the worklist
+ *  - scanned for @mentions; accepted target agents are appended to the worklist
+ * Returns false when delivery is rejected, otherwise a structured delivery and
+ * handoff outcome. Message delivery and handoff acceptance are intentionally
+ * separate states.
  */
 function postMessage(
   threadId,
@@ -177,7 +210,7 @@ function postMessage(
     Object.entries(AGENTS).map(([id, config]) => [id, config.label || id])
   );
   const routeInvocationId = currentInvocationId || invocationId;
-  finalizeA2ARoutes({
+  const finalized = finalizeA2ARoutes({
     text: content,
     fromAgent: agent,
     threadId: thread.sessionId || threadId,
@@ -201,20 +234,35 @@ function postMessage(
     logger: console,
   });
 
-  return true;
+  const result = {
+    ok: true,
+    messagePosted: true,
+    handoff: summarizeHandoffOutcome(finalized),
+  };
+  if (currentInvocationId) {
+    transcript.appendEvent(
+      thread.sessionId || threadId,
+      currentInvocationId,
+      "callback-outcome",
+      result
+    );
+    durableRecorder?.appendInvocationEvent(currentInvocationId, "callback-outcome", result);
+  }
+  if (record) record.lastCallbackOutcome = result;
+  return result;
 }
 
 /**
  * Build the HTTP callback instruction block that gets injected into agent prompts.
  * This teaches agents without native dynamic MCP support (Codex, opencode, etc.)
- * how to call back into the Shift server via curl.
+ * how to call back into the Shift server through the cross-platform Node client.
  *
- * sessionId is the active chat thread id. It is injected both into the curl
- * examples and (by the server) as the SHIFT_THREAD_ID env var, so agents can
- * quote $SHIFT_THREAD_ID instead of hard-coding it.
+ * sessionId is the active chat thread id. The client reads it from the
+ * SHIFT_THREAD_ID env var so agents never need to hard-code it.
  */
-function buildCallbackInstructions(apiUrl, _sessionId) {
-  // Curl examples intentionally use $SHIFT_THREAD_ID so agents do not hard-code ids.
+function buildCallbackInstructions(_apiUrl, _sessionId) {
+  // The Node client avoids shell-specific curl aliases, JSON quoting, and
+  // Windows PowerShell encoding behavior.
   return `<!-- ═══════════════════════════════════════════════════════════ -->
 <!-- MCP 回调工具说明（通过 HTTP 调用）                            -->
 <!-- 你可以在执行过程中主动发消息、查阅历史，不需要等执行结束      -->
@@ -226,9 +274,12 @@ function buildCallbackInstructions(apiUrl, _sessionId) {
 
 ## 发送消息到聊天室
 
-\`\`\`bash
-curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/json" -d "{\\"sessionId\\": \\"$SHIFT_THREAD_ID\\", \\"invocationId\\": \\"$SHIFT_INVOCATION_ID\\", \\"callbackToken\\": \\"$SHIFT_CALLBACK_TOKEN\\", \\"content\\": \\"你的消息\\"}"
+\`\`\`text
+node scripts/callback-client.js post-message --content "你的消息"
 \`\`\`
+
+多行或包含复杂引号时，先把消息以 UTF-8 写入临时文件，再使用
+\`--content-file <路径>\`，不要手工拼 JSON。
 
 用法示例：
 - 发现需要别人处理的问题 → 发消息/回复，行首 @ 对方（不要 spawn 子代理）
@@ -244,31 +295,27 @@ curl -X POST ${apiUrl}/api/callbacks/post-message -H "Content-Type: application/
 - 不要 @ 自己
 - \`sessionId\` 必须使用 \`$SHIFT_THREAD_ID\`，不要伪造
 - callbackToken 有 TTL（默认 30 分钟），过期会 401
+- 只有返回的 \`handoff.status=accepted\` 才表示目标 Agent 已入队
+- \`repair_required\` 或退出码 2 表示消息已发布，但交接未成功；必须补全 handoff 后重试
 
 ## 获取当前对话上下文
 
-\`\`\`bash
-curl -G ${apiUrl}/api/callbacks/thread-context -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" --data-urlencode "sessionId=$SHIFT_THREAD_ID" --data-urlencode "invocationId=$SHIFT_INVOCATION_ID"
+\`\`\`text
+node scripts/callback-client.js thread-context
 \`\`\`
 
 ## 列出本会话所有 invocation（谁跑了什么、什么状态）
 
-\`\`\`bash
-curl -G ${apiUrl}/api/callbacks/list-invocations -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" --data-urlencode "sessionId=$SHIFT_THREAD_ID" --data-urlencode "invocationId=$SHIFT_INVOCATION_ID"
+\`\`\`text
+node scripts/callback-client.js list-invocations
 \`\`\`
 
 返回：\`{ invocations: [{ invocationId, agent, startedAt, endedAt, state, eventCount }] }\`
 
 ## 搜索本会话历史（分层：memory / message / evidence）
 
-\`\`\`bash
-curl -G ${apiUrl}/api/callbacks/session-search \\
-  -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" \\
-  --data-urlencode "sessionId=$SHIFT_THREAD_ID" \\
-  --data-urlencode "invocationId=$SHIFT_INVOCATION_ID" \\
-  --data-urlencode "query=redis 端口" \\
-  --data-urlencode "limit=10" \\
-  --data-urlencode "layers=memory,message,evidence"
+\`\`\`text
+node scripts/callback-client.js session-search --query "redis 端口" --limit 10 --layers memory,message,evidence
 \`\`\`
 
 返回：\`{ query, limit, layers: { memory, message, evidence }, truncated, hits: [{ layer, score, snippet, sourceKind, sourceId, kind, invocationId, eventNo, memoryId? }] }\`。
@@ -280,14 +327,8 @@ curl -G ${apiUrl}/api/callbacks/session-search \\
 
 ## 读取某次 invocation 的完整事件流
 
-\`\`\`bash
-curl -G ${apiUrl}/api/callbacks/read-invocation \\
-  -H "X-Callback-Token: $SHIFT_CALLBACK_TOKEN" \\
-  --data-urlencode "sessionId=$SHIFT_THREAD_ID" \\
-  --data-urlencode "invocationId=$SHIFT_INVOCATION_ID" \\
-  --data-urlencode "targetInvocationId=<invocationId>" \\
-  --data-urlencode "from=0" \\
-  --data-urlencode "limit=200"
+\`\`\`text
+node scripts/callback-client.js read-invocation --target <invocationId> --from 0 --limit 200
 \`\`\`
 
 返回：\`{ invocationId, events: [...], total, from, limit }\`
@@ -307,6 +348,7 @@ module.exports = {
   createInvocation,
   validateToken,
   postMessage,
+  summarizeHandoffOutcome,
   buildCallbackInstructions,
   sendSse,
 };

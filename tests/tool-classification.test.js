@@ -7,6 +7,9 @@ const {
   summarizeTask,
   toolNameFromItem,
   toolArgsFromItem,
+  isFailedItem,
+  exitCodeFromItem,
+  shellOutputLooksFailed,
 } = require("../src/agents/tool-classification");
 
 test("isSubagentTool detects spawn/task/wait style tools", () => {
@@ -36,6 +39,23 @@ test("summarizeTask prefers description over long prompt", () => {
     }),
     "查看git状态和最近提交"
   );
+});
+
+test("tool failure helpers honor exit codes and PowerShell error records", () => {
+  assert.equal(exitCodeFromItem({ state: { exitCode: 7 } }), 7);
+  assert.equal(isFailedItem({ status: "completed", exit_code: 7 }), true);
+  assert.equal(
+    shellOutputLooksFailed({
+      status: "completed",
+      output: [
+        "Invoke-WebRequest : Cannot bind parameter Headers.",
+        "CategoryInfo : InvalidArgument: (:) [Invoke-WebRequest], ParameterBindingException",
+        "FullyQualifiedErrorId : CannotConvertArgumentNoMessage",
+      ].join("\n"),
+    }),
+    true
+  );
+  assert.equal(shellOutputLooksFailed({ status: "completed", output: "build completed" }), false);
 });
 
 test("summarizeResult strips OpenCode task XML wrappers", () => {

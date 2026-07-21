@@ -1,4 +1,5 @@
 const SUBAGENT_NAME_RE = /^(spawn[_-]?agent|spawn[_-]?subagent|wait[_-]?agent|subagent|task|agent[_-]?tool)\b/i;
+const ANSI_COLOR_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
 function asObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -65,7 +66,41 @@ function isFailedItem(item) {
   const status = String(item.status || item.state || "").toLowerCase();
   if (["failed", "error", "errored", "cancelled", "canceled"].includes(status)) return true;
   if (item.error || item.is_error === true || item.success === false) return true;
+  const exitCode = exitCodeFromItem(item);
+  if (exitCode !== null && exitCode !== 0) return true;
   return false;
+}
+
+function exitCodeFromItem(item) {
+  if (!item || typeof item !== "object") return null;
+  const state = asObject(item.state);
+  const candidates = [
+    item.exitCode,
+    item.exit_code,
+    item.code,
+    state && state.exitCode,
+    state && state.exit_code,
+    state && state.code,
+  ];
+  for (const value of candidates) {
+    if (value === null || value === undefined || value === "") continue;
+    const code = Number(value);
+    if (Number.isInteger(code)) return code;
+  }
+  return null;
+}
+
+function shellOutputLooksFailed(item) {
+  if (!item || typeof item !== "object") return false;
+  const result = toolResultFromItem(item);
+  const text = typeof result === "string" ? result : summarizeResult(result, 4000);
+  if (!text) return false;
+  const plain = text.replace(ANSI_COLOR_RE, "");
+  return (
+    /FullyQualifiedErrorId\s*:/i.test(plain) ||
+    /CategoryInfo\s*:\s*(?:Invalid|NotSpecified|OperationStopped|ParserError)/i.test(plain) ||
+    /(?:ParserError|ParameterBindingException|CommandNotFoundException)/i.test(plain)
+  );
 }
 
 function isSubagentTool(toolName, args = {}) {
@@ -202,6 +237,8 @@ module.exports = {
   toolArgsFromItem,
   toolResultFromItem,
   isFailedItem,
+  exitCodeFromItem,
+  shellOutputLooksFailed,
   isSubagentTool,
   subagentDisplayName,
   cleanToolOutput,
