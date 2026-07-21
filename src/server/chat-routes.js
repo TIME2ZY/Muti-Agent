@@ -365,8 +365,24 @@ function createChatRoutes({
       windowId: null,
       sealer: null,
       useWorktree: Boolean(useWorktree),
-      reviewWorkflow: reviewState.initialReviewState(session?.reviewWorkflow),
+      reviewWorkflow: reviewState.initialReviewState(),
     };
+
+    // Prefer session.reviewWorkflow; if it was lost (null/idle) but review-state
+    // messages remain, rebuild from the newest snapshot and re-persist.
+    const resolvedReview = reviewState.resolveReviewWorkflow(session);
+    threadCtx.reviewWorkflow = resolvedReview.state;
+    if (
+      resolvedReview.source === "messages" &&
+      typeof setSessionReviewWorkflow === "function"
+    ) {
+      setSessionReviewWorkflow(
+        options.sessionsFile || undefined,
+        sessionId,
+        resolvedReview.state
+      );
+    }
+
     callbacks.registerThread(sessionId, threadCtx);
 
     const roleOf = (agentId) =>
@@ -397,6 +413,12 @@ function createChatRoutes({
           reviewEvent: event.type,
           reviewStatus: result.state.status,
           reviewRound: result.state.round,
+          // Full snapshot fields so crash recovery can rebuild without the
+          // session.reviewWorkflow field (e.g. SQLite-only thread rows).
+          verdict: result.state.verdict,
+          reviewer: result.state.reviewer,
+          implementer: result.state.implementer,
+          updatedAt: result.state.updatedAt,
         },
         { allowCreate: false, windowId: threadCtx.windowId }
       );

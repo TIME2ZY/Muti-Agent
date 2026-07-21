@@ -152,12 +152,99 @@ function describeReviewState(state) {
   return `审查状态：${labels[normalized.status]}（第 ${normalized.round} 轮）`;
 }
 
+/**
+ * True when the workflow has left the default idle state (including approved).
+ * Used to decide whether session.reviewWorkflow is authoritative.
+ */
+function isActiveReviewState(input) {
+  return initialReviewState(input).status !== STATES.IDLE;
+}
+
+/**
+ * Map a persisted session / transcript message (or raw event payload) back to
+ * a review workflow snapshot. Returns null when the record is not a review-state.
+ */
+function reviewStateFromMessage(message = {}) {
+  if (!message || typeof message !== "object") return null;
+
+  const kind = String(message.kind || message.event || "")
+    .trim()
+    .toLowerCase();
+  // Session messages use kind:"review-state"; SSE/transcript payloads use event type
+  // or may omit kind when fields are inlined from the state snapshot.
+  const looksLikeReviewState =
+    kind === "review-state" ||
+    kind === EVENTS.REVIEW_REQUESTED ||
+    kind === EVENTS.REVIEW_STARTED ||
+    kind === EVENTS.CHANGES_REQUESTED ||
+    kind === EVENTS.FIX_STARTED ||
+    kind === EVENTS.APPROVED ||
+    VALID_STATES.has(message.reviewStatus) ||
+    VALID_STATES.has(message.status);
+
+  if (!looksLikeReviewState) return null;
+
+  const statusCandidate = message.reviewStatus || message.status;
+  if (!VALID_STATES.has(statusCandidate) || statusCandidate === STATES.IDLE) {
+    return null;
+  }
+
+  return initialReviewState({
+    status: statusCandidate,
+    round: message.reviewRound ?? message.round,
+    verdict: message.verdict || message.reviewVerdict || null,
+    reviewer: message.reviewer || null,
+    implementer: message.implementer || null,
+    updatedAt: message.updatedAt || message.createdAt || null,
+  });
+}
+
+/**
+ * Walk messages newest-first and rebuild the latest non-idle review snapshot.
+ * Empty / missing history yields idle.
+ */
+function rebuildReviewWorkflowFromMessages(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return initialReviewState();
+  }
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const rebuilt = reviewStateFromMessage(messages[index]);
+    if (rebuilt && isActiveReviewState(rebuilt)) return rebuilt;
+  }
+  return initialReviewState();
+}
+
+/**
+ * Prefer the session field when it is already active; otherwise fall back to
+ * the newest review-state message. Does not invent transitions — only restores
+ * the last known snapshot.
+ *
+ * @returns {{ state: object, source: "session"|"messages"|"idle" }}
+ */
+function resolveReviewWorkflow(session = {}) {
+  const fromField = initialReviewState(session?.reviewWorkflow);
+  if (isActiveReviewState(fromField)) {
+    return { state: fromField, source: "session" };
+  }
+
+  const fromMessages = rebuildReviewWorkflowFromMessages(session?.messages);
+  if (isActiveReviewState(fromMessages)) {
+    return { state: fromMessages, source: "messages" };
+  }
+
+  return { state: fromField, source: "idle" };
+}
+
 module.exports = {
   STATES,
   EVENTS,
   initialReviewState,
+  isActiveReviewState,
   extractReviewVerdict,
   transitionReviewState,
   renderReviewStateBlock,
   describeReviewState,
+  reviewStateFromMessage,
+  rebuildReviewWorkflowFromMessages,
+  resolveReviewWorkflow,
 };
