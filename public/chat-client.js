@@ -170,8 +170,9 @@
             agent: "system",
             content: text,
             kind: "a2a-route",
+            layer: "workflow",
           });
-          if (active) addSystem(text);
+          if (active) addSystem(text, "", { kind: "a2a-route", layer: "workflow" });
           break;
         }
         case "a2a-skipped": {
@@ -186,8 +187,31 @@
             agent: "system",
             content: text,
             kind: "a2a-skipped",
+            layer: "workflow",
           });
-          if (active) addSystem(text);
+          if (active) addSystem(text, "", { kind: "a2a-skipped", layer: "workflow" });
+          break;
+        }
+        case "review-state": {
+          const labels = {
+            awaiting_review: "等待审查",
+            reviewing: "审查中",
+            changes_requested: "需要修改",
+            fixing: "修复中",
+            approved: "已放行",
+          };
+          const text = `审查状态：${labels[data.status] || data.status || "未知"}（第 ${
+            Number(data.round) || 0
+          } 轮）`;
+          if (!Array.isArray(rt.systemNotices)) rt.systemNotices = [];
+          rt.systemNotices.push({
+            role: "system",
+            agent: "system",
+            content: text,
+            kind: "review-state",
+            layer: "workflow",
+          });
+          if (active) addSystem(text, "", { kind: "review-state", layer: "workflow" });
           break;
         }
         case "done":

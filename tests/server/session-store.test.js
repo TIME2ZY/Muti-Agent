@@ -57,6 +57,26 @@ test(
 );
 
 test(
+  "session store persists review workflow and classifies message layers",
+  withTempFile((file) => {
+    const session = store.createSession(file);
+    store.setSessionReviewWorkflow(file, session.id, {
+      status: "changes_requested",
+      round: 1,
+    });
+    store.appendToSession(file, session.id, {
+      role: "system",
+      kind: "review-state",
+      content: "needs fixes",
+    });
+
+    const stored = store.getSession(file, session.id);
+    assert.equal(stored.reviewWorkflow.status, "changes_requested");
+    assert.equal(stored.messages[0].layer, "workflow");
+  })
+);
+
+test(
   "session store rejects path and prototype-like IDs",
   withTempFile((file) => {
     for (const id of ["..", "__proto__", "constructor"]) {

@@ -60,6 +60,30 @@
   min-height: var(--space-4);
 }
 
+/* Workflow notices are orchestration metadata, not conversation turns. */
+.message.layer-workflow {
+  margin-block: calc(var(--space-2) * -0.25);
+}
+
+.message.layer-workflow .msg-meta {
+  display: none;
+}
+
+.message.layer-workflow .msg-card {
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  padding-inline-start: var(--space-3);
+}
+
+.message.layer-workflow .msg-bubble {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.message.layer-diagnostic .msg-card {
+  border-inline-start: 2px solid var(--danger);
+  padding-inline-start: var(--space-3);
+}
+
 .message {
   display: flex;
   flex-direction: column;

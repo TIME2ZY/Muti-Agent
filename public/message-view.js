@@ -625,12 +625,20 @@
       usage = null,
       showUsage = true,
       scroll = true,
+      kind = "",
+      layer = "",
     }) {
       hideEmpty();
       ensureSpacer();
 
       const wrapper = document.createElement("article");
-      wrapper.className = ["message", role, variant].filter(Boolean).join(" ");
+      const resolvedLayer =
+        layer || (role === "user" || role === "assistant" ? "conversation" : "system");
+      wrapper.className = ["message", role, variant, `layer-${resolvedLayer}`]
+        .filter(Boolean)
+        .join(" ");
+      wrapper.dataset.layer = resolvedLayer;
+      if (kind) wrapper.dataset.kind = kind;
       if (role === "assistant" && agent && typeof agentColorIndex === "function") {
         wrapper.dataset.agentColor = String(agentColorIndex(agent));
         wrapper.dataset.agentId = String(agent);
@@ -1648,10 +1656,17 @@
       if (typeof syncComposerControls === "function") syncComposerControls();
     }
 
-    function addSystem(text, variant = "") {
+    function addSystem(text, variant = "", meta = {}) {
       hideEmpty();
       ensureSpacer();
-      createMessage({ role: "system", agent: "system", content: text, variant });
+      createMessage({
+        role: "system",
+        agent: "system",
+        content: text,
+        variant,
+        kind: meta.kind || "",
+        layer: meta.layer || (variant === "error" ? "diagnostic" : "system"),
+      });
 
       const slot = typeof getSessionSlot === "function" ? getSessionSlot() : null;
       if (variant === "error" && slot && slot.lastPrompt) {

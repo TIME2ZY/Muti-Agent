@@ -65,6 +65,7 @@ const {
   getSession,
   setSessionProjectDir,
   setSessionWorktree,
+  setSessionReviewWorkflow,
   deleteSession,
   appendToSession,
 } = sessionStore;
@@ -195,6 +196,13 @@ function createServer(options = {}) {
     return session;
   }
 
+  function updateReviewWorkflowDual(file, sessionId, reviewWorkflow) {
+    ensureFileShadow(file, sessionId);
+    const session = setSessionReviewWorkflow(file, sessionId, reviewWorkflow);
+    durableRecorder.mirrorThread(session);
+    return session;
+  }
+
   function appendToSessionDual(file, sessionId, message, appendOptions = {}) {
     if (appendOptions.allowCreate === false) ensureFileShadow(file, sessionId);
     const session = appendToSession(file, sessionId, message, appendOptions);
@@ -299,6 +307,7 @@ function createServer(options = {}) {
     validateProjectDir,
     setSessionWorktree: updateWorktreeDual,
     appendToSession: appendToSessionDual,
+    setSessionReviewWorkflow: updateReviewWorkflowDual,
     getSessionMapPath,
     readSessionMap,
     recordInvocationEvent,

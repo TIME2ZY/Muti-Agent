@@ -316,6 +316,33 @@ test("a2a-skipped paints system notice when session is active", () => {
   assert.equal(runtimeStore.get("s1").systemNotices[0].kind, "a2a-skipped");
 });
 
+test("review-state is buffered and painted as workflow metadata", () => {
+  const calls = [];
+  const runtimeStore = createRuntimeStore();
+  const deps = makeDeps({
+    runtimeStore,
+    state: {
+      currentSessionId: "s1",
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+    },
+    addSystem(text, variant, meta) {
+      calls.push({ text, variant, meta });
+    },
+  });
+  const client = chatClientModule.createChatClient(deps);
+
+  client.handleSseEvent("review-state", { status: "changes_requested", round: 2 }, {
+    sessionId: "s1",
+  });
+
+  assert.match(calls[0].text, /需要修改/);
+  assert.deepEqual(calls[0].meta, { kind: "review-state", layer: "workflow" });
+  assert.equal(runtimeStore.get("s1").systemNotices[0].layer, "workflow");
+});
+
 test("agent-exit finalizes the agent so handoffs clear writing state", () => {
   const finalized = [];
   const runtimeStore = createRuntimeStore();

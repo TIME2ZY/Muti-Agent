@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { assertValidOpaqueId, isValidOpaqueId } = require("./id-policy");
+const { withMessageLayer } = require("./message-layers");
 
 const LOCK_RETRY_MS = 25;
 const LOCK_TIMEOUT_MS = 5000;
@@ -53,6 +54,7 @@ function makeSession(id) {
     worktree: null,
     projectDir: "",
     lastAgent: "",
+    reviewWorkflow: null,
   };
 }
 
@@ -121,6 +123,10 @@ function restoreSession(sessionsFile, input) {
       worktree: input.worktree || null,
       projectDir: typeof input.projectDir === "string" ? input.projectDir : "",
       lastAgent: typeof input.lastAgent === "string" ? input.lastAgent : "",
+      reviewWorkflow:
+        input.reviewWorkflow && typeof input.reviewWorkflow === "object"
+          ? input.reviewWorkflow
+          : null,
     };
     data.sessions[input.id] = session;
     data.lastSessionId = input.id;
@@ -204,6 +210,20 @@ function setSessionLastAgent(sessionsFile, sessionId, lastAgent) {
   });
 }
 
+function setSessionReviewWorkflow(sessionsFile, sessionId, reviewWorkflow) {
+  if (!isValidOpaqueId(sessionId)) return null;
+  return withFileLock(sessionsFile, () => {
+    const data = readSessions(sessionsFile);
+    const session = data.sessions[sessionId];
+    if (!session) return null;
+    session.reviewWorkflow =
+      reviewWorkflow && typeof reviewWorkflow === "object" ? { ...reviewWorkflow } : null;
+    data.lastSessionId = sessionId;
+    writeSessionsUnlocked(sessionsFile, data);
+    return session;
+  });
+}
+
 function deleteSession(sessionsFile, sessionId) {
   if (!isValidOpaqueId(sessionId)) return false;
   return withFileLock(sessionsFile, () => {
@@ -232,11 +252,11 @@ function appendToSession(sessionsFile, sessionId, message, options = {}) {
       data.sessions[sessionId] = session;
     }
 
-    const msg = {
+    const msg = withMessageLayer({
       id: generateId(),
       createdAt: new Date().toISOString(),
       ...message,
-    };
+    });
     session.messages.push(msg);
 
     if (!session.title && message.role === "user" && message.content) {
@@ -264,6 +284,7 @@ module.exports = {
   setSessionProjectDir,
   setSessionWorktree,
   setSessionLastAgent,
+  setSessionReviewWorkflow,
   deleteSession,
   appendToSession,
 };

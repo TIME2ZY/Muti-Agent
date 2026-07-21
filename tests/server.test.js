@@ -1993,6 +1993,34 @@ test("prompt template uses the cross-platform callback client", () => {
   assert.match(instructions, /TTL/);
 });
 
+test("callbacks.postMessage advances the persisted review workflow", () => {
+  const sessionId = "session-cb-review";
+  const invocationId = "invocation-cb-review";
+  const reviewEvents = [];
+  const threadCtx = {
+    res: { destroyed: false, writableEnded: false, write() {} },
+    worklist: ["grok"],
+    controller: new AbortController(),
+    a2aCount: 0,
+    tokens: new Map([[invocationId, { agentId: "grok", callbackToken: "token" }]]),
+    applyReviewEvent(event, sourceInvocationId) {
+      reviewEvents.push({ event, sourceInvocationId });
+    },
+  };
+  callbacks.registerThread(sessionId, threadCtx);
+
+  try {
+    callbacks.postMessage(sessionId, invocationId, "@OpenCode\n请 review", {});
+    assert.equal(reviewEvents.length, 1);
+    assert.equal(reviewEvents[0].event.type, "review_requested");
+    assert.equal(reviewEvents[0].event.actor, "grok");
+    assert.equal(reviewEvents[0].event.counterpart, "opencode");
+    assert.equal(reviewEvents[0].sourceInvocationId, invocationId);
+  } finally {
+    callbacks.unregisterThread(sessionId);
+  }
+});
+
 // ── Transcript integration (lesson 08 Phase 1) ─────────────────
 
 test("chat endpoint writes transcript events (invocation-start, stdout, invocation-end)", async () => {
@@ -3031,6 +3059,18 @@ test("A2A allows the same agent to re-enter worklist (review → fix)", async ()
       assert.match(prompts[2], /APPLICATION SKILL: receiving-review/);
       assert.doesNotMatch(prompts[2], /APPLICATION SKILL: a2a-handoff/);
       assert.match(prompts[2], /<!-- Agent Identity: grok/);
+      assert.match(prompts[1], /status: reviewing/);
+      assert.match(prompts[2], /status: fixing/);
+
+      const sessionResponse = await fetch(`${baseUrl}/api/sessions/reentry-handoff-test`);
+      const { session } = await sessionResponse.json();
+      assert.equal(session.reviewWorkflow.status, "fixing");
+      assert.equal(session.reviewWorkflow.round, 1);
+      assert.ok(
+        session.messages.some(
+          (message) => message.kind === "review-state" && message.layer === "workflow"
+        )
+      );
     }
   );
 });
