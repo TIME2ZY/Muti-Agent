@@ -114,8 +114,14 @@
     return count;
   }
 
-  const PURIFY_CONFIG = {
-    ALLOWED_TAGS: [
+  /**
+   * Explicit DOMPurify allow-list used by every render path.
+   * Keep this opaque-config-free: callers/tests can read PURIFY_CONFIG and
+   * assert that script/style/iframe stay forbidden. Mutating the exported
+   * object is a no-op (deep-frozen).
+   */
+  const PURIFY_CONFIG = Object.freeze({
+    ALLOWED_TAGS: Object.freeze([
       "p",
       "br",
       "h1",
@@ -147,8 +153,8 @@
       "span",
       "button",
       "input",
-    ],
-    ALLOWED_ATTR: [
+    ]),
+    ALLOWED_ATTR: Object.freeze([
       "class",
       "href",
       "title",
@@ -169,12 +175,21 @@
       "colspan",
       "rowspan",
       "id",
-    ],
+    ]),
     ALLOW_DATA_ATTR: false,
     ALLOW_ARIA_ATTR: true,
-    FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form", "svg", "math"],
-    FORBID_ATTR: ["style"],
-  };
+    FORBID_TAGS: Object.freeze([
+      "style",
+      "script",
+      "iframe",
+      "object",
+      "embed",
+      "form",
+      "svg",
+      "math",
+    ]),
+    FORBID_ATTR: Object.freeze(["style"]),
+  });
 
   /** @type {import('markdown-it')|null} */
   let mdEngine = null;
@@ -529,6 +544,10 @@
     normalizeMdNewlines,
     hasRenderPipeline,
     isSafeHttpUrl,
+    /** Explicit sanitizer policy (frozen). Tests pin this so defaults cannot silently loosen. */
+    PURIFY_CONFIG,
+    /** Fail-closed sanitizer used by renderMd; empty string when purifier is unavailable. */
+    sanitizeHtml,
     // Retained no-op-ish helpers for older tests / callers (deprecated).
     splitTableRow(line) {
       const inner = String(line || "").replace(/^\||\|$/g, "");

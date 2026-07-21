@@ -93,6 +93,8 @@
                 usage: msg.usage || null,
                 showUsage: msg.source !== "callback",
                 scroll: false,
+                ...(msg.kind ? { kind: msg.kind } : {}),
+                ...(msg.layer ? { layer: msg.layer } : {}),
               });
             }
           } finally {
@@ -132,6 +134,8 @@
               agent: notice.agent || "system",
               content: notice.content,
               variant: notice.variant || "",
+              ...(notice.kind ? { kind: notice.kind } : {}),
+              ...(notice.layer ? { layer: notice.layer } : { layer: "workflow" }),
             });
           }
         }

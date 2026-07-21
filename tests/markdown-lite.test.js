@@ -246,12 +246,91 @@ test("renderMd strips raw HTML and dangerous URL schemes", () => {
   assert.doesNotMatch(svg, /<svg\b/i);
 });
 
+test("PURIFY_CONFIG is explicit, frozen, and forbids executable surfaces", () => {
+  const config = markdownLite.PURIFY_CONFIG;
+  assert.ok(config && typeof config === "object");
+  assert.equal(Object.isFrozen(config), true);
+  assert.equal(Object.isFrozen(config.ALLOWED_TAGS), true);
+  assert.equal(Object.isFrozen(config.ALLOWED_ATTR), true);
+  assert.equal(Object.isFrozen(config.FORBID_TAGS), true);
+  assert.equal(Object.isFrozen(config.FORBID_ATTR), true);
+
+  // Markdown surface we actually render.
+  for (const tag of ["p", "a", "pre", "code", "table", "input", "blockquote"]) {
+    assert.ok(config.ALLOWED_TAGS.includes(tag), `expected ALLOWED_TAGS to include ${tag}`);
+  }
+  // Dangerous tags must never be allow-listed.
+  for (const tag of ["script", "style", "iframe", "object", "embed", "form", "svg", "math"]) {
+    assert.equal(config.ALLOWED_TAGS.includes(tag), false, `${tag} must not be allowed`);
+    assert.ok(config.FORBID_TAGS.includes(tag), `${tag} must be forbidden`);
+  }
+  assert.equal(config.ALLOW_DATA_ATTR, false);
+  assert.ok(config.FORBID_ATTR.includes("style"));
+  // Mutation must not loosen the live policy object.
+  assert.throws(() => {
+    config.ALLOWED_TAGS.push("script");
+  }, TypeError);
+});
+
+test("sanitizeHtml applies PURIFY_CONFIG and fails closed on empty input", () => {
+  assert.equal(typeof markdownLite.sanitizeHtml, "function");
+  assert.equal(markdownLite.sanitizeHtml(""), "");
+  const dirty =
+    '<p onclick="alert(1)">ok</p><script>alert(1)</script><iframe src="https://evil"></iframe>';
+  const clean = markdownLite.sanitizeHtml(dirty);
+  assert.match(clean, /<p>/);
+  assert.match(clean, /ok/);
+  assert.doesNotMatch(clean, /<script\b/i);
+  assert.doesNotMatch(clean, /<iframe\b/i);
+  assert.doesNotMatch(clean, /\bonclick\b/i);
+});
+
+test("renderMd neutralizes data: and protocol-relative links", () => {
+  const dataLink = markdownLite.renderMd("[x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)");
+  assert.doesNotMatch(dataLink, /href\s*=\s*["']?\s*data:/i);
+  if (/<a\b/i.test(dataLink)) {
+    assert.match(dataLink, /href="#"/);
+  }
+
+  const protocolRelative = markdownLite.renderMd("[x](//evil.example/path)");
+  assert.doesNotMatch(protocolRelative, /href\s*=\s*["']?\s*\/\//i);
+  if (/<a\b/i.test(protocolRelative)) {
+    assert.match(protocolRelative, /href="#"/);
+  }
+});
+
+test("renderMd keeps tables and task lists while stripping XSS payloads", () => {
+  const html = markdownLite.renderMd(
+    [
+      "| name | value |",
+      "| --- | --- |",
+      "| a | <script>x</script> |",
+      "",
+      "- [x] done <img src=x onerror=alert(1)>",
+      "- [ ] todo [bad](javascript:alert(1))",
+    ].join("\n")
+  );
+
+  assert.match(html, /<table class="md-table">/);
+  assert.match(html, /type="checkbox"/);
+  assert.match(html, /disabled/);
+  // Escaped text is fine; live tags / executable hrefs are not.
+  assert.doesNotMatch(html, /<script\b/i);
+  assert.doesNotMatch(html, /<img\b/i);
+  assert.doesNotMatch(html, /<[^>]*\bonerror\b/i);
+  assert.doesNotMatch(html, /href\s*=\s*["']?\s*javascript:/i);
+  // Inline HTML inside table cells must be text, not executable markup.
+  assert.match(html, /&lt;script&gt;/);
+});
+
 test("isSafeHttpUrl only allows http(s)", () => {
   assert.equal(markdownLite.isSafeHttpUrl("https://example.com/a"), true);
   assert.equal(markdownLite.isSafeHttpUrl("http://example.com"), true);
   assert.equal(markdownLite.isSafeHttpUrl("javascript:alert(1)"), false);
   assert.equal(markdownLite.isSafeHttpUrl("data:text/html,hi"), false);
   assert.equal(markdownLite.isSafeHttpUrl("//evil.com"), false);
+  assert.equal(markdownLite.isSafeHttpUrl("vbscript:msgbox(1)"), false);
+  assert.equal(markdownLite.isSafeHttpUrl("file:///etc/passwd"), false);
 });
 
 test("renderMd highlight:false skips Prism and omits data-prism", () => {

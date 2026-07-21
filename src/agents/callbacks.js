@@ -3,6 +3,8 @@ const transcript = require("../session/transcript");
 const { ENV } = require("../shared/brand");
 const { finalizeA2ARoutes } = require("./a2a-finalize");
 const { AGENTS } = require("./catalog");
+const agentIdentity = require("./identity");
+const reviewState = require("./review-state");
 
 // Default token TTL: 30 minutes. Long enough for most invocations, short
 // enough to prevent stale tokens from accumulating after the worklist exits.
@@ -233,6 +235,53 @@ function postMessage(
     a2aState: thread,
     logger: console,
   });
+
+  if (typeof thread.applyReviewEvent === "function") {
+    const roleOf = (agentId) =>
+      String(agentIdentity.getIdentity(agentId)?.role || AGENTS[agentId]?.role || "")
+        .trim()
+        .toLowerCase();
+    const actorRole = roleOf(agent);
+    const reviewerTarget = finalized.mentions.find((target) => roleOf(target) === "reviewer") || null;
+    const implementerTarget =
+      finalized.mentions.find((target) => roleOf(target) === "implementer") || null;
+    const verdict = reviewState.extractReviewVerdict(content);
+    if (actorRole === "reviewer" && verdict === "request-changes") {
+      thread.applyReviewEvent(
+        {
+          type: reviewState.EVENTS.CHANGES_REQUESTED,
+          actor: agent,
+          actorRole,
+          counterpart: implementerTarget || thread.reviewWorkflow?.implementer,
+        },
+        routeInvocationId
+      );
+    } else if (
+      actorRole === "reviewer" &&
+      (verdict === "approve" || verdict === "approve-with-nits")
+    ) {
+      thread.applyReviewEvent(
+        {
+          type: reviewState.EVENTS.APPROVED,
+          actor: agent,
+          actorRole,
+          counterpart: thread.reviewWorkflow?.implementer,
+          verdict,
+        },
+        routeInvocationId
+      );
+    } else if (actorRole === "implementer" && reviewerTarget) {
+      thread.applyReviewEvent(
+        {
+          type: reviewState.EVENTS.REVIEW_REQUESTED,
+          actor: agent,
+          actorRole,
+          counterpart: reviewerTarget,
+        },
+        routeInvocationId
+      );
+    }
+  }
 
   const result = {
     ok: true,

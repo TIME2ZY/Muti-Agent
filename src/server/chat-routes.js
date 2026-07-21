@@ -8,6 +8,7 @@ const { ENV } = require("../shared/brand");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
+const reviewState = require("../agents/review-state");
 
 const BILLING_FIELDS = Object.freeze([
   "inputTokens",
@@ -82,6 +83,7 @@ function createChatRoutes({
   setSessionProjectDir,
   validateProjectDir,
   setSessionWorktree,
+  setSessionReviewWorkflow,
   appendToSession,
   getSessionMapPath,
   readSessionMap,
@@ -363,8 +365,68 @@ function createChatRoutes({
       windowId: null,
       sealer: null,
       useWorktree: Boolean(useWorktree),
+      reviewWorkflow: reviewState.initialReviewState(),
     };
+
+    // Prefer session.reviewWorkflow; if it was lost (null/idle) but review-state
+    // messages remain, rebuild from the newest snapshot and re-persist.
+    const resolvedReview = reviewState.resolveReviewWorkflow(session);
+    threadCtx.reviewWorkflow = resolvedReview.state;
+    if (
+      resolvedReview.source === "messages" &&
+      typeof setSessionReviewWorkflow === "function"
+    ) {
+      setSessionReviewWorkflow(
+        options.sessionsFile || undefined,
+        sessionId,
+        resolvedReview.state
+      );
+    }
+
     callbacks.registerThread(sessionId, threadCtx);
+
+    const roleOf = (agentId) =>
+      String(agentIdentity.getIdentity?.(agentId)?.role || AGENTS[agentId]?.role || "")
+        .trim()
+        .toLowerCase();
+    const applyReviewEvent = (event, invocationId) => {
+      const result = reviewState.transitionReviewState(threadCtx.reviewWorkflow, event);
+      if (!result.changed) return result;
+      threadCtx.reviewWorkflow = result.state;
+      if (typeof setSessionReviewWorkflow === "function") {
+        setSessionReviewWorkflow(options.sessionsFile || undefined, sessionId, result.state);
+      }
+      if (event.silent === true) return result;
+      const payload = {
+        event: event.type,
+        actor: event.actor || null,
+        ...result.state,
+      };
+      appendToSession(
+        options.sessionsFile || undefined,
+        sessionId,
+        {
+          role: "system",
+          agent: "system",
+          kind: "review-state",
+          content: reviewState.describeReviewState(result.state),
+          reviewEvent: event.type,
+          reviewStatus: result.state.status,
+          reviewRound: result.state.round,
+          // Full snapshot fields so crash recovery can rebuild without the
+          // session.reviewWorkflow field (e.g. SQLite-only thread rows).
+          verdict: result.state.verdict,
+          reviewer: result.state.reviewer,
+          implementer: result.state.implementer,
+          updatedAt: result.state.updatedAt,
+        },
+        { allowCreate: false, windowId: threadCtx.windowId }
+      );
+      if (invocationId) transcript.appendEvent(sessionId, invocationId, "review-state", payload);
+      sendSse(res, "review-state", payload);
+      return result;
+    };
+    threadCtx.applyReviewEvent = applyReviewEvent;
 
     try {
       for (let i = 0; i < worklist.length && threadCtx.a2aCount < maxDepth; i++) {
@@ -390,6 +452,30 @@ function createChatRoutes({
         let contextSealHandled = false;
 
         const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
+        const actorRole = roleOf(agent);
+        if (actorRole === "reviewer") {
+          applyReviewEvent(
+            {
+              type: reviewState.EVENTS.REVIEW_STARTED,
+              actor: agent,
+              actorRole,
+              counterpart: threadCtx.reviewWorkflow.implementer,
+              silent: true,
+            },
+            null
+          );
+        } else if (actorRole === "implementer") {
+          applyReviewEvent(
+            {
+              type: reviewState.EVENTS.FIX_STARTED,
+              actor: agent,
+              actorRole,
+              counterpart: threadCtx.reviewWorkflow.reviewer,
+              silent: true,
+            },
+            null
+          );
+        }
         const startedAt = new Date().toISOString();
         invocationEvents.set(invocationId, {
           invocationId,
@@ -515,7 +601,11 @@ function createChatRoutes({
         const collaborationBlock = renderCollaborationRules(agent, AGENTS, {
           compact: i > 0,
         });
-        const promptParts = [identityBlock, collaborationBlock];
+        const promptParts = [
+          identityBlock,
+          collaborationBlock,
+          reviewState.renderReviewStateBlock(threadCtx.reviewWorkflow),
+        ];
         if (i === 0) {
           promptParts.push(bootstrapPacket, augmentedPrompt);
         } else {
@@ -732,6 +822,47 @@ function createChatRoutes({
           sealerState: sealer.getState(),
         });
         sendSse(res, "agent-exit", { agent, code, signal, invocationId, usage: invocationUsage });
+
+        const routedAgents = parseA2AMentions(assistantContent, agent);
+        const reviewerTarget = routedAgents.find((target) => roleOf(target) === "reviewer") || null;
+        const implementerTarget =
+          routedAgents.find((target) => roleOf(target) === "implementer") || null;
+        const verdict = reviewState.extractReviewVerdict(assistantContent);
+        if (actorRole === "reviewer" && verdict === "request-changes") {
+          applyReviewEvent(
+            {
+              type: reviewState.EVENTS.CHANGES_REQUESTED,
+              actor: agent,
+              actorRole,
+              counterpart: implementerTarget || threadCtx.reviewWorkflow.implementer,
+            },
+            invocationId
+          );
+        } else if (
+          actorRole === "reviewer" &&
+          (verdict === "approve" || verdict === "approve-with-nits")
+        ) {
+          applyReviewEvent(
+            {
+              type: reviewState.EVENTS.APPROVED,
+              actor: agent,
+              actorRole,
+              counterpart: threadCtx.reviewWorkflow.implementer,
+              verdict,
+            },
+            invocationId
+          );
+        } else if (actorRole === "implementer" && reviewerTarget) {
+          applyReviewEvent(
+            {
+              type: reviewState.EVENTS.REVIEW_REQUESTED,
+              actor: agent,
+              actorRole,
+              counterpart: reviewerTarget,
+            },
+            invocationId
+          );
+        }
 
         // Parse structured handoff once per turn (soft — never blocks routing).
         const primaryHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {

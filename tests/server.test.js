@@ -1993,6 +1993,34 @@ test("prompt template uses the cross-platform callback client", () => {
   assert.match(instructions, /TTL/);
 });
 
+test("callbacks.postMessage advances the persisted review workflow", () => {
+  const sessionId = "session-cb-review";
+  const invocationId = "invocation-cb-review";
+  const reviewEvents = [];
+  const threadCtx = {
+    res: { destroyed: false, writableEnded: false, write() {} },
+    worklist: ["grok"],
+    controller: new AbortController(),
+    a2aCount: 0,
+    tokens: new Map([[invocationId, { agentId: "grok", callbackToken: "token" }]]),
+    applyReviewEvent(event, sourceInvocationId) {
+      reviewEvents.push({ event, sourceInvocationId });
+    },
+  };
+  callbacks.registerThread(sessionId, threadCtx);
+
+  try {
+    callbacks.postMessage(sessionId, invocationId, "@OpenCode\n请 review", {});
+    assert.equal(reviewEvents.length, 1);
+    assert.equal(reviewEvents[0].event.type, "review_requested");
+    assert.equal(reviewEvents[0].event.actor, "grok");
+    assert.equal(reviewEvents[0].event.counterpart, "opencode");
+    assert.equal(reviewEvents[0].sourceInvocationId, invocationId);
+  } finally {
+    callbacks.unregisterThread(sessionId);
+  }
+});
+
 // ── Transcript integration (lesson 08 Phase 1) ─────────────────
 
 test("chat endpoint writes transcript events (invocation-start, stdout, invocation-end)", async () => {
@@ -3031,8 +3059,95 @@ test("A2A allows the same agent to re-enter worklist (review → fix)", async ()
       assert.match(prompts[2], /APPLICATION SKILL: receiving-review/);
       assert.doesNotMatch(prompts[2], /APPLICATION SKILL: a2a-handoff/);
       assert.match(prompts[2], /<!-- Agent Identity: grok/);
+      assert.match(prompts[1], /status: reviewing/);
+      assert.match(prompts[2], /status: fixing/);
+
+      const sessionResponse = await fetch(`${baseUrl}/api/sessions/reentry-handoff-test`);
+      const { session } = await sessionResponse.json();
+      assert.equal(session.reviewWorkflow.status, "fixing");
+      assert.equal(session.reviewWorkflow.round, 1);
+      assert.ok(
+        session.messages.some(
+          (message) => message.kind === "review-state" && message.layer === "workflow"
+        )
+      );
     }
   );
+});
+
+test("chat restores review workflow from messages when session field is missing", async () => {
+  const sessionStore = require("../src/server/session-store");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "review-rebuild-"));
+  const sessionsFile = path.join(tmpDir, "sessions.json");
+  const sessionId = "review-rebuild-session";
+
+  ensureSession(sessionsFile, sessionId);
+  sessionStore.appendToSession(sessionsFile, sessionId, {
+    role: "system",
+    agent: "system",
+    kind: "review-state",
+    content: "审查状态：需要修改（第 1 轮）",
+    reviewEvent: "changes_requested",
+    reviewStatus: "changes_requested",
+    reviewRound: 1,
+    verdict: "request-changes",
+    reviewer: "opencode",
+    implementer: "grok",
+    updatedAt: "2026-07-21T02:00:00.000Z",
+  });
+  // Simulate lost thread-level field (e.g. SQLite-only thread row without reviewWorkflow).
+  sessionStore.setSessionReviewWorkflow(sessionsFile, sessionId, null);
+
+  const before = sessionStore.getSession(sessionsFile, sessionId);
+  assert.equal(before.reviewWorkflow, null);
+  assert.equal(before.messages.length, 1);
+
+  await withServer(
+    {
+      sessionsFile,
+      // Keep the pre-seeded sessions file; do not wipe via a fresh temp path.
+      // withServer still creates its own tmpDir for memory/invocations, but
+      // honors an explicit sessionsFile option.
+      spawnRunner() {
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "grok",
+              invocationId: "rebuild-1",
+              text: "continuing fix",
+            }) + "\n"
+          );
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agent: "grok",
+          prompt: "继续修",
+          sessionId,
+        }),
+      });
+      assert.equal(response.status, 200);
+      await response.text();
+
+      const sessionResponse = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
+      const { session } = await sessionResponse.json();
+      assert.equal(session.reviewWorkflow.status, "fixing");
+      assert.equal(session.reviewWorkflow.round, 1);
+      assert.equal(session.reviewWorkflow.verdict, "request-changes");
+      assert.equal(session.reviewWorkflow.reviewer, "opencode");
+      assert.equal(session.reviewWorkflow.implementer, "grok");
+    }
+  );
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 test("bootstrap digest lists prior invocations when chat is re-entered with same sessionId", async () => {
