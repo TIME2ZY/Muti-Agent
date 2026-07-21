@@ -854,6 +854,23 @@ input.task-list-item-checkbox {
   display: none;
 }
 
+/* Interleaved thinking ↔ text timeline (strategy A segment order). */
+.msg-stream-segments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.msg-stream-segments > .msg-thinking {
+  margin-bottom: 0;
+}
+
+.msg-stream-segments > .msg-final-content,
+.msg-stream-segments > .stream-live-text {
+  min-width: 0;
+}
+
 .msg-thinking,
 .msg-process,
 .msg-progress-wrap {

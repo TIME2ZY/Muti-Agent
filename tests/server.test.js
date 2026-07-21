@@ -2564,10 +2564,15 @@ test("frontend chunks process-trace hydrate for long histories", () => {
   assert.match(js, /_hydrateQueue/);
 });
 
-test("frontend app.js uses plain-text live streaming instead of segmented markdown streaming", () => {
+test("frontend live stream paints plain text segments; markdown only on finalize", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
   assert.match(js, /liveText\.className = "stream-live-text"/);
-  assert.match(js, /item\._liveTextEl\.textContent = raw/);
+  assert.match(js, /function paintStreamSegments/);
+  assert.match(js, /stream-live-text/);
+  assert.match(js, /function appendLiveSegment/);
+  // Live path keeps plain text; finalized path may markdown-paint each text segment.
+  assert.match(js, /paintStreamSegments\(item,\s*\{\s*live:\s*true/);
+  assert.match(js, /paintStreamSegments\(item,\s*\{\s*live:\s*false,\s*markdown:\s*true/);
   assert.doesNotMatch(js, /function splitIntoSegments/);
   assert.doesNotMatch(js, /stream-suffix/);
 });
@@ -2580,17 +2585,21 @@ test("frontend surfaces thinking in a collapsed details block and keeps writing 
   assert.match(js, /bubble\.classList\.add\("msg-bubble-live-pending"\)/);
   assert.match(js, /function appendLive\(agent, text,\s*sessionId\)/);
   assert.match(js, /item\.bubble\.classList\.remove\("msg-bubble-live-pending"\)/);
-  assert.match(js, /item\.setBadge\("writing"\)/);
+  assert.match(js, /setBadge\(kind === "text" \? "writing" : "thinking"\)/);
   assert.match(js, /msg-thinking/);
   assert.match(js, /thinking\.delta/);
   assert.match(js, /msg-progress/);
   assert.match(js, /progress\.update/);
   assert.match(js, /msg-process/);
   assert.match(js, /wrapProcessDetails/);
-  assert.match(js, /thinkingEl\.open = false/);
+  // Collapsed by default; interleaved segments restore think↔text timeline.
+  assert.match(js, /open:\s*false/);
+  assert.match(js, /function buildContentSegmentsFromEvents/);
+  assert.match(js, /msg-stream-segments/);
   assert.match(css, /\.msg-thinking/);
   assert.match(css, /\.msg-progress/);
   assert.match(css, /\.msg-process/);
+  assert.match(css, /\.msg-stream-segments/);
 });
 
 test("frontend app.js surfaces Codex progress before first text delta", () => {
