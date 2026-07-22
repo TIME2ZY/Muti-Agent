@@ -3,6 +3,13 @@ function createSessionReadService({ mode = "dual", storage, fileStore, logger = 
     throw new Error("File session store is required.");
   }
 
+  function displayTitle(title) {
+    if (!title) return "(空对话)";
+    return typeof fileStore.buildSessionTitle === "function"
+      ? fileStore.buildSessionTitle(title)
+      : title;
+  }
+
   function attempt(operation, work) {
     if (mode !== "sqlite" || !storage) return undefined;
     try {
@@ -40,7 +47,7 @@ function createSessionReadService({ mode = "dual", storage, fileStore, logger = 
     const sqliteSessions = attempt("list sessions", () =>
       storage.threads.listWithMessageCounts().map((thread) => ({
         id: thread.id,
-        title: thread.title || "(空对话)",
+        title: displayTitle(thread.title),
         createdAt: thread.createdAt,
         messageCount: thread.messageCount,
         lastAgent: thread.lastAgentId || "",

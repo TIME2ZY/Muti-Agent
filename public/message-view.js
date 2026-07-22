@@ -669,8 +669,12 @@
       return details;
     }
 
-    function makeSetBadge(badgeEl) {
+    function makeSetBadge(badgeEl, wrapper) {
       return function setBadge(badgeState) {
+        if (wrapper && wrapper.dataset) {
+          if (badgeState) wrapper.dataset.agentStatus = badgeState;
+          else delete wrapper.dataset.agentStatus;
+        }
         if (!badgeState) {
           badgeEl.style.display = "none";
           badgeEl.className = "msg-badge";
@@ -753,17 +757,25 @@
       bubble.className = "msg-bubble";
       card.appendChild(bubble);
 
+      const avatar =
+        role === "assistant" && agent && globalScope.AgentAvatar
+          ? globalScope.AgentAvatar.createAgentAvatar(agent, {
+              label: roleDisplayName(role, agent),
+              className: "agent-avatar-message",
+            })
+          : null;
+
       if (role === "assistant" && content === "") {
         bubble.classList.add("msg-bubble-live");
         bubble.classList.add("msg-bubble-live-pending");
         const liveText = document.createElement("div");
         liveText.className = "stream-live-text";
         bubble.append(liveText);
-        wrapper.append(meta, card);
+        wrapper.append(...(avatar ? [avatar, meta, card] : [meta, card]));
         messagesEl.insertBefore(wrapper, spacerEl);
         if (scroll !== false) scheduleScrollDown(true);
 
-        const setBadge = makeSetBadge(badge);
+        const setBadge = makeSetBadge(badge, wrapper);
         return {
           wrapper,
           bubble,
@@ -782,7 +794,7 @@
       paintFinalMarkdown(contentEl, content, { copyBtn });
       bubble.appendChild(contentEl);
 
-      wrapper.append(meta, card);
+      wrapper.append(...(avatar ? [avatar, meta, card] : [meta, card]));
       if (role === "assistant" && showUsage !== false) renderMessageUsage(wrapper, usage);
       messagesEl.insertBefore(wrapper, spacerEl);
       if (scroll !== false) scheduleScrollDown(true);
@@ -792,7 +804,7 @@
         scheduleHydrateProcessTrace(bubble, invocationId);
       }
 
-      const setBadge = makeSetBadge(badge);
+      const setBadge = makeSetBadge(badge, wrapper);
       return { wrapper, bubble, meta, setBadge, contentEl };
     }
 

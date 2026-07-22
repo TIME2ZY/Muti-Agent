@@ -97,6 +97,57 @@
   max-width: min(94%, 52rem);
 }
 
+.message.assistant {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-areas:
+    "avatar meta"
+    "avatar card"
+    ". usage";
+  column-gap: 10px;
+  row-gap: 6px;
+}
+
+.message.assistant > .agent-avatar-message {
+  grid-area: avatar;
+  align-self: start;
+  margin-top: 1px;
+}
+
+.message.assistant > .msg-meta { grid-area: meta; }
+.message.assistant > .msg-card { grid-area: card; }
+.message.assistant > .msg-usage { grid-area: usage; }
+
+.message[data-agent-status="thinking"] .agent-avatar-message,
+.message[data-agent-status="writing"] .agent-avatar-message {
+  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 55%, var(--border));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--agent-color, var(--accent)) 12%, transparent),
+    0 1px 2px color-mix(in srgb, #0f1412 7%, transparent);
+}
+
+.message[data-agent-status="thinking"] .agent-avatar-message::after,
+.message[data-agent-status="writing"] .agent-avatar-message::after,
+.message[data-agent-status="error"] .agent-avatar-message::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--surface-canvas);
+  border-radius: 50%;
+  background: var(--agent-color, var(--accent));
+}
+
+.message[data-agent-status="thinking"] .agent-avatar-message::after {
+  background: var(--stderr);
+}
+
+.message[data-agent-status="error"] .agent-avatar-message::after {
+  background: var(--danger);
+}
+
 .message.system {
   max-width: min(72%, 36rem);
   opacity: 0.9;
@@ -211,7 +262,7 @@
 .message:focus-within .msg-copy { opacity: 0.6; }
 .msg-copy:hover { opacity: 1; color: var(--accent); }
 
-/* Canvas messages: user = soft bubble on the right; assistant = agent rail */
+/* Canvas messages: user on the right; branded Agent bubbles on the left. */
 .msg-card {
   position: relative;
   border: none;
@@ -233,15 +284,14 @@
 }
 
 .message.assistant .msg-card {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-shadow: inset 2px 0 0 var(--agent-color, var(--assistant-line));
-  padding-left: 4px;
+  background: color-mix(in srgb, var(--surface-raised) 74%, var(--surface-canvas));
+  border: 1px solid color-mix(in srgb, var(--agent-color, var(--assistant-line)) 16%, var(--border-subtle));
+  border-radius: var(--radius-xs) var(--radius-lg) var(--radius-lg) var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 
 .msg-usage {
-  margin-left: var(--space-4);
+  margin-left: 0;
   color: var(--text-tertiary);
   font: 10px/1.3 var(--font-ui);
 }

@@ -42,8 +42,6 @@
   const recallSearchInputEl = recallPanelInlineEl
     ? recallPanelInlineEl.querySelector(".recall-search input")
     : null;
-  const currentAgentEl = $("#current-agent");
-  const currentAgentNameEl = $("#current-agent-name");
   const currentSessionTitleEl = $("#current-session-title");
   const contextStatusEl = $("#context-status");
   const runBarEl = $("#run-bar");
@@ -749,8 +747,6 @@
 
   const agentPanelView = window.AgentPanelView.createAgentPanelView({
     agentTabsEl,
-    currentAgentEl,
-    currentAgentNameEl,
     contextStatusEl,
     state,
     agentLabel,
@@ -765,16 +761,6 @@
   renderAgentTabs = agentPanelView.renderAgentTabs;
   renderCurrentAgent = agentPanelView.renderCurrentAgent;
 
-  if (currentAgentEl) {
-    currentAgentEl.addEventListener("click", () => {
-      activateRightTab("agents").then(() => {
-        if (agentTabsEl) {
-          const selected = agentTabsEl.querySelector(".agent-tab.is-selected");
-          if (selected && typeof selected.focus === "function") selected.focus();
-        }
-      });
-    });
-  }
   if (contextStatusEl) {
     contextStatusEl.addEventListener("click", () => activateRightTab("agents"));
   }
