@@ -53,7 +53,14 @@
         <div class="sidebar-brand" aria-label="Shift 交班台">
           <span class="brand-mark" aria-hidden="true">
             <svg class="icon-svg" width="22" height="22" viewBox="0 0 24 24" focusable="false">
-              <path d="M5 6.5h8.5M10.5 3l3.5 3.5-3.5 3.5M19 17.5h-8.5M13.5 14l-3.5 3.5 3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="M5 6.5h8.5M10.5 3l3.5 3.5-3.5 3.5M19 17.5h-8.5M13.5 14l-3.5 3.5 3.5 3.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
           </span>
           <span class="brand-copy">
@@ -63,8 +70,21 @@
         </div>
         <div class="sidebar-head">
           <button class="btn-new-chat" id="btn-new-chat" type="button">
-            <svg class="icon-svg" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-              <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            <svg
+              class="icon-svg"
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                d="M8 3v10M3 8h10"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
             </svg>
             新建会话
           </button>
@@ -81,7 +101,7 @@
           <div class="main-identity">
             <span class="main-title" title="SHIFT AGENTS · 交班台">
               <small>当前会话</small>
-              <strong>协作线程</strong>
+              <strong id="current-session-title">协作线程</strong>
             </span>
             <button
               type="button"
@@ -109,7 +129,14 @@
 
           <div class="main-header-tools">
             <div class="header-tool-group" aria-label="项目与工作区">
-              <span class="project-dir" id="project-dir" title="点击修改项目目录">
+              <span
+                class="project-dir"
+                id="project-dir"
+                title="点击修改项目目录"
+                aria-label="修改项目目录"
+                role="button"
+                tabindex="0"
+              >
                 <span class="project-dir-icon" aria-hidden="true">
                   <svg
                     class="icon-svg"
@@ -170,13 +197,18 @@
             <div class="empty-state" id="empty-state">
               <div class="empty-state-icon" aria-hidden="true">
                 <svg class="icon-svg" width="28" height="28" viewBox="0 0 32 32" focusable="false">
-                  <path d="M7 9h11M14 5l4 4-4 4M25 23H14M18 19l-4 4 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                  <path
+                    d="M7 9h11M14 5l4 4-4 4M25 23H14M18 19l-4 4 4 4"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
                 </svg>
               </div>
               <p class="empty-state-title">今天想推进什么？</p>
-              <p class="empty-state-hint">
-                直接描述任务；需要特定协作者时输入 @
-              </p>
+              <p class="empty-state-hint">直接描述任务；需要特定协作者时输入 @</p>
               <div
                 class="empty-state-chips"
                 id="empty-state-chips"
@@ -224,7 +256,7 @@
               aria-controls="agent-panel"
               tabindex="0"
             >
-              Agents
+              协作者
             </button>
             <button
               id="panel-tab-workspace"
@@ -277,9 +309,12 @@
             <div class="recall-search">
               <input
                 id="recall-search-input-inline"
+                name="recall-search"
                 type="search"
                 placeholder="搜索历史（关键词）…"
                 autocomplete="off"
+                spellcheck="false"
+                aria-label="搜索历史"
               />
             </div>
             <div class="recall-body" id="recall-body-inline"></div>
@@ -304,8 +339,10 @@
               ></div>
               <textarea
                 id="prompt"
+                name="prompt"
                 placeholder="描述任务；输入 @ 可指定协作者…"
                 rows="1"
+                aria-label="任务描述"
                 aria-autocomplete="list"
                 aria-controls="mention-menu"
                 aria-expanded="false"

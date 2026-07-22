@@ -2,14 +2,7 @@
   "use strict";
 
   function createProjectHeader(deps) {
-    const {
-      projectDirEl,
-      projectDirPath,
-      worktreeStatusEl,
-      state,
-      sessionApi,
-      worktreeApi,
-    } = deps;
+    const { projectDirEl, projectDirPath, worktreeStatusEl, state, sessionApi, worktreeApi } = deps;
 
     async function loadProjectDir(sessionId = state.currentSessionId) {
       if (!sessionId) {
@@ -59,7 +52,9 @@
         return;
       }
       try {
-        state.worktreeStatus = await worktreeApi.readStatus(state.currentSessionId, { allowMissing: true });
+        state.worktreeStatus = await worktreeApi.readStatus(state.currentSessionId, {
+          allowMissing: true,
+        });
         renderWorktreeStatus();
       } catch {
         state.worktreeStatus = null;
@@ -69,13 +64,19 @@
 
     function bindProjectDirEdit() {
       if (!projectDirEl) return;
-      projectDirEl.addEventListener("click", () => {
+      const beginEdit = () => {
         if (projectDirEl.classList.contains("editing")) return;
         const input = document.createElement("input");
         input.className = "project-dir-input";
+        input.name = "project-directory";
         input.value = state.projectDir;
         input.placeholder = "/path/to/project";
+        input.autocomplete = "off";
+        input.spellcheck = false;
+        input.setAttribute("aria-label", "项目目录");
         projectDirEl.classList.add("editing");
+        projectDirEl.removeAttribute("role");
+        projectDirEl.tabIndex = -1;
         projectDirEl.appendChild(input);
         input.focus();
         input.select();
@@ -84,6 +85,8 @@
           const val = input.value.trim();
           input.remove();
           projectDirEl.classList.remove("editing");
+          projectDirEl.setAttribute("role", "button");
+          projectDirEl.tabIndex = 0;
 
           if (save && val && val !== state.projectDir) {
             if (!state.currentSessionId) {
@@ -101,10 +104,21 @@
         };
 
         input.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") { e.preventDefault(); done(true); }
-          if (e.key === "Escape") { done(false); }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            done(true);
+          }
+          if (e.key === "Escape") {
+            done(false);
+          }
         });
         input.addEventListener("blur", () => done(true));
+      };
+      projectDirEl.addEventListener("click", beginEdit);
+      projectDirEl.addEventListener("keydown", (e) => {
+        if (e.target !== projectDirEl || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        beginEdit();
       });
     }
 

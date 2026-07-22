@@ -8,6 +8,11 @@
     return "";
   }
 
+  function sessionAriaLabel(title, messageCount, status) {
+    const statusText = runStatusLabel(status);
+    return `${title || "空对话"}，${messageCount || 0} 条消息${statusText ? `，${statusText}` : ""}`;
+  }
+
   function applyDot(dot, status) {
     if (!dot) return;
     const st = status || "idle";
@@ -65,13 +70,11 @@
     for (const s of list) {
       buckets[dayBucket(s && s.createdAt, nowMs)].push(s);
     }
-    return GROUP_ORDER
-      .filter((key) => buckets[key].length > 0)
-      .map((key) => ({
-        key,
-        label: GROUP_LABEL[key],
-        items: buckets[key],
-      }));
+    return GROUP_ORDER.filter((key) => buckets[key].length > 0).map((key) => ({
+      key,
+      label: GROUP_LABEL[key],
+      items: buckets[key],
+    }));
   }
 
   function createSessionListView(deps) {
@@ -95,9 +98,18 @@
       const statusText = runStatusLabel(runStatus);
       const item = document.createElement("div");
       item.dataset.sessionId = s.id;
-      item.className = "session-item"
-        + (s.id === currentId ? " active" : "")
-        + (runStatus === "running" ? " is-running" : "");
+      item.className =
+        "session-item" +
+        (s.id === currentId ? " active" : "") +
+        (runStatus === "running" ? " is-running" : "");
+
+      const select = document.createElement("button");
+      select.className = "session-select";
+      select.type = "button";
+      select.setAttribute("aria-current", s.id === currentId ? "true" : "false");
+      select.dataset.sessionTitle = s.title || "";
+      select.dataset.messageCount = String(s.messageCount || 0);
+      select.setAttribute("aria-label", sessionAriaLabel(s.title, s.messageCount, runStatus));
 
       const dot = document.createElement("span");
       applyDot(dot, runStatus);
@@ -122,10 +134,10 @@
       }
 
       info.append(title, meta);
-      item.append(dot, info);
+      select.append(dot, info);
+      item.appendChild(select);
 
-      item.addEventListener("click", (e) => {
-        if (e.target.closest(".btn-delete-session")) return;
+      select.addEventListener("click", () => {
         if (typeof onSelect === "function") onSelect(s.id);
       });
 
@@ -181,7 +193,9 @@
       if (!sessionId) return;
       let item = itemById.get(sessionId);
       if (!item && sessionListEl) {
-        item = sessionListEl.querySelector(`[data-session-id="${CSS.escape ? CSS.escape(sessionId) : sessionId}"]`);
+        item = sessionListEl.querySelector(
+          `[data-session-id="${CSS.escape ? CSS.escape(sessionId) : sessionId}"]`
+        );
       }
       if (!item) return;
 
@@ -193,6 +207,13 @@
       if (!meta) return;
       let statusEl = meta.querySelector(".session-run-status");
       const label = runStatusLabel(st);
+      const select = item.querySelector(".session-select");
+      if (select) {
+        select.setAttribute(
+          "aria-label",
+          sessionAriaLabel(select.dataset.sessionTitle, Number(select.dataset.messageCount), st)
+        );
+      }
       if (!label) {
         if (statusEl) statusEl.remove();
         return;
@@ -212,6 +233,7 @@
   const api = {
     createSessionListView,
     runStatusLabel,
+    sessionAriaLabel,
     dayBucket,
     groupSessions,
     GROUP_LABEL,

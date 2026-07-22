@@ -2488,7 +2488,7 @@ test("frontend uses unified Chinese console copy in the main shell", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.match(html, /SHIFT AGENTS · 交班台/);
   assert.match(html, /本会话规则/);
-  assert.match(html, />\s*Agents\s*</);
+  assert.match(html, />\s*协作者\s*</);
   assert.doesNotMatch(html, /agent-panel-title/);
   // New chat lives in the sidebar only; composer keeps a single Send action.
   assert.match(html, /btn-new-chat/);

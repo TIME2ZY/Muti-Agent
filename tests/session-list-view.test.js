@@ -4,6 +4,7 @@ const {
   dayBucket,
   groupSessions,
   runStatusLabel,
+  sessionAriaLabel,
 } = require("../public/session-list-view.js");
 
 test("runStatusLabel covers known statuses", () => {
@@ -11,6 +12,11 @@ test("runStatusLabel covers known statuses", () => {
   assert.equal(runStatusLabel("done"), "完成");
   assert.equal(runStatusLabel("error"), "失败");
   assert.equal(runStatusLabel("idle"), "");
+});
+
+test("sessionAriaLabel combines title, count, and runtime status", () => {
+  assert.equal(sessionAriaLabel("审查 diff", 3, "running"), "审查 diff，3 条消息，运行中");
+  assert.equal(sessionAriaLabel("", 0, "idle"), "空对话，0 条消息");
 });
 
 test("dayBucket maps today / yesterday / earlier", () => {
@@ -33,10 +39,22 @@ test("groupSessions preserves order and skips empty groups", () => {
     { id: "d", createdAt: new Date(2026, 5, 1, 10, 0, 0).toISOString(), title: "D" },
   ];
   const groups = groupSessions(sessions, now);
-  assert.deepEqual(groups.map((g) => g.key), ["today", "yesterday", "earlier"]);
-  assert.deepEqual(groups[0].items.map((s) => s.id), ["a", "b"]);
-  assert.deepEqual(groups[1].items.map((s) => s.id), ["c"]);
-  assert.deepEqual(groups[2].items.map((s) => s.id), ["d"]);
+  assert.deepEqual(
+    groups.map((g) => g.key),
+    ["today", "yesterday", "earlier"]
+  );
+  assert.deepEqual(
+    groups[0].items.map((s) => s.id),
+    ["a", "b"]
+  );
+  assert.deepEqual(
+    groups[1].items.map((s) => s.id),
+    ["c"]
+  );
+  assert.deepEqual(
+    groups[2].items.map((s) => s.id),
+    ["d"]
+  );
   assert.equal(groups[0].label, "今天");
   assert.equal(groups[1].label, "昨天");
   assert.equal(groups[2].label, "更早");
@@ -44,8 +62,9 @@ test("groupSessions preserves order and skips empty groups", () => {
 
 test("groupSessions with only earlier items omits today/yesterday headings", () => {
   const now = new Date(2026, 6, 10, 15, 0, 0).getTime();
-  const groups = groupSessions([
-    { id: "old", createdAt: new Date(2026, 1, 1).toISOString() },
-  ], now);
-  assert.deepEqual(groups.map((g) => g.key), ["earlier"]);
+  const groups = groupSessions([{ id: "old", createdAt: new Date(2026, 1, 1).toISOString() }], now);
+  assert.deepEqual(
+    groups.map((g) => g.key),
+    ["earlier"]
+  );
 });
