@@ -7,45 +7,47 @@
   color-scheme: light dark;
 
   /* ── Base surfaces (legacy aliases kept) ── */
-  --surface:        light-dark(#f5f6f8, #171923);
+  --surface: light-dark(#f5f6f8, #171923);
   --surface-raised: light-dark(#e9ebf0, #202330);
-  --surface-inset:  light-dark(#e6e8ed, #10121a);
+  --surface-inset: light-dark(#e6e8ed, #10121a);
 
   /* ── Regional surfaces (panel differentiation) ── */
-  --surface-rail:        light-dark(#e9ebf0, #11131b);
-  --surface-canvas:      light-dark(#fbfbfa, #181a24);
-  --surface-instrument:  light-dark(#f2f3f6, #1c1f2a);
+  --surface-rail: light-dark(#e9ebf0, #11131b);
+  --surface-canvas: light-dark(#fbfbfa, #181a24);
+  --surface-instrument: light-dark(#f2f3f6, #1c1f2a);
   --surface-instrument-raised: light-dark(#e7e9ef, #252837);
 
   /* Text */
-  --text-primary:   light-dark(#1e2230, #f0f1f5);
+  --text-primary: light-dark(#1e2230, #f0f1f5);
   --text-secondary: light-dark(#5b6170, #a8adbb);
-  --text-tertiary:  light-dark(#7a8190, #737989);
+  --text-tertiary: light-dark(#646c7c, #9299aa);
 
   /* Borders */
-  --border:         light-dark(#c9cdd6, #3c4050);
-  --border-subtle:  light-dark(#dde0e6, #2b2e3c);
-  --border-hard:    light-dark(#b7bcc7, #4b5060);
+  --border: light-dark(#c9cdd6, #3c4050);
+  --border-subtle: light-dark(#dde0e6, #2b2e3c);
+  --border-hard: light-dark(#b7bcc7, #4b5060);
 
   /* Primary CTA / focus (electric blue — sole solid fill accent) */
-  --accent:         light-dark(#5148d8, #8f87ff);
-  --accent-hover:   light-dark(#4038be, #aaa4ff);
-  --accent-text:    light-dark(#ffffff, #10111a);
+  --accent: light-dark(#5148d8, #8f87ff);
+  --accent-hover: light-dark(#4038be, #aaa4ff);
+  --accent-text: light-dark(#ffffff, #10111a);
 
   /* Nav selection (left rail — cooler, does not compete with CTA) */
-  --accent-nav:     light-dark(#5148d8, #8f87ff);
-  --accent-nav-bg:  light-dark(color-mix(in srgb, #5148d8 9%, var(--surface-rail)),
-                               color-mix(in srgb, #8f87ff 11%, var(--surface-rail)));
+  --accent-nav: light-dark(#5148d8, #8f87ff);
+  --accent-nav-bg: light-dark(
+    color-mix(in srgb, #5148d8 9%, var(--surface-rail)),
+    color-mix(in srgb, #8f87ff 11%, var(--surface-rail))
+  );
 
   /* Semantic */
-  --danger:         light-dark(#b91c1c, #f07178);
-  --danger-hover:   light-dark(#991b1b, #f5a0a5);
-  --danger-text:    light-dark(#f8fafc, #1a0a0a);
-  --stderr:         light-dark(#a16207, #d4a843);
-  --success:        light-dark(#15803d, #6ba87a);
+  --danger: light-dark(#b91c1c, #f07178);
+  --danger-hover: light-dark(#991b1b, #f5a0a5);
+  --danger-text: light-dark(#f8fafc, #1a0a0a);
+  --stderr: light-dark(#a16207, #d4a843);
+  --success: light-dark(#15803d, #6ba87a);
 
   /* Message roles */
-  --user-bg:        light-dark(#eeedff, #292845);
+  --user-bg: light-dark(#eeedff, #292845);
   --assistant-line: light-dark(#969cac, #555b6d);
 
   /* Per-agent palette (identity only — not chrome chrome) */
@@ -60,10 +62,10 @@
   /* Semantic badge surfaces (theme-aware) */
   --badge-thinking-bg: light-dark(#f0e6d3, color-mix(in srgb, var(--stderr) 18%, var(--surface)));
   --badge-thinking-fg: light-dark(#8a6d3b, var(--stderr));
-  --badge-writing-bg:  color-mix(in srgb, var(--accent) 12%, var(--surface));
-  --badge-writing-fg:  var(--accent);
-  --badge-error-bg:    color-mix(in srgb, var(--danger) 12%, var(--surface));
-  --badge-error-fg:    var(--danger);
+  --badge-writing-bg: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  --badge-writing-fg: var(--accent);
+  --badge-error-bg: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  --badge-error-fg: var(--danger);
 
   /* Elevation */
   --shadow-sm: 0 1px 2px color-mix(in srgb, #0f1412 5%, transparent);
@@ -72,16 +74,21 @@
   --overlay-scrim: color-mix(in srgb, #000 45%, transparent);
 
   /* Focus ring */
-  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
-  --focus-ring-danger: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--danger) 50%, transparent);
+  --focus-ring:
+    0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
+  --focus-ring-danger:
+    0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--danger) 50%, transparent);
 
   /* Typography roles
      --font-ui: chrome, buttons, nav titles
      --font-body: reading (message prose)
      --font-mono: paths, diffs, model ids, timestamps only */
-  --font-ui: "Segoe UI Variable", "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-ui:
+    "Segoe UI Variable", "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui,
+    sans-serif;
   --font-body: var(--font-ui);
-  --font-mono: "Cascadia Code", "IBM Plex Mono", "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  --font-mono:
+    "Cascadia Code", "IBM Plex Mono", "JetBrains Mono", "SF Mono", ui-monospace, monospace;
 
   /* Spacing scale (8px base) */
   --space-1: 4px;
@@ -112,7 +119,7 @@
   --row-pad-y: calc(7px * var(--density));
   --msg-gap: calc(18px * var(--density));
   --header-pad-y: calc(10px * var(--density));
-  --composer-pad-y: calc(10px * var(--density));
+  --composer-pad-y: calc(8px * var(--density));
 
   /* Control sizing */
   --btn-height: 36px;
@@ -122,7 +129,7 @@
   --duration-fast: 140ms;
   --duration: 200ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-standard: cubic-bezier(0.2, 0.0, 0.0, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* Explicit theme: always set via JS (light | dark) */
@@ -149,9 +156,21 @@
 }
 
 /* Agent color slots via data-agent-color="1".."6" */
-[data-agent-color="1"] { --agent-color: var(--agent-1); }
-[data-agent-color="2"] { --agent-color: var(--agent-2); }
-[data-agent-color="3"] { --agent-color: var(--agent-3); }
-[data-agent-color="4"] { --agent-color: var(--agent-4); }
-[data-agent-color="5"] { --agent-color: var(--agent-5); }
-[data-agent-color="6"] { --agent-color: var(--agent-6); }
+[data-agent-color="1"] {
+  --agent-color: var(--agent-1);
+}
+[data-agent-color="2"] {
+  --agent-color: var(--agent-2);
+}
+[data-agent-color="3"] {
+  --agent-color: var(--agent-3);
+}
+[data-agent-color="4"] {
+  --agent-color: var(--agent-4);
+}
+[data-agent-color="5"] {
+  --agent-color: var(--agent-5);
+}
+[data-agent-color="6"] {
+  --agent-color: var(--agent-6);
+}

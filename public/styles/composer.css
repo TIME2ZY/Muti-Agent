@@ -4,7 +4,7 @@
 
 .composer {
   border-top: 1px solid var(--border-subtle);
-  padding: var(--composer-pad-y) var(--space-5) calc(var(--space-4) * var(--density));
+  padding: var(--composer-pad-y) var(--space-4) calc(var(--space-3) * var(--density));
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -41,12 +41,22 @@
 }
 
 @keyframes run-bar-pulse {
-  0%, 100% { opacity: 0.35; transform: scale(0.9); }
-  50% { opacity: 1; transform: scale(1); }
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .run-bar-dot { animation: none; opacity: 0.85; }
+  .run-bar-dot {
+    animation: none;
+    opacity: 0.85;
+  }
 }
 
 .run-bar-label {
@@ -92,7 +102,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: 10px 10px 10px 14px;
+  padding: 8px 8px 8px 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   background: var(--surface-canvas);
@@ -104,7 +114,9 @@
 
 .composer-shell:focus-within {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  box-shadow: var(--shadow-md), 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .composer-input {
@@ -130,7 +142,9 @@
   z-index: 40;
 }
 
-.mention-menu[hidden] { display: none; }
+.mention-menu[hidden] {
+  display: none;
+}
 
 .mention-option {
   display: grid;
@@ -170,7 +184,7 @@
 
 .composer textarea {
   width: 100%;
-  min-height: 44px;
+  min-height: 38px;
   max-height: min(34vh, 280px);
   resize: none;
   overflow-y: auto;
@@ -246,7 +260,11 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: transparent;
-  transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .worktree-mode:hover .worktree-mode-chip {

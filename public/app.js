@@ -44,6 +44,7 @@
     : null;
   const currentAgentEl = $("#current-agent");
   const currentAgentNameEl = $("#current-agent-name");
+  const currentSessionTitleEl = $("#current-session-title");
   const contextStatusEl = $("#context-status");
   const runBarEl = $("#run-bar");
   const runBarLabelEl = $("#run-bar-label");
@@ -557,6 +558,14 @@
 
   function renderSessionList(sessions) {
     if (sessionListView) sessionListView.render(sessions);
+    if (currentSessionTitleEl) {
+      const current = Array.isArray(sessions)
+        ? sessions.find((session) => session && session.id === state.currentSessionId)
+        : null;
+      const title = current && current.title ? current.title : "新会话";
+      currentSessionTitleEl.textContent = title;
+      currentSessionTitleEl.title = title;
+    }
   }
 
   sessionListView = window.SessionListView.createSessionListView({
