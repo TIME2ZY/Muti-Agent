@@ -47,6 +47,17 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
   }
 
   async function listInvocationsWithMeta(threadId) {
+    // sqlite mode is strict single-store: never probe transcript for online reads.
+    if (mode === "sqlite" && storage) {
+      const sqliteRecords = trySqlite("list invocations", () =>
+        storage.invocations.listForThreadWithMeta(threadId)
+      );
+      if (sqliteRecords === undefined) return [];
+      return sqliteRecords
+        .map(invocationFromSqlite)
+        .sort((a, b) => String(b.startedAt || "").localeCompare(a.startedAt || ""));
+    }
+
     const sqliteRecords = trySqlite("list invocations", () =>
       storage.invocations.listForThreadWithMeta(threadId)
     );
@@ -59,18 +70,11 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
 
     const mappedSqlite = sqliteRecords.map(invocationFromSqlite);
     const merged = new Map();
-    if (mode === "sqlite") {
-      for (const record of mappedSqlite) merged.set(record.invocationId, record);
-      for (const record of fileRecords) {
-        if (!merged.has(record.invocationId)) merged.set(record.invocationId, record);
-      }
-    } else {
-      for (const record of fileRecords) merged.set(record.invocationId, record);
-      for (const record of mappedSqlite) {
-        const fileRecord = merged.get(record.invocationId);
-        if (!fileRecord || record.eventCount >= fileRecord.eventCount) {
-          merged.set(record.invocationId, record);
-        }
+    for (const record of fileRecords) merged.set(record.invocationId, record);
+    for (const record of mappedSqlite) {
+      const fileRecord = merged.get(record.invocationId);
+      if (!fileRecord || record.eventCount >= fileRecord.eventCount) {
+        merged.set(record.invocationId, record);
       }
     }
     return [...merged.values()].sort((a, b) =>
@@ -134,6 +138,14 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       // With a healthy SQLite index, do not fall back to full-file scans (R0 / R8).
       if (sqliteHits !== undefined && mode !== "files") {
         result = finalizeSearchResult(sqliteHits.slice(0, limit), {
+          query: searchQuery,
+          limit,
+          weakQuery: false,
+        });
+      } else if (mode === "sqlite" && storage) {
+        // Strict single-store: SQLite miss/error does not resurrect transcript.
+        source = sqliteHits === undefined ? "sqlite-error" : "sqlite";
+        result = finalizeSearchResult([], {
           query: searchQuery,
           limit,
           weakQuery: false,
@@ -486,6 +498,12 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
   }
 
   async function readInvocationPage(threadId, invocationId, options = {}) {
+    const emptyPage = {
+      events: [],
+      total: 0,
+      from: Math.max(0, Number(options.from) || 0),
+      limit: options.limit || 200,
+    };
     const sqlitePage = trySqlite("read invocation page", () => {
       const invocation = storage.invocations.get(invocationId);
       if (!invocation || invocation.threadId !== threadId) return null;
@@ -501,16 +519,17 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         })),
       };
     });
-    if (mode === "sqlite" && sqlitePage !== undefined && sqlitePage !== null) return sqlitePage;
+
+    // Strict single-store: never fall back to transcript in sqlite mode.
+    if (mode === "sqlite" && storage) {
+      if (sqlitePage === undefined || sqlitePage === null) return emptyPage;
+      return sqlitePage;
+    }
+
     const filePage = await tryFile(
       "read invocation page",
       () => transcript.readInvocationPage(threadId, invocationId, options),
-      {
-        events: [],
-        total: 0,
-        from: Math.max(0, Number(options.from) || 0),
-        limit: options.limit || 200,
-      }
+      emptyPage
     );
     if (sqlitePage === undefined || sqlitePage === null) return filePage;
     if (sqlitePage.total < filePage.total) return filePage;

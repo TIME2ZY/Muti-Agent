@@ -5,13 +5,29 @@ const MAX_MEMORY_CONTENT_CHARS = 2048;
 function createMemoryCapture({
   memoryService = null,
   transcript,
+  eventStore = null,
   logger = console,
   idFactory = crypto.randomUUID,
 } = {}) {
-  if (!transcript || typeof transcript.appendEvent !== "function") {
-    throw new Error("Memory capture requires a transcript event sink.");
+  const hasTranscript = transcript && typeof transcript.appendEvent === "function";
+  const hasEventStore = eventStore && typeof eventStore.append === "function";
+  if (!hasTranscript && !hasEventStore) {
+    throw new Error("Memory capture requires an eventStore or transcript event sink.");
   }
   const replayedThreads = new Set();
+
+  function emitMemoryEvent(threadId, invocationId, event) {
+    if (hasEventStore) {
+      eventStore.append({
+        threadId,
+        invocationId,
+        kind: "memory-captured",
+        payload: event,
+      });
+      return;
+    }
+    transcript.appendEvent(threadId, invocationId, "memory-captured", event);
+  }
 
   function persistCapture(input, eventInvocationId) {
     let outcome = null;
@@ -44,7 +60,7 @@ function createMemoryCapture({
       created: outcome?.created ?? false,
       error: error ? error.message : null,
     };
-    transcript.appendEvent(input.threadId, eventInvocationId, "memory-captured", event);
+    emitMemoryEvent(input.threadId, eventInvocationId, event);
     if (error) replayedThreads.delete(input.threadId);
     return { captured: true, persisted: Boolean(outcome), memory, event, error };
   }

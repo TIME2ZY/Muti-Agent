@@ -239,3 +239,20 @@ test("switchSession restores lastAgent from session metadata", async () => {
 
   assert.deepEqual(applied, [["s1", "opencode"]]);
 });
+
+test("session lifecycle notifies session-scoped panels", async () => {
+  const state = makeState();
+  const changed = [];
+  const deps = baseDeps(state, {
+    onSessionChanged(id) {
+      changed.push(id);
+    },
+  });
+  const controller = sessionControllerModule.createSessionController(deps);
+
+  await controller.switchSession("s1");
+  await controller.newSession();
+  await controller.deleteSession("s2");
+
+  assert.deepEqual(changed, ["s1", "s2", null]);
+});

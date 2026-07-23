@@ -16,6 +16,7 @@ const DEFAULT_TOKEN_TTL_MS = 30 * 60 * 1000;
 //   sessionId,        // chat session id (same as threadId in current data model)
 //   res,              // active SSE response
 //   worklist,         // shared string[] mutated by A2A loop and callbacks
+//   a2aCauses,        // queue-aligned invocation causality records
 //   controller,       // AbortController for the whole chain
 //   a2aCount,         // number used as shared mutable counter
 //   sessionsFile,     // path used to persist messages
@@ -141,6 +142,28 @@ function summarizeHandoffOutcome(finalized) {
   };
 }
 
+function appendCallbackEvent({
+  eventStore,
+  transcript,
+  durableRecorder,
+  sessionId,
+  invocationId,
+  kind,
+  payload,
+}) {
+  if (!sessionId || !invocationId) return;
+  if (eventStore && typeof eventStore.append === "function") {
+    eventStore.append({ threadId: sessionId, invocationId, kind, payload });
+    return;
+  }
+  if (transcript && typeof transcript.appendEvent === "function") {
+    transcript.appendEvent(sessionId, invocationId, kind, payload);
+  }
+  if (durableRecorder && typeof durableRecorder.appendInvocationEvent === "function") {
+    durableRecorder.appendInvocationEvent(invocationId, kind, payload);
+  }
+}
+
 /**
  * Post a message from a running agent back to the chat.
  * Enforces Thread Affinity: if the registered thread has an explicit
@@ -187,19 +210,19 @@ function postMessage(
     );
   }
 
-  // Record the mid-execution callback in the transcript under the originating
-  // invocation. We look up the current invocation from the worklist head.
-  // For simplicity we use a synthetic "_callback" suffix per callback; the
-  // full thread is searchable via searchTranscript().
+  // Record the mid-execution callback under the originating invocation.
   const currentInvocationId = thread.currentInvocationId;
+  const eventStore = durableRecorder?.eventStore || null;
+  const callbackSessionId = thread.sessionId || threadId;
   if (currentInvocationId) {
-    transcript.appendEvent(thread.sessionId || threadId, currentInvocationId, "callback-post", {
-      agent,
-      content,
-    });
-    durableRecorder?.appendInvocationEvent(currentInvocationId, "callback-post", {
-      agent,
-      content,
+    appendCallbackEvent({
+      eventStore,
+      transcript,
+      durableRecorder,
+      sessionId: callbackSessionId,
+      invocationId: currentInvocationId,
+      kind: "callback-post",
+      payload: { agent, content },
     });
   }
 
@@ -213,8 +236,8 @@ function postMessage(
   const finalized = finalizeA2ARoutes({
     text: content,
     fromAgent: agent,
-    threadId: thread.sessionId || threadId,
-    sessionId: thread.sessionId || threadId,
+    threadId: callbackSessionId,
+    sessionId: callbackSessionId,
     invocationId: routeInvocationId,
     windowId: typeof thread.windowId === "string" ? thread.windowId : null,
     useWorktree: Boolean(thread.useWorktree),
@@ -223,6 +246,7 @@ function postMessage(
     maxDepth: getMaxA2ADepth(),
     memoryCapture,
     transcript,
+    eventStore,
     durableRecorder,
     sendSse: (event, payload) => sendSse(thread.res, event, payload),
     appendToSession,
@@ -240,13 +264,15 @@ function postMessage(
     handoff: summarizeHandoffOutcome(finalized),
   };
   if (currentInvocationId) {
-    transcript.appendEvent(
-      thread.sessionId || threadId,
-      currentInvocationId,
-      "callback-outcome",
-      result
-    );
-    durableRecorder?.appendInvocationEvent(currentInvocationId, "callback-outcome", result);
+    appendCallbackEvent({
+      eventStore,
+      transcript,
+      durableRecorder,
+      sessionId: callbackSessionId,
+      invocationId: currentInvocationId,
+      kind: "callback-outcome",
+      payload: result,
+    });
   }
   if (record) record.lastCallbackOutcome = result;
   return result;

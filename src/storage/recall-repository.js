@@ -268,6 +268,7 @@ function messageToRecall(row) {
       invocationId: row.invocation_id,
       sequenceNo: row.sequence_no,
       role: row.role,
+      messageType: row.message_type || null,
     },
   };
 }
@@ -276,7 +277,8 @@ function eventToRecall(row) {
   let payload = row.payload;
   if (payload === undefined && row.payload_json != null) {
     try {
-      payload = typeof row.payload_json === "string" ? JSON.parse(row.payload_json) : row.payload_json;
+      payload =
+        typeof row.payload_json === "string" ? JSON.parse(row.payload_json) : row.payload_json;
     } catch {
       payload = row.payload_json;
     }

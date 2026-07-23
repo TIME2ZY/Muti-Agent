@@ -1,10 +1,15 @@
 const crypto = require("node:crypto");
-const { eventPlainText } = require("./event-plain-text");
+const { createEventStore } = require("./event-store");
 
-function createDualWriteRecorder({ storage, logger = console } = {}) {
-  const eventSequences = new Map();
-  const unavailableInvocations = new Set();
-  const invocationThreads = new Map();
+function createDualWriteRecorder({ storage, eventStore = null, logger = console } = {}) {
+  const events =
+    eventStore ||
+    createEventStore({
+      storage,
+      transcript: null,
+      mode: storage ? "sqlite" : "files",
+      logger,
+    });
   /** Thread ids that were deleted during this process — block resurrection. */
   const deletedThreads = new Set();
 
@@ -24,16 +29,23 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
 
   function mirrorThread(session) {
     if (!session || !isThreadWritable(session.id)) return null;
-    return attempt("mirror thread", () =>
-      storage.threads.upsert({
+    return attempt("mirror thread", () => {
+      // Preserve durable metadata when the in-memory session snapshot is stale
+      // (e.g. title/lastAgent already written via appendToSession).
+      const existing =
+        typeof storage.threads.get === "function" ? storage.threads.get(session.id) : null;
+      return storage.threads.upsert({
         id: session.id,
-        title: session.title || "",
-        projectDir: session.projectDir || "",
-        lastAgentId: session.lastAgent || null,
-        createdAt: session.createdAt,
+        title: session.title || existing?.title || "",
+        projectDir:
+          typeof session.projectDir === "string" && session.projectDir
+            ? session.projectDir
+            : existing?.projectDir || "",
+        lastAgentId: session.lastAgent || existing?.lastAgentId || null,
+        createdAt: session.createdAt || existing?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      })
-    );
+      });
+    });
   }
 
   function ensureWindow(input) {
@@ -113,6 +125,7 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
           content: typeof message.content === "string" ? message.content : "",
           metadata: durableMessageMetadata(message),
           createdAt: message.createdAt,
+          messageType: message.messageType,
         });
         upsertMessageRecall(stored);
         return stored;
@@ -122,12 +135,12 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
 
   function startInvocation(input) {
     if (!storage || !isThreadWritable(input.threadId)) {
-      if (input.invocationId) unavailableInvocations.add(input.invocationId);
+      if (input.invocationId) events.markInvocationUnavailable(input.invocationId);
       return null;
     }
     const window = ensureWindow(input);
     if (!window) {
-      unavailableInvocations.add(input.invocationId);
+      events.markInvocationUnavailable(input.invocationId);
       return null;
     }
     // Only bind resume when the open window already carries that provider
@@ -150,120 +163,180 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
           windowId: window.id,
           agentId: input.agentId,
           startedAt: input.startedAt,
+          parentInvocationId: input.parentInvocationId,
+          triggerMessageId: input.triggerMessageId,
+          triggerType: input.triggerType,
         });
-        storage.invocations.appendEvent({
-          invocationId: input.invocationId,
-          sequenceNo: 0,
-          kind: "invocation-start",
-          payload: {
-            agent: input.agentId,
-            resumeSessionId: resumeSessionId || null,
-            windowGeneration: window.generation,
-          },
-          createdAt: input.startedAt,
-        });
-        upsertInvocationRecall({
-          invocationId: input.invocationId,
-          sequenceNo: 0,
-          kind: "invocation-start",
-          payload: {
-            agent: input.agentId,
-            resumeSessionId: resumeSessionId || null,
-            windowGeneration: window.generation,
-          },
+        events.registerInvocation(input.invocationId, input.threadId);
+        // SQLite start event only here. Callers (or a later eventStore.append)
+        // own the transcript line so dual mode does not double-write JSONL.
+        events.append({
           threadId: input.threadId,
-          windowId: window.id,
-          agentId: input.agentId,
+          invocationId: input.invocationId,
+          kind: "invocation-start",
+          payload: {
+            agent: input.agentId,
+            resumeSessionId: resumeSessionId || null,
+            windowGeneration: window.generation,
+            parentInvocationId: input.parentInvocationId || null,
+            triggerMessageId: input.triggerMessageId || null,
+            triggerType: input.triggerType || null,
+          },
           createdAt: input.startedAt,
+          sequenceNo: 0,
+          writeTranscript: false,
         });
         return record;
       });
       return started;
     });
-    if (!invocation) unavailableInvocations.add(input.invocationId);
+    if (!invocation) events.markInvocationUnavailable(input.invocationId);
     else {
-      eventSequences.set(input.invocationId, 1);
-      invocationThreads.set(input.invocationId, input.threadId);
+      events.registerInvocation(input.invocationId, input.threadId);
       const refreshed = storage.windows.get(window.id) || window;
       return { invocation, window: refreshed };
     }
     return null;
   }
 
-  function appendInvocationEvent(invocationId, kind, payload) {
-    if (!storage || unavailableInvocations.has(invocationId)) return false;
-    const ownerThread = invocationThreads.get(invocationId);
-    if (ownerThread && deletedThreads.has(ownerThread)) return false;
-    const result = attempt("append invocation event", () => {
-      const invocation = storage.invocations.get(invocationId);
-      if (!invocation || deletedThreads.has(invocation.threadId)) {
-        unavailableInvocations.add(invocationId);
-        return false;
-      }
-      const sequenceNo = eventSequences.get(invocationId) ?? nextEventSequence(invocationId);
-      const createdAt = new Date().toISOString();
-      storage.transaction(() => {
-        storage.invocations.appendEvent({ invocationId, sequenceNo, kind, payload, createdAt });
-        upsertInvocationRecall({
-          invocationId,
-          sequenceNo,
-          kind,
-          payload,
-          threadId: invocation.threadId,
-          windowId: invocation.windowId,
-          agentId: invocation.agentId,
-          createdAt,
-        });
+  function appendInvocationEvent(invocationId, kind, payload, options = {}) {
+    // Fail-open at the dual-write boundary for stream events. EventStore itself
+    // propagates SQLite errors so transactional callers still roll back.
+    try {
+      const result = events.append({
+        invocationId,
+        kind,
+        payload,
+        ...options,
       });
-      eventSequences.set(invocationId, sequenceNo + 1);
-      return true;
-    });
-    return result === true;
+      if (events.writeSqlite) return result.sqlite === true;
+      return result.ok;
+    } catch (error) {
+      logger.error(`[sqlite-dual-write] append invocation event failed: ${error.message}`);
+      return false;
+    }
   }
 
-  function finishInvocation(invocationId, code, signal) {
-    if (!storage || unavailableInvocations.has(invocationId)) return null;
-    const ownerThread = invocationThreads.get(invocationId);
-    if (ownerThread && deletedThreads.has(ownerThread)) return null;
-    const state = code === 0 ? "completed" : signal ? "aborted" : "failed";
+  function finishInvocation(invocationId, code, signal, endPayload = null) {
+    if (!storage) return null;
     const result = attempt("finish invocation", () =>
       storage.transaction(() => {
         const existing = storage.invocations.get(invocationId);
         if (!existing || deletedThreads.has(existing.threadId)) {
-          unavailableInvocations.add(invocationId);
+          events.markInvocationUnavailable(invocationId);
           return null;
         }
+        const state = code === 0 ? "completed" : signal ? "aborted" : "failed";
         const record = storage.invocations.finish(invocationId, {
           state,
           exitCode: code,
           signal,
         });
         if (!record) throw new Error(`Invocation ${invocationId} is not active.`);
-        const sequenceNo = eventSequences.get(invocationId) ?? nextEventSequence(invocationId);
-        storage.invocations.appendEvent({
-          invocationId,
-          sequenceNo,
-          kind: "invocation-end",
-          payload: { code, signal },
-          createdAt: record.endedAt,
-        });
-        upsertInvocationRecall({
-          invocationId,
-          sequenceNo,
-          kind: "invocation-end",
-          payload: { code, signal },
+        const payload =
+          endPayload && typeof endPayload === "object"
+            ? { code, signal, ...endPayload }
+            : { code, signal };
+        // SQLite end event only; chat-routes still emits the richer transcript line
+        // via eventStore in dual mode (or skips transcript in sqlite mode).
+        events.append({
           threadId: record.threadId,
-          windowId: record.windowId,
-          agentId: record.agentId,
+          invocationId,
+          kind: "invocation-end",
+          payload,
           createdAt: record.endedAt,
+          writeTranscript: false,
         });
         return record;
       })
     );
-    eventSequences.delete(invocationId);
-    unavailableInvocations.delete(invocationId);
-    invocationThreads.delete(invocationId);
     return result;
+  }
+
+  /**
+   * Finish an invocation and append the assistant-final message in one SQLite
+   * transaction (plus EventStore sinks for invocation-end).
+   */
+  function finishWithAssistantMessage(input = {}) {
+    if (!storage) return null;
+    const invocationId = input.invocationId;
+    if (!invocationId) return null;
+    const finish = () =>
+      storage.transaction(() => {
+        const existing = storage.invocations.get(invocationId);
+        if (!existing || deletedThreads.has(existing.threadId)) {
+          events.markInvocationUnavailable(invocationId);
+          return null;
+        }
+        const code = input.code;
+        const signal = input.signal;
+        const state = code === 0 ? "completed" : signal ? "aborted" : "failed";
+        const record = storage.invocations.finish(invocationId, {
+          state,
+          exitCode: code,
+          signal,
+          endedAt: input.endedAt,
+        });
+        if (!record) throw new Error(`Invocation ${invocationId} is not active.`);
+
+        const payload =
+          input.endPayload && typeof input.endPayload === "object"
+            ? { code, signal, ...input.endPayload }
+            : { code, signal };
+        events.append({
+          threadId: record.threadId,
+          invocationId,
+          kind: "invocation-end",
+          payload,
+          createdAt: record.endedAt,
+          writeTranscript: input.writeTranscript === true,
+        });
+
+        let message = null;
+        if (input.message) {
+          const session = input.session;
+          const threadId = session?.id || record.threadId;
+          if (threadId && isThreadWritable(threadId)) {
+            if (session) mirrorThread(session);
+            const msg = input.message;
+            const messageId =
+              typeof msg.id === "string" && msg.id
+                ? msg.id
+                : crypto.randomUUID().replace(/-/g, "").slice(0, 18);
+            message = storage.messages.append({
+              id: messageId,
+              threadId,
+              windowId: input.windowId || record.windowId || null,
+              invocationId,
+              role: msg.role || "assistant",
+              agentId: msg.agent || record.agentId,
+              content: typeof msg.content === "string" ? msg.content : "",
+              metadata: durableMessageMetadata({ ...msg, id: messageId }),
+              createdAt: msg.createdAt || record.endedAt,
+              messageType: msg.messageType || "assistant-final",
+            });
+            upsertMessageRecall(message);
+            // lastAgent tracks the user's chosen entry agent, not the last
+            // responding agent in an A2A chain — do not update it here.
+            const existing = storage.threads.get(threadId);
+            if (existing) {
+              storage.threads.upsert({
+                id: threadId,
+                title: existing.title || "",
+                projectDir: existing.projectDir || "",
+                lastAgentId: existing.lastAgentId,
+                createdAt: existing.createdAt,
+                updatedAt: new Date().toISOString(),
+              });
+            }
+          }
+        }
+
+        return { invocation: record, message };
+      });
+    return input.failClosed === true
+      ? finish()
+      : attempt("finish with assistant message", finish);
   }
 
   function bindProviderSession(windowId, providerSessionId) {
@@ -290,29 +363,13 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
   function deleteThread(threadId) {
     if (!threadId) return null;
     deletedThreads.add(threadId);
-    for (const [invocationId, ownerThreadId] of invocationThreads) {
-      if (ownerThreadId !== threadId) continue;
-      unavailableInvocations.add(invocationId);
-      eventSequences.delete(invocationId);
-      invocationThreads.delete(invocationId);
-    }
+    events.markThreadDeleted(threadId);
     return attempt("delete thread", () => storage.threads.delete(threadId));
   }
 
   function close() {
-    eventSequences.clear();
-    unavailableInvocations.clear();
-    invocationThreads.clear();
     deletedThreads.clear();
-  }
-
-  function nextEventSequence(invocationId) {
-    const row = storage.db
-      .prepare(
-        "SELECT COALESCE(MAX(sequence_no), -1) + 1 AS sequence_no FROM invocation_events WHERE invocation_id = ?"
-      )
-      .get(invocationId);
-    return row.sequence_no;
+    if (eventStore !== events) events.close();
   }
 
   function upsertMessageRecall(message) {
@@ -330,31 +387,14 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
         invocationId: message.invocationId,
         sequenceNo: message.sequenceNo,
         role: message.role,
-      },
-    });
-  }
-
-  function upsertInvocationRecall(event) {
-    if (!storage.recall || deletedThreads.has(event.threadId)) return null;
-    return storage.recall.upsert({
-      threadId: event.threadId,
-      windowId: event.windowId,
-      sourceKind: "invocation-event",
-      sourceId: `${event.invocationId}:${event.sequenceNo}`,
-      title: event.kind,
-      content: eventPlainText(event.kind, event.payload || {}),
-      agentId: event.agentId,
-      createdAt: event.createdAt,
-      metadata: {
-        invocationId: event.invocationId,
-        eventNo: event.sequenceNo,
-        kind: event.kind,
+        messageType: message.messageType,
       },
     });
   }
 
   return {
     enabled: Boolean(storage),
+    eventStore: events,
     mirrorThread,
     ensureWindow,
     sealWindow,
@@ -363,6 +403,7 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
     startInvocation,
     appendInvocationEvent,
     finishInvocation,
+    finishWithAssistantMessage,
     bindProviderSession,
     addWindowUsage,
     setWindowUsageSnapshot,
@@ -372,7 +413,7 @@ function createDualWriteRecorder({ storage, logger = console } = {}) {
 }
 
 function durableMessageMetadata(message) {
-  const excluded = new Set(["id", "role", "agent", "content", "createdAt"]);
+  const excluded = new Set(["id", "role", "agent", "content", "createdAt", "messageType"]);
   const metadata = {};
   for (const [key, value] of Object.entries(message)) {
     if (!excluded.has(key)) metadata[key] = value;

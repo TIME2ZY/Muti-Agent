@@ -2,7 +2,9 @@ const path = require("node:path");
 const { DEFAULT_MEMORY_DB_FILE, DEFAULT_SESSIONS_FILE } = require("../shared/runtime-paths");
 const { ENV } = require("../shared/brand");
 const { createDualWriteRecorder } = require("./dual-write-recorder");
+const { createEventStore } = require("./event-store");
 const { createStorage } = require("./index");
+const { createSqliteSessionService } = require("./sqlite-session-service");
 
 function createServerStorage(options = {}, sessionsFile, logger = console) {
   const mode = options.storageMode || process.env[ENV.STORAGE_MODE] || "dual";
@@ -10,11 +12,21 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     throw new Error(`Unsupported storage mode "${mode}". Use files, dual, or sqlite.`);
   }
   if (mode === "files") {
+    const eventStore = createEventStore({
+      storage: null,
+      transcript: options.transcript || null,
+      mode: "files",
+      logger,
+    });
     return {
       mode,
       storage: null,
-      recorder: createDualWriteRecorder(),
-      close() {},
+      recorder: createDualWriteRecorder({ eventStore, logger }),
+      eventStore,
+      sessionService: null,
+      close() {
+        eventStore.close();
+      },
     };
   }
 
@@ -31,16 +43,39 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
       storage = createStorage({ file });
     } catch (error) {
       logger.error(`[sqlite-storage] initialization failed: ${error.message}`);
+      // sqlite mode is single-write: never continue with a black-hole event sink.
+      // dual mode may degrade to file-only writes.
+      if (mode === "sqlite") {
+        throw new Error(
+          `SHIFT_STORAGE_MODE=sqlite requires a working database (${error.message})`
+        );
+      }
     }
   }
 
-  const recorder = createDualWriteRecorder({ storage, logger });
+  if (mode === "sqlite" && !storage) {
+    throw new Error("SHIFT_STORAGE_MODE=sqlite requires a working database.");
+  }
+
+  const eventStore = createEventStore({
+    storage,
+    transcript: options.transcript || null,
+    mode,
+    logger,
+  });
+  const recorder = createDualWriteRecorder({ storage, eventStore, logger });
+  const sessionService = storage ? createSqliteSessionService({ storage, logger }) : null;
+
   return {
     mode,
     storage,
     recorder,
+    eventStore,
+    sessionService,
     close() {
       recorder.close();
+      eventStore.close();
+      sessionService?.close?.();
       if (ownsStorage && storage) {
         try {
           storage.checkpoint("TRUNCATE");

@@ -21,9 +21,11 @@
   const panelTabAgentsEl = $("#panel-tab-agents");
   const panelTabWorkspaceEl = $("#panel-tab-workspace");
   const panelTabRecallEl = $("#panel-tab-recall");
+  const panelTabMemoryEl = $("#panel-tab-memory");
   const agentPanelEl = $("#agent-panel");
   const agentTabsEl = $("#agent-tabs");
   const workspacePanelEl = $("#workspace-panel");
+  const memoryPanelInlineEl = $("#memory-panel-inline");
   const emptyStateEl = $("#empty-state");
   const spacerEl = messagesEl.querySelector(".messages-spacer");
   const skillsTagsEl = $("#skills-tags");
@@ -57,6 +59,7 @@
   const sessionApi = window.SessionApi.createSessionApi(apiFetch);
   const worktreeApi = window.WorktreeApi.createWorktreeApi(apiFetch);
   const recallApi = window.RecallApi.createRecallApi(apiFetch);
+  const memoryApi = window.MemoryApi.createMemoryApi(apiFetch);
   const escHtml = window.MarkdownLite.escHtml;
   const renderMd = window.MarkdownLite.renderMd;
   const writeClipboard = window.ClipboardUtils.writeClipboard;
@@ -95,7 +98,7 @@
       mentionMatches: [],
       mentionRange: null,
       recallSearchDebounce: null,
-      rightPanelTab: "agents", // agents | workspace | recall
+      rightPanelTab: "agents", // agents | workspace | recall | memory
       workspace: window.WorkspacePanel.emptyWorkspaceState(),
       usageSummary: { available: false, session: {}, agents: [] },
       // NOT live run data — see runtimeStore
@@ -421,6 +424,26 @@
   });
   recallPanel.bindSearch();
 
+  const memoryPanel = window.MemoryPanel.createMemoryPanel({
+    bodyEl: memoryPanelInlineEl ? memoryPanelInlineEl.querySelector(".memory-body") : null,
+    filterKindEl: $("#memory-filter-kind"),
+    filterStatusEl: $("#memory-filter-status"),
+    includeRetiredEl: $("#memory-include-retired"),
+    formEl: $("#memory-create-form"),
+    memoryApi,
+    getSessionId: () => state.currentSessionId,
+    escHtml,
+    t: (path, fallback) => {
+      const locale = window.Locale || window.LocaleZhCN;
+      if (locale && typeof locale.t === "function") return locale.t(path, fallback);
+      return fallback || path;
+    },
+    onToast: (message, isError) => {
+      if (typeof setStatus === "function") setStatus(message, isError ? "error" : "ok");
+    },
+  });
+  memoryPanel.bind();
+
   let sessionController = null;
   let chatClient = null;
   let renderAgentTabs = () => {};
@@ -611,13 +634,17 @@
     remountLiveMessages,
     syncComposerControls,
     loadUsageSummary,
+    onSessionChanged: () => {
+      if (state.rightPanelTab === "memory") memoryPanel.load();
+    },
   });
 
-  const RIGHT_TABS = ["agents", "workspace", "recall"];
+  const RIGHT_TABS = ["agents", "workspace", "recall", "memory"];
   const tabButtons = {
     agents: panelTabAgentsEl,
     workspace: panelTabWorkspaceEl,
     recall: panelTabRecallEl,
+    memory: panelTabMemoryEl,
   };
 
   function setRightPanelTab(nextTab) {
@@ -626,6 +653,7 @@
     if (agentPanelEl) agentPanelEl.hidden = nextTab !== "agents";
     if (workspacePanelEl) workspacePanelEl.hidden = nextTab !== "workspace";
     if (recallPanelInlineEl) recallPanelInlineEl.hidden = nextTab !== "recall";
+    if (memoryPanelInlineEl) memoryPanelInlineEl.hidden = nextTab !== "memory";
 
     for (const id of RIGHT_TABS) {
       const btn = tabButtons[id];
@@ -636,14 +664,18 @@
       btn.tabIndex = active ? 0 : -1;
     }
 
-    // Mobile-only height boost for workspace/recall (CSS gated @media max-width 700px).
+    // Mobile-only height boost for workspace/recall/memory (CSS gated @media max-width 700px).
     // Do not apply a desktop max-height via this class — that was a regression that
     // capped workspace/recall to ~360px while the agents tab stayed full height.
     if (sidePanelEl) {
-      sidePanelEl.classList.toggle("is-expanded", nextTab === "workspace" || nextTab === "recall");
+      sidePanelEl.classList.toggle(
+        "is-expanded",
+        nextTab === "workspace" || nextTab === "recall" || nextTab === "memory"
+      );
     }
 
     if (nextTab === "recall") recallPanel.loadRecallList();
+    if (nextTab === "memory") memoryPanel.load();
   }
 
   async function activateRightTab(nextTab) {
@@ -655,6 +687,9 @@
   panelTabWorkspaceEl.addEventListener("click", () => activateRightTab("workspace"));
   if (panelTabRecallEl) {
     panelTabRecallEl.addEventListener("click", () => activateRightTab("recall"));
+  }
+  if (panelTabMemoryEl) {
+    panelTabMemoryEl.addEventListener("click", () => activateRightTab("memory"));
   }
 
   const tablistEl = document.querySelector(".panel-tabs");

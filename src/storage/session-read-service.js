@@ -76,6 +76,7 @@ function messageFromSqlite(message) {
     id: message.id,
     createdAt: message.createdAt,
     role: message.role,
+    messageType: message.messageType,
     agent: message.agentId || undefined,
     content: message.content,
     ...(message.invocationId ? { invocationId: message.invocationId } : {}),

@@ -187,3 +187,62 @@ test("callback handoff summary separates accepted, repair, and skipped states", 
   assert.equal(skipped.status, "skipped");
   assert.equal(skipped.accepted, false);
 });
+
+test("A2A causality stays queue-aligned when the same agent re-enters", () => {
+  const worklist = ["codex"];
+  const state = { a2aCauses: [] };
+  let messageNo = 0;
+  const appendToSession = (_file, _sessionId, message) => ({
+    messages: [{ ...message, id: `route-${++messageNo}` }],
+  });
+
+  finalizeA2ARoutes({
+    text: completeHandoffText("opencode"),
+    fromAgent: "codex",
+    threadId: "t1",
+    sessionId: "t1",
+    invocationId: "inv-parent-1",
+    worklist,
+    a2aCount: 0,
+    policyMode: "balanced",
+    sessionsFile: "sessions.json",
+    appendToSession,
+    a2aState: state,
+    agentLabels: { codex: "Codex", opencode: "OpenCode" },
+  });
+  finalizeA2ARoutes({
+    text: completeHandoffText("opencode"),
+    fromAgent: "codex",
+    threadId: "t1",
+    sessionId: "t1",
+    invocationId: "inv-parent-2",
+    worklist,
+    a2aCount: 1,
+    policyMode: "balanced",
+    sessionsFile: "sessions.json",
+    appendToSession,
+    a2aState: state,
+    agentLabels: { codex: "Codex", opencode: "OpenCode" },
+  });
+
+  assert.deepEqual(worklist, ["codex", "opencode", "opencode"]);
+  assert.deepEqual(
+    state.a2aCauses.map(({ agentId, parentInvocationId, triggerMessageId }) => ({
+      agentId,
+      parentInvocationId,
+      triggerMessageId,
+    })),
+    [
+      {
+        agentId: "opencode",
+        parentInvocationId: "inv-parent-1",
+        triggerMessageId: "route-1",
+      },
+      {
+        agentId: "opencode",
+        parentInvocationId: "inv-parent-2",
+        triggerMessageId: "route-2",
+      },
+    ]
+  );
+});

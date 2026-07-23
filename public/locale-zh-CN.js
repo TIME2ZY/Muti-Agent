@@ -92,7 +92,22 @@
       tabAgents: "Agents",
       tabWorkspace: "工作区",
       tabRecall: "回忆",
+      tabMemory: "记忆",
       worktreeChip: "改代码",
+    },
+
+    memory: {
+      noSession: "暂无会话",
+      loading: "加载中…",
+      loadFailed: "加载失败",
+      emptyList: "本会话暂无记忆",
+      confirm: "确认",
+      invalidate: "否定",
+      confirmOk: "已确认记忆",
+      invalidateOk: "已否定记忆",
+      invalidatePrompt: "否定原因（可选）",
+      contentRequired: "请填写记忆内容",
+      createOk: "已写入记忆",
     },
 
     recall: {

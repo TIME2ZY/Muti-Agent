@@ -3,19 +3,37 @@ const { withTransaction } = require("./database");
 function createInvocationRepository(db) {
   const insertInvocation = db.prepare(`
     INSERT INTO invocations
-      (id, thread_id, window_id, agent_id, state, started_at)
+      (id, thread_id, window_id, agent_id, state, started_at,
+       parent_invocation_id, trigger_message_id, trigger_type)
     VALUES
-      (@id, @threadId, @windowId, @agentId, 'active', @startedAt)
+      (@id, @threadId, @windowId, @agentId, 'active', @startedAt,
+       @parentInvocationId, @triggerMessageId, @triggerType)
   `);
   const findById = db.prepare("SELECT * FROM invocations WHERE id = ?");
+  const findMessageOwner = db.prepare("SELECT thread_id FROM messages WHERE id = ?");
   const listByThread = db.prepare(`
     SELECT * FROM invocations WHERE thread_id = ? ORDER BY started_at ASC
+  `);
+  const allocateEventSequence = db.prepare(`
+    UPDATE invocations
+    SET next_event_sequence = next_event_sequence + 1
+    WHERE id = ?
+    RETURNING next_event_sequence - 1 AS sequence_no
+  `);
+  const advanceEventSequence = db.prepare(`
+    UPDATE invocations
+    SET next_event_sequence = MAX(next_event_sequence, ?)
+    WHERE id = ?
   `);
   const insertEvent = db.prepare(`
     INSERT INTO invocation_events
       (invocation_id, sequence_no, kind, payload_json, created_at)
     VALUES
       (@invocationId, @sequenceNo, @kind, @payloadJson, @createdAt)
+  `);
+  const findEvent = db.prepare(`
+    SELECT * FROM invocation_events
+    WHERE invocation_id = ? AND sequence_no = ?
   `);
   const listEvents = db.prepare(`
     SELECT * FROM invocation_events
@@ -44,15 +62,41 @@ function createInvocationRepository(db) {
     SET state = @state, exit_code = @exitCode, signal = @signal, ended_at = @endedAt
     WHERE id = @id AND state = 'active'
   `);
+  const appendEventTransaction = db.transaction((input) => {
+    const invocationId = requiredString(input.invocationId, "invocation id");
+    const sequenceNo =
+      input.sequenceNo === undefined
+        ? allocateSequence(allocateEventSequence, invocationId)
+        : nonNegativeInteger(input.sequenceNo, "event sequence");
+    if (input.sequenceNo !== undefined) {
+      assertInvocationExists(advanceEventSequence.run(sequenceNo + 1, invocationId), invocationId);
+    }
+    insertEvent.run({
+      invocationId,
+      sequenceNo,
+      kind: requiredString(input.kind, "event kind"),
+      payloadJson: JSON.stringify(input.payload || {}),
+      createdAt: input.createdAt || new Date().toISOString(),
+    });
+    return mapEvent(findEvent.get(invocationId, sequenceNo));
+  });
 
   return {
     start(input) {
+      const threadId = requiredString(input.threadId, "thread id");
+      const parentInvocationId = nullableString(input.parentInvocationId);
+      const triggerMessageId = nullableString(input.triggerMessageId);
+      assertCausalOwner(findById, parentInvocationId, threadId, "parent invocation");
+      assertCausalOwner(findMessageOwner, triggerMessageId, threadId, "trigger message");
       insertInvocation.run({
         id: requiredString(input.id, "invocation id"),
-        threadId: requiredString(input.threadId, "thread id"),
+        threadId,
         windowId: requiredString(input.windowId, "window id"),
         agentId: requiredString(input.agentId, "agent id"),
         startedAt: input.startedAt || new Date().toISOString(),
+        parentInvocationId,
+        triggerMessageId,
+        triggerType: normalizeTriggerType(input.triggerType),
       });
       return this.get(input.id);
     },
@@ -73,13 +117,7 @@ function createInvocationRepository(db) {
     },
 
     appendEvent(input) {
-      insertEvent.run({
-        invocationId: requiredString(input.invocationId, "invocation id"),
-        sequenceNo: nonNegativeInteger(input.sequenceNo, "event sequence"),
-        kind: requiredString(input.kind, "event kind"),
-        payloadJson: JSON.stringify(input.payload || {}),
-        createdAt: input.createdAt || new Date().toISOString(),
-      });
+      return appendEventTransaction(input);
     },
 
     listEvents(invocationId) {
@@ -125,6 +163,10 @@ function mapInvocation(row) {
     signal: row.signal,
     startedAt: row.started_at,
     endedAt: row.ended_at,
+    parentInvocationId: row.parent_invocation_id,
+    triggerMessageId: row.trigger_message_id,
+    triggerType: row.trigger_type,
+    nextEventSequence: row.next_event_sequence,
   };
 }
 
@@ -162,4 +204,40 @@ function nonNegativeInteger(value, label) {
   return value;
 }
 
-module.exports = { createInvocationRepository };
+const TRIGGER_TYPES = new Set([
+  "user-message",
+  "a2a-handoff",
+  "callback",
+  "retry",
+  "window-rotation",
+]);
+
+function normalizeTriggerType(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || !TRIGGER_TYPES.has(value)) {
+    throw new Error(`Unsupported invocation trigger type "${value}".`);
+  }
+  return value;
+}
+
+function assertCausalOwner(statement, id, threadId, label) {
+  if (!id) return;
+  const owner = statement.get(id);
+  if (!owner) throw new Error(`${label} ${id} does not exist.`);
+  const ownerThreadId = owner.thread_id || owner.threadId;
+  if (ownerThreadId !== threadId) {
+    throw new Error(`${label} ${id} belongs to another thread.`);
+  }
+}
+
+function allocateSequence(statement, invocationId) {
+  const row = statement.get(invocationId);
+  if (!row) throw new Error(`invocation ${invocationId} does not exist.`);
+  return row.sequence_no;
+}
+
+function assertInvocationExists(result, invocationId) {
+  if (result.changes === 0) throw new Error(`invocation ${invocationId} does not exist.`);
+}
+
+module.exports = { TRIGGER_TYPES, createInvocationRepository };

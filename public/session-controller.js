@@ -26,6 +26,7 @@
       remountLiveMessages,
       syncComposerControls,
       loadUsageSummary,
+      onSessionChanged,
     } = deps;
     let switchToken = 0;
 
@@ -67,6 +68,7 @@
       // display target; each session keeps its own controller/live state.
       const previousSessionId = state.currentSessionId;
       state.currentSessionId = id;
+      if (typeof onSessionChanged === "function") onSessionChanged(id);
       messagesEl.replaceChildren();
 
       let loadedMessages = null;
@@ -107,6 +109,7 @@
         }
       } catch (error) {
         state.currentSessionId = previousSessionId;
+        if (typeof onSessionChanged === "function") onSessionChanged(previousSessionId);
         addSystem("加载消息失败: " + error.message, "error");
         ensureSpacer();
       }
@@ -172,6 +175,7 @@
       try {
         const session = await sessionApi.createSession();
         state.currentSessionId = session.id;
+        if (typeof onSessionChanged === "function") onSessionChanged(session.id);
         // Intentionally do not abort other sessions' runtimes.
         store()?.getOrCreate(session.id);
         messagesEl.replaceChildren();
@@ -203,6 +207,7 @@
         if (store()) store().dispose(id);
         if (state.currentSessionId === id) {
           state.currentSessionId = null;
+          if (typeof onSessionChanged === "function") onSessionChanged(null);
           messagesEl.replaceChildren();
           ensureSpacer();
           showEmpty();

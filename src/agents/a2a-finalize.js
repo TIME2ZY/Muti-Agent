@@ -43,6 +43,7 @@ function finalizeA2ARoutes(input = {}) {
   const memoryCapture = input.memoryCapture || null;
   const transcript = input.transcript || null;
   const durableRecorder = input.durableRecorder || null;
+  const eventStore = input.eventStore || durableRecorder?.eventStore || null;
   const sendSse = typeof input.sendSse === "function" ? input.sendSse : null;
   const appendToSession = typeof input.appendToSession === "function" ? input.appendToSession : null;
   const sessionsFile = input.sessionsFile;
@@ -110,6 +111,7 @@ function finalizeA2ARoutes(input = {}) {
       threadId: sessionId,
       invocationId,
       transcript,
+      eventStore,
       sendSse,
     });
 
@@ -151,6 +153,7 @@ function finalizeA2ARoutes(input = {}) {
         invocationId,
         transcript,
         durableRecorder,
+        eventStore,
         sendSse,
         appendToSession,
         source,
@@ -173,6 +176,7 @@ function finalizeA2ARoutes(input = {}) {
         invocationId,
         transcript,
         durableRecorder,
+        eventStore,
         sendSse,
         appendToSession,
         source,
@@ -187,6 +191,7 @@ function finalizeA2ARoutes(input = {}) {
     const entry = {
       from: fromAgent,
       to: target,
+      parentInvocationId: invocationId || null,
       policy: decision,
       handoffOk: quality.ok,
       handoffDegraded: quality.degraded,
@@ -204,10 +209,19 @@ function finalizeA2ARoutes(input = {}) {
       invocationId,
       transcript,
       durableRecorder,
+      eventStore,
       sendSse,
       appendToSession,
       source,
     });
+    if (Array.isArray(input.a2aState?.a2aCauses)) {
+      input.a2aState.a2aCauses.push({
+        agentId: target,
+        parentInvocationId: invocationId || null,
+        triggerMessageId: entry.routeMessageId || null,
+        triggerType: "a2a-handoff",
+      });
+    }
   }
 
   if (typeof input.onA2ACount === "function") {
@@ -247,10 +261,16 @@ function finalizeA2ARoutes(input = {}) {
   };
 }
 
-function emitHandoffParsed({ summary, threadId, invocationId, transcript, sendSse }) {
-  if (transcript && typeof transcript.appendEvent === "function" && threadId && invocationId) {
-    transcript.appendEvent(threadId, invocationId, "handoff", summary);
-  }
+function emitHandoffParsed({ summary, threadId, invocationId, transcript, eventStore, sendSse }) {
+  appendRouteEvent({
+    eventStore,
+    transcript,
+    durableRecorder: null,
+    sessionId: threadId,
+    invocationId,
+    kind: "handoff",
+    payload: summary,
+  });
   if (sendSse) sendSse("handoff-parsed", summary);
 }
 
@@ -263,6 +283,7 @@ function emitSkip({
   invocationId,
   transcript,
   durableRecorder,
+  eventStore,
   sendSse,
   appendToSession,
   source,
@@ -277,6 +298,7 @@ function emitSkip({
         agent: "system",
         content: skipText,
         kind: "a2a-skipped",
+        messageType: "a2a-skipped",
         from: skip.from,
         to: skip.to,
         reason: skip.reason,
@@ -294,22 +316,20 @@ function emitSkip({
       maxDepth: skip.maxDepth,
     });
   }
-  if (transcript && sessionId && invocationId) {
-    transcript.appendEvent(sessionId, invocationId, "a2a-skipped", {
+  appendRouteEvent({
+    eventStore,
+    transcript,
+    durableRecorder,
+    sessionId,
+    invocationId,
+    kind: "a2a-skipped",
+    payload: {
       from: skip.from,
       to: skip.to,
       reason: skip.reason,
       maxDepth: skip.maxDepth,
-    });
-  }
-  if (durableRecorder && invocationId) {
-    durableRecorder.appendInvocationEvent?.(invocationId, "a2a-skipped", {
-      from: skip.from,
-      to: skip.to,
-      reason: skip.reason,
-      maxDepth: skip.maxDepth,
-    });
-  }
+    },
+  });
 }
 
 function emitRepair({
@@ -319,6 +339,7 @@ function emitRepair({
   invocationId,
   transcript,
   durableRecorder,
+  eventStore,
   sendSse,
   appendToSession,
   source,
@@ -332,6 +353,7 @@ function emitRepair({
         agent: "system",
         content: repair.message,
         kind: "handoff-repair-needed",
+        messageType: "handoff-repair-needed",
         from: repair.from,
         to: repair.to,
         reason: repair.reason,
@@ -342,24 +364,22 @@ function emitRepair({
     );
   }
   if (sendSse) sendSse("handoff-repair-needed", repair);
-  if (transcript && sessionId && invocationId) {
-    transcript.appendEvent(sessionId, invocationId, "handoff-repair-needed", {
+  appendRouteEvent({
+    eventStore,
+    transcript,
+    durableRecorder,
+    sessionId,
+    invocationId,
+    kind: "handoff-repair-needed",
+    payload: {
       from: repair.from,
       to: repair.to,
       reason: repair.reason,
       policy: repair.policy,
       missing: repair.missing,
       mode: repair.mode,
-    });
-  }
-  if (durableRecorder && invocationId) {
-    durableRecorder.appendInvocationEvent?.(invocationId, "handoff-repair-needed", {
-      from: repair.from,
-      to: repair.to,
-      reason: repair.reason,
-      policy: repair.policy,
-    });
-  }
+    },
+  });
 }
 
 function emitRoute({
@@ -371,6 +391,7 @@ function emitRoute({
   invocationId,
   transcript,
   durableRecorder,
+  eventStore,
   sendSse,
   appendToSession,
   source,
@@ -381,7 +402,7 @@ function emitRoute({
     ? `🔄 ${fromLabel} → ${toLabel}（交接包不完整 / ${entry.policy}）`
     : `🔄 ${fromLabel} → ${toLabel}`;
   if (appendToSession && sessionsFile && sessionId) {
-    appendToSession(
+    const updated = appendToSession(
       sessionsFile,
       sessionId,
       {
@@ -389,6 +410,7 @@ function emitRoute({
         agent: "system",
         content: routeText,
         kind: "a2a-route",
+        messageType: "a2a-route",
         from: entry.from,
         to: entry.to,
         handoffOk: entry.handoffOk,
@@ -399,6 +421,10 @@ function emitRoute({
       },
       { allowCreate: false }
     );
+    // Surface the durable route message id so the next A2A invocation can set
+    // triggerMessageId to this handoff/route notice rather than the original user turn.
+    const last = updated?.messages?.[updated.messages.length - 1];
+    if (last?.id) entry.routeMessageId = last.id;
   }
   if (sendSse) {
     sendSse("a2a-route", {
@@ -410,23 +436,49 @@ function emitRoute({
       reentry: entry.reentry,
     });
   }
-  if (transcript && sessionId && invocationId) {
-    transcript.appendEvent(sessionId, invocationId, "a2a-route", {
+  appendRouteEvent({
+    eventStore,
+    transcript,
+    durableRecorder,
+    sessionId,
+    invocationId,
+    kind: "a2a-route",
+    payload: {
       from: entry.from,
       to: entry.to,
       handoffOk: entry.handoffOk,
       handoffDegraded: entry.handoffDegraded,
       handoffPolicy: entry.policy,
       reentry: entry.reentry,
+    },
+  });
+}
+
+function appendRouteEvent({
+  eventStore,
+  transcript,
+  durableRecorder,
+  sessionId,
+  invocationId,
+  kind,
+  payload,
+}) {
+  if (!sessionId || !invocationId) return;
+  if (eventStore && typeof eventStore.append === "function") {
+    eventStore.append({
+      threadId: sessionId,
+      invocationId,
+      kind,
+      payload,
     });
+    return;
   }
-  if (durableRecorder && invocationId) {
-    durableRecorder.appendInvocationEvent?.(invocationId, "a2a-route", {
-      from: entry.from,
-      to: entry.to,
-      handoffPolicy: entry.policy,
-      reentry: entry.reentry,
-    });
+  // Legacy fallback when EventStore is not wired (unit tests).
+  if (transcript && typeof transcript.appendEvent === "function") {
+    transcript.appendEvent(sessionId, invocationId, kind, payload);
+  }
+  if (durableRecorder && typeof durableRecorder.appendInvocationEvent === "function") {
+    durableRecorder.appendInvocationEvent(invocationId, kind, payload);
   }
 }
 
