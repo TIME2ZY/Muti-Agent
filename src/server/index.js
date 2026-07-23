@@ -20,6 +20,7 @@ const projectDirService = require("./project-dir");
 const invocationStore = require("./invocation-store");
 const uiSecurity = require("./ui-security");
 const { createSessionRoutes } = require("./session-routes");
+const { createMemoryRoutes } = require("./memory-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const skills = require("./skills");
@@ -283,6 +284,15 @@ function createServer(options = {}) {
     setSessionProjectDir: updateProjectDirDual,
     usageStorage: storageContext.storage,
   });
+  const handleMemoryRoutes = createMemoryRoutes({
+    memoryService,
+    getSession: getSessionForMode,
+    sessionsFile,
+    sendJson,
+    readJsonBody,
+    eventStore,
+    logger,
+  });
   const handleCallbackRoutes = createCallbackRoutes({
     callbacks,
     transcript,
@@ -371,6 +381,10 @@ function createServer(options = {}) {
     }
 
     if (await handleSessionRoutes(req, res, url)) {
+      return;
+    }
+
+    if (await handleMemoryRoutes(req, res, url)) {
       return;
     }
 

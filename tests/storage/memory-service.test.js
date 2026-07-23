@@ -205,6 +205,61 @@ test("listActive supports kind, limit, and content budget filters", () => {
   }
 });
 
+test("createProduct writes decision/constraint/fact with supersession", () => {
+  const storage = createFixture();
+  try {
+    const first = storage.memory.createProduct({
+      threadId: "thread-1",
+      kind: "decision",
+      topic: "storage-primary",
+      content: "SQLite is the online source of truth.",
+      createdBy: "user",
+    });
+    assert.equal(first.created, true);
+    assert.equal(first.memory.kind, "decision");
+    assert.equal(first.supersessionKey, "decision:storage-primary");
+    assert.equal(first.memory.status, "captured");
+
+    const second = storage.memory.createProduct({
+      threadId: "thread-1",
+      kind: "decision",
+      topic: "storage-primary",
+      content: "SQLite remains primary; JSONL is audit only.",
+      createdBy: "user",
+    });
+    assert.equal(second.created, true);
+    assert.deepEqual(second.superseded, [first.memory.id]);
+    assert.equal(storage.memories.get(first.memory.id).status, "superseded");
+    assert.equal(storage.memory.listActive("thread-1").length, 1);
+
+    const fact = storage.memory.createProduct({
+      threadId: "thread-1",
+      kind: "fact",
+      content: "Runtime database path is data/runtime/memory.sqlite",
+    });
+    assert.equal(fact.memory.kind, "fact");
+    assert.match(fact.supersessionKey, /^fact:/);
+
+    const listed = storage.memory.list("thread-1", { kinds: "decision,fact" });
+    assert.equal(listed.length, 3);
+    assert.ok(listed.every((item) => item.related !== undefined));
+    assert.ok(listed.find((item) => item.id === second.memory.id).isActive);
+
+    const confirmed = storage.memory.confirm(second.memory.id, {
+      confirmedBy: "user",
+      confirmationSource: "ui:memory-panel",
+    });
+    assert.equal(confirmed.status, "confirmed");
+    const invalidated = storage.memory.invalidate(fact.memory.id, {
+      invalidatedBy: "user",
+      reason: "path changed",
+    });
+    assert.equal(invalidated.status, "invalidated");
+  } finally {
+    storage.close();
+  }
+});
+
 test("capture rolls back new memory, supersession, and recall when projection fails", () => {
   const storage = createFixture();
   try {

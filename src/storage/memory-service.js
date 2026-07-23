@@ -1,4 +1,16 @@
 const crypto = require("node:crypto");
+const {
+  PRODUCT_KINDS,
+  ALL_KINDS,
+  ALL_STATUSES,
+  ACTIVE_STATUSES,
+  normalizeProductKind,
+  buildSupersessionKey,
+  buildProductCaptureKey,
+  deriveTopicFromContent,
+  slugifyTopic,
+  parseSupersessionKey,
+} = require("./memory-keys");
 
 function createMemoryService({
   storage,
@@ -54,6 +66,51 @@ function createMemoryService({
     }
   }
 
+  /**
+   * Product write path for decision / constraint / fact.
+   * Always sets a stable supersessionKey so later writes replace active peers.
+   */
+  function createProduct(input = {}) {
+    const threadId = requiredString(input.threadId, "thread id");
+    const kind = normalizeProductKind(input.kind);
+    const content = requiredString(input.content, "memory content");
+    const topic =
+      typeof input.topic === "string" && input.topic.trim()
+        ? slugifyTopic(input.topic)
+        : input.supersessionKey
+          ? parseSupersessionKey(input.supersessionKey)?.topic ||
+            slugifyTopic(String(input.supersessionKey).split(":").slice(1).join(":") || content)
+          : deriveTopicFromContent(content);
+    const supersessionKey =
+      typeof input.supersessionKey === "string" && input.supersessionKey.trim()
+        ? input.supersessionKey.trim()
+        : buildSupersessionKey(kind, topic);
+    const captureKey =
+      typeof input.captureKey === "string" && input.captureKey.trim()
+        ? input.captureKey.trim()
+        : buildProductCaptureKey(kind, topic, idFactory);
+
+    const outcome = capture({
+      id: input.id,
+      threadId,
+      kind,
+      content,
+      sourceMessageId: input.sourceMessageId || null,
+      sourceInvocationId: input.sourceInvocationId || null,
+      createdBy: input.createdBy || "user",
+      createdAt: input.createdAt,
+      metadata: {
+        ...(input.metadata && typeof input.metadata === "object" ? input.metadata : {}),
+        source: "product",
+        topic,
+      },
+      windowId: input.windowId || null,
+      captureKey,
+      supersessionKey,
+    });
+    return { ...outcome, topic, supersessionKey };
+  }
+
   function listActive(threadId, options = {}) {
     const items = storage.memories.listActive(requiredString(threadId, "thread id"), options);
     const maxChars = normalizeMaxChars(options.maxChars);
@@ -68,6 +125,42 @@ function createMemoryService({
       usedChars += contentChars;
     }
     return selected;
+  }
+
+  /**
+   * List memories for management UI (active and/or historical).
+   */
+  function list(threadId, options = {}) {
+    const id = requiredString(threadId, "thread id");
+    const includeRetired = options.includeRetired !== false;
+    const kinds = normalizeFilterList(options.kinds, ALL_KINDS);
+    const statuses = normalizeFilterList(
+      options.statuses,
+      ALL_STATUSES,
+      includeRetired ? ALL_STATUSES : ACTIVE_STATUSES
+    );
+    const limit = normalizeLimit(options.limit, 200);
+
+    let items = storage.memories.listForThread(id);
+    if (kinds.length > 0) items = items.filter((item) => kinds.includes(item.kind));
+    if (statuses.length > 0) items = items.filter((item) => statuses.includes(item.status));
+
+    // Newest first for management UI.
+    items = items
+      .slice()
+      .sort((a, b) => {
+        const byTime = String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+        if (byTime !== 0) return byTime;
+        return String(b.id).localeCompare(String(a.id));
+      })
+      .slice(0, limit);
+
+    return items.map(enrichMemory);
+  }
+
+  function get(id) {
+    const memory = storage.memories.get(id);
+    return memory ? enrichMemory(memory) : null;
   }
 
   function confirm(id, audit = {}) {
@@ -88,7 +181,7 @@ function createMemoryService({
         confirmationSource,
       },
     });
-    return storage.memories.get(id);
+    return enrichMemory(storage.memories.get(id));
   }
 
   function invalidate(id, audit = {}) {
@@ -103,10 +196,43 @@ function createMemoryService({
         invalidationReason: nullableString(audit.reason),
       },
     });
-    return storage.memories.get(id);
+    return enrichMemory(storage.memories.get(id));
   }
 
-  return { capture, listActive, confirm, invalidate };
+  function enrichMemory(memory) {
+    if (!memory) return null;
+    const related = memory.supersessionKey
+      ? storage.memories
+          .listForThread(memory.threadId)
+          .filter(
+            (item) => item.supersessionKey === memory.supersessionKey && item.id !== memory.id
+          )
+          .map((item) => ({
+            id: item.id,
+            status: item.status,
+            createdAt: item.createdAt,
+            supersededBy: item.supersededBy,
+          }))
+      : [];
+    return {
+      ...memory,
+      topic: parseSupersessionKey(memory.supersessionKey)?.topic || memory.metadata?.topic || null,
+      related,
+      isActive: ACTIVE_STATUSES.includes(memory.status),
+      isProduct: PRODUCT_KINDS.includes(memory.kind),
+    };
+  }
+
+  return {
+    capture,
+    createProduct,
+    listActive,
+    list,
+    get,
+    confirm,
+    invalidate,
+    PRODUCT_KINDS,
+  };
 }
 
 function assertTransitionAllowed(memory, nextStatus) {
@@ -116,6 +242,12 @@ function assertTransitionAllowed(memory, nextStatus) {
   }
   if (nextStatus === "confirmed" && memory.status !== "captured") {
     throw new Error(`Cannot confirm memory ${memory.id} from ${memory.status}.`);
+  }
+  if (
+    nextStatus === "invalidated" &&
+    !new Set(["captured", "confirmed"]).has(memory.status)
+  ) {
+    throw new Error(`Cannot invalidate memory ${memory.id} from ${memory.status}.`);
   }
 }
 
@@ -142,6 +274,24 @@ function normalizeMaxChars(value) {
     throw new Error("maxChars must be a non-negative number.");
   }
   return Math.floor(number);
+}
+
+function normalizeLimit(value, fallback = 200) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return Math.max(1, Math.min(Math.floor(number), 1000));
+}
+
+function normalizeFilterList(value, allowed, defaultList = []) {
+  if (value === undefined || value === null || value === "") return defaultList.slice();
+  const raw = Array.isArray(value)
+    ? value
+    : String(value)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+  const filtered = raw.filter((item) => allowed.includes(item));
+  return filtered;
 }
 
 function requiredString(value, label) {
