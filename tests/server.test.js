@@ -2446,13 +2446,19 @@ test("frontend index.html exposes explicit worktree mode toggle", () => {
   assert.match(html, /title="为本次对话创建或复用隔离 worktree"/);
 });
 
-test("frontend exposes agent and workspace panel tabs", () => {
+test("frontend exposes all right-panel tabs in a four-column layout", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const workspaceCss = fs.readFileSync(
+    path.join(__dirname, "../public", "styles", "workspace.css"),
+    "utf8"
+  );
   const boot = require("../public/boot.js");
   assert.match(html, /id="panel-tab-agents"/);
   assert.match(html, /id="panel-tab-workspace"/);
   assert.match(html, /id="panel-tab-recall"/);
+  assert.match(html, /id="panel-tab-memory"/);
   assert.match(html, /id="workspace-panel"/);
+  assert.match(workspaceCss, /grid-template-columns:\s*repeat\(4,/);
   assert.match(html, /src="\/public\/boot\.js"/);
   for (const src of [
     "/public/session-api.js",

@@ -39,7 +39,7 @@
 /* Segmented control — not solid accent pills */
 .panel-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
   padding: 10px 10px 0;
   border-bottom: 1px solid var(--border-subtle);
