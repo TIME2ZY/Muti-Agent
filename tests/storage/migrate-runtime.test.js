@@ -256,3 +256,76 @@ test("migrate resumes after interrupted first pass", async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("migrate restores invocation parent and trigger causality", async () => {
+  const root = fixtureRoot();
+  const sessionsFile = path.join(root, "sessions.json");
+  const transcriptDir = path.join(root, "transcripts");
+  const memoryDbFile = path.join(root, "memory.sqlite");
+  writeJson(sessionsFile, {
+    sessions: {
+      "thread-causal": {
+        id: "thread-causal",
+        createdAt: "2026-07-12T00:00:00.000Z",
+        messages: [
+          {
+            id: "msg-user",
+            role: "user",
+            agent: "codex",
+            content: "start",
+            createdAt: "2026-07-12T00:00:01.000Z",
+          },
+          {
+            id: "msg-route",
+            role: "system",
+            agent: "system",
+            content: "codex to opencode",
+            messageType: "a2a-route",
+            createdAt: "2026-07-12T00:00:03.000Z",
+          },
+        ],
+      },
+    },
+  });
+  writeJsonl(path.join(transcriptDir, "thread-causal", "invocations", "inv-child.jsonl"), [
+    {
+      ts: "2026-07-12T00:00:04.000Z",
+      kind: "invocation-start",
+      payload: {
+        agent: "opencode",
+        parentInvocationId: "inv-parent",
+        triggerMessageId: "msg-route",
+        triggerType: "a2a-handoff",
+      },
+    },
+  ]);
+  writeJsonl(path.join(transcriptDir, "thread-causal", "invocations", "inv-parent.jsonl"), [
+    {
+      ts: "2026-07-12T00:00:02.000Z",
+      kind: "invocation-start",
+      payload: {
+        agent: "codex",
+        triggerMessageId: "msg-user",
+        triggerType: "user-message",
+      },
+    },
+  ]);
+
+  try {
+    await migrateRuntimeToSqlite({ sessionsFile, transcriptDir, memoryDbFile });
+    const storage = createStorage({ file: memoryDbFile });
+    try {
+      const parent = storage.invocations.get("inv-parent");
+      const child = storage.invocations.get("inv-child");
+      assert.equal(parent.triggerMessageId, "msg-user");
+      assert.equal(parent.triggerType, "user-message");
+      assert.equal(child.parentInvocationId, "inv-parent");
+      assert.equal(child.triggerMessageId, "msg-route");
+      assert.equal(child.triggerType, "a2a-handoff");
+    } finally {
+      storage.close();
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

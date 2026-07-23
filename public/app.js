@@ -636,6 +636,9 @@
     remountLiveMessages,
     syncComposerControls,
     loadUsageSummary,
+    onSessionChanged: () => {
+      if (state.rightPanelTab === "memory") memoryPanel.load();
+    },
   });
 
   const RIGHT_TABS = ["agents", "workspace", "recall", "memory"];

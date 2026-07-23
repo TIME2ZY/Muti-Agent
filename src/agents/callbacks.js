@@ -16,6 +16,7 @@ const DEFAULT_TOKEN_TTL_MS = 30 * 60 * 1000;
 //   sessionId,        // chat session id (same as threadId in current data model)
 //   res,              // active SSE response
 //   worklist,         // shared string[] mutated by A2A loop and callbacks
+//   a2aCauses,        // queue-aligned invocation causality records
 //   controller,       // AbortController for the whole chain
 //   a2aCount,         // number used as shared mutable counter
 //   sessionsFile,     // path used to persist messages

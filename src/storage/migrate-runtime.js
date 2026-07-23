@@ -161,15 +161,23 @@ async function migrateThread({ storage, threadId, session, transcriptDir, dryRun
   }
 
   // Import invocations/events first so assistant messages can link later on re-run.
-  const invocationIds = listInvocationIds(transcriptDir, threadId).filter(
-    (id) => isValidOpaqueId(id) && !id.startsWith("_")
-  );
+  const invocationSources = listInvocationIds(transcriptDir, threadId)
+    .filter((id) => isValidOpaqueId(id) && !id.startsWith("_"))
+    .map((invocationId) => {
+      const events = readInvocationJsonl(transcriptDir, threadId, invocationId);
+      const start = events.find((event) => event.kind === "invocation-start");
+      return {
+        invocationId,
+        events,
+        start,
+        startedAt: start?.ts || events[0]?.ts || "",
+      };
+    })
+    .filter((source) => source.events.length > 0)
+    .sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)));
 
-  for (const invocationId of invocationIds) {
-    const events = readInvocationJsonl(transcriptDir, threadId, invocationId);
-    if (events.length === 0) continue;
-
-    const start = events.find((event) => event.kind === "invocation-start");
+  for (const source of invocationSources) {
+    const { invocationId, events, start } = source;
     const end = events.find((event) => event.kind === "invocation-end");
     const agentId =
       (start?.payload && (start.payload.agent || start.payload.agentId)) ||
@@ -180,6 +188,39 @@ async function migrateThread({ storage, threadId, session, transcriptDir, dryRun
     let invocation = storage.invocations.get(invocationId);
     if (!invocation) {
       const window = ensureMigrationWindow(storage, threadId, agentId);
+      const requestedParentInvocationId =
+        typeof start?.payload?.parentInvocationId === "string"
+          ? start.payload.parentInvocationId
+          : null;
+      const parentInvocation = requestedParentInvocationId
+        ? storage.invocations.get(requestedParentInvocationId)
+        : null;
+      const parentInvocationId =
+        parentInvocation?.threadId === threadId ? parentInvocation.id : null;
+      const requestedTriggerMessageId =
+        typeof start?.payload?.triggerMessageId === "string"
+          ? start.payload.triggerMessageId
+          : null;
+      const triggerMessage = requestedTriggerMessageId
+        ? storage.messages.get(requestedTriggerMessageId)
+        : null;
+      const triggerMessageId = triggerMessage?.threadId === threadId ? triggerMessage.id : null;
+      if (requestedParentInvocationId && !parentInvocationId) {
+        report.diffs.push({
+          kind: "causal-reference-missing",
+          invocationId,
+          field: "parentInvocationId",
+          value: requestedParentInvocationId,
+        });
+      }
+      if (requestedTriggerMessageId && !triggerMessageId) {
+        report.diffs.push({
+          kind: "causal-reference-missing",
+          invocationId,
+          field: "triggerMessageId",
+          value: requestedTriggerMessageId,
+        });
+      }
       try {
         invocation = storage.invocations.start({
           id: invocationId,
@@ -187,6 +228,12 @@ async function migrateThread({ storage, threadId, session, transcriptDir, dryRun
           windowId: window.id,
           agentId: String(agentId),
           startedAt,
+          parentInvocationId,
+          triggerMessageId,
+          triggerType:
+            typeof start?.payload?.triggerType === "string"
+              ? start.payload.triggerType
+              : null,
         });
         report.invocationsCreated += 1;
       } catch (error) {

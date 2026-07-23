@@ -33,30 +33,17 @@ function auditSqliteStorage(options = {}) {
   const logger = options.logger || console;
 
   try {
-    const findings = [];
     const db = storage.db;
-
-    auditMessageRecall(db, findings);
-    auditEventRecall(db, findings);
-    auditMemoryRecall(db, findings);
-    auditRecallFts(db, findings);
-    auditAssistantFinalInvocation(db, findings);
-    auditCompletedInvocationEnd(db, findings);
-    auditMessageAgentMatch(db, findings);
-
-    const integrity = integrityCheck(db, { full: Boolean(options.fullIntegrity) });
-    if (!integrity.ok) {
-      findings.push({
-        code: "integrity",
-        severity: "error",
-        message: `SQLite integrity failed (quick_check=${integrity.quickCheck}, fk=${integrity.foreignKeyErrors})`,
-        detail: integrity,
-      });
-    }
+    const initial = collectFindings(db, Boolean(options.fullIntegrity));
+    let findings = initial.findings;
+    let integrity = initial.integrity;
 
     const repairs = [];
     if (repair && findings.length > 0) {
       applyRepairs(storage, findings, repairs, logger);
+      const remaining = collectFindings(db, Boolean(options.fullIntegrity));
+      findings = remaining.findings;
+      integrity = remaining.integrity;
     }
 
     const summary = summarizeFindings(findings);
@@ -66,12 +53,35 @@ function auditSqliteStorage(options = {}) {
       ok: findings.every((item) => item.severity !== "error"),
       summary,
       findings,
+      initialFindings: repair ? initial.findings : undefined,
       repairs,
       integrity,
     };
   } finally {
     if (ownsStorage) storage.close();
   }
+}
+
+function collectFindings(db, fullIntegrity) {
+  const findings = [];
+  auditMessageRecall(db, findings);
+  auditEventRecall(db, findings);
+  auditMemoryRecall(db, findings);
+  auditRecallFts(db, findings);
+  auditAssistantFinalInvocation(db, findings);
+  auditCompletedInvocationEnd(db, findings);
+  auditMessageAgentMatch(db, findings);
+
+  const integrity = integrityCheck(db, { full: fullIntegrity });
+  if (!integrity.ok) {
+    findings.push({
+      code: "integrity",
+      severity: "error",
+      message: `SQLite integrity failed (quick_check=${integrity.quickCheck}, fk=${integrity.foreignKeyErrors})`,
+      detail: integrity,
+    });
+  }
+  return { findings, integrity };
 }
 
 function auditMessageRecall(db, findings) {

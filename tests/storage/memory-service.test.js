@@ -260,6 +260,62 @@ test("createProduct writes decision/constraint/fact with supersession", () => {
   }
 });
 
+test("createProduct rejects cross-kind supersession keys and cross-thread sources", () => {
+  const storage = createFixture();
+  try {
+    const decision = storage.memory.createProduct({
+      threadId: "thread-1",
+      kind: "decision",
+      topic: "storage",
+      content: "Use SQLite.",
+      createdBy: "user",
+    });
+    assert.throws(
+      () =>
+        storage.memory.createProduct({
+          threadId: "thread-1",
+          kind: "fact",
+          content: "This must not supersede the decision.",
+          supersessionKey: decision.supersessionKey,
+          createdBy: "user",
+        }),
+      /does not match/
+    );
+    assert.equal(storage.memories.get(decision.memory.id).status, "captured");
+
+    storage.threads.create({ id: "thread-2" });
+    const window = storage.windows.create({
+      id: "window-2",
+      threadId: "thread-2",
+      agentId: "codex",
+      providerKey: "codex:test",
+      workspaceKey: "base:C:/other",
+      generation: 1,
+      capacityTokens: 200000,
+    });
+    storage.invocations.start({
+      id: "invocation-thread-2",
+      threadId: "thread-2",
+      windowId: window.id,
+      agentId: "codex",
+    });
+    assert.throws(
+      () =>
+        storage.memory.createProduct({
+          threadId: "thread-1",
+          kind: "fact",
+          topic: "foreign-source",
+          content: "Invalid source.",
+          sourceInvocationId: "invocation-thread-2",
+          createdBy: "user",
+        }),
+      /belongs to another thread/
+    );
+  } finally {
+    storage.close();
+  }
+});
+
 test("capture rolls back new memory, supersession, and recall when projection fails", () => {
   const storage = createFixture();
   try {

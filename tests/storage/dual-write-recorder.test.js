@@ -147,6 +147,28 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
       "invocation-start"
     );
 
+    storage.recall.upsert = () => {
+      throw new Error("strict sqlite failure");
+    };
+    assert.throws(
+      () =>
+        recorder.finishWithAssistantMessage({
+          invocationId: "invocation-atomic",
+          code: 0,
+          signal: null,
+          session,
+          message: {
+            id: "message-assistant",
+            role: "assistant",
+            agent: "codex",
+            content: "done",
+          },
+          failClosed: true,
+        }),
+      /strict sqlite failure/
+    );
+    assert.equal(storage.invocations.get("invocation-atomic").state, "active");
+
     storage.recall.upsert = originalUpsert;
     const completed = recorder.finishWithAssistantMessage({
       invocationId: "invocation-atomic",

@@ -74,17 +74,29 @@ function createMemoryService({
     const threadId = requiredString(input.threadId, "thread id");
     const kind = normalizeProductKind(input.kind);
     const content = requiredString(input.content, "memory content");
+    assertProductSourceAffinity(threadId, input);
+    const requestedSupersessionKey =
+      typeof input.supersessionKey === "string" && input.supersessionKey.trim()
+        ? input.supersessionKey.trim()
+        : null;
+    const parsedSupersessionKey = requestedSupersessionKey
+      ? parseSupersessionKey(requestedSupersessionKey)
+      : null;
+    if (requestedSupersessionKey && !parsedSupersessionKey) {
+      throw new Error("Memory supersessionKey must be a valid kind:topic key.");
+    }
+    if (parsedSupersessionKey && parsedSupersessionKey.kind !== kind) {
+      throw new Error(
+        `Memory supersessionKey kind "${parsedSupersessionKey.kind}" does not match "${kind}".`
+      );
+    }
     const topic =
       typeof input.topic === "string" && input.topic.trim()
         ? slugifyTopic(input.topic)
-        : input.supersessionKey
-          ? parseSupersessionKey(input.supersessionKey)?.topic ||
-            slugifyTopic(String(input.supersessionKey).split(":").slice(1).join(":") || content)
+        : parsedSupersessionKey
+          ? slugifyTopic(parsedSupersessionKey.topic)
           : deriveTopicFromContent(content);
-    const supersessionKey =
-      typeof input.supersessionKey === "string" && input.supersessionKey.trim()
-        ? input.supersessionKey.trim()
-        : buildSupersessionKey(kind, topic);
+    const supersessionKey = buildSupersessionKey(kind, topic);
     const captureKey =
       typeof input.captureKey === "string" && input.captureKey.trim()
         ? input.captureKey.trim()
@@ -109,6 +121,27 @@ function createMemoryService({
       supersessionKey,
     });
     return { ...outcome, topic, supersessionKey };
+  }
+
+  function assertProductSourceAffinity(threadId, input) {
+    if (input.sourceMessageId) {
+      const message = storage.messages?.get(input.sourceMessageId);
+      if (!message) throw new Error(`Source message ${input.sourceMessageId} does not exist.`);
+      if (message.threadId !== threadId) {
+        throw new Error(`Source message ${input.sourceMessageId} belongs to another thread.`);
+      }
+    }
+    if (input.sourceInvocationId) {
+      const invocation = storage.invocations?.get(input.sourceInvocationId);
+      if (!invocation) {
+        throw new Error(`Source invocation ${input.sourceInvocationId} does not exist.`);
+      }
+      if (invocation.threadId !== threadId) {
+        throw new Error(
+          `Source invocation ${input.sourceInvocationId} belongs to another thread.`
+        );
+      }
+    }
   }
 
   function listActive(threadId, options = {}) {

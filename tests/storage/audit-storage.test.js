@@ -107,6 +107,9 @@ test("audit detects missing recall and repairs with --repair", () => {
 
     const repaired = auditSqliteStorage({ storage, repair: true });
     assert.equal(repaired.repairs.length > 0, true);
+    assert.equal(repaired.ok, true, JSON.stringify(repaired.summary));
+    assert.ok(repaired.initialFindings.length > 0);
+    assert.equal(repaired.findings.length, 0);
     const after = auditSqliteStorage({ storage });
     assert.equal(after.ok, true, JSON.stringify(after.summary));
   } finally {

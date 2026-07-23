@@ -35,7 +35,7 @@
       };
     }
 
-    let loading = false;
+    let loadToken = 0;
 
     function toast(message, isError) {
       if (typeof onToast === "function") onToast(message, isError);
@@ -43,14 +43,13 @@
 
     async function load() {
       const sessionId = typeof getSessionId === "function" ? getSessionId() : null;
+      const token = ++loadToken;
       if (!sessionId) {
         bodyEl.innerHTML = `<div class="memory-empty">${escHtml(
           t("memory.noSession", "暂无会话")
         )}</div>`;
         return;
       }
-      if (loading) return;
-      loading = true;
       bodyEl.innerHTML = `<div class="memory-empty">${escHtml(
         t("memory.loading", "加载中…")
       )}</div>`;
@@ -64,13 +63,23 @@
           includeRetired,
           limit: 200,
         });
+        if (
+          token !== loadToken ||
+          (typeof getSessionId === "function" && getSessionId() !== sessionId)
+        ) {
+          return;
+        }
         renderList(data.memories || [], data.counts || {});
       } catch (error) {
+        if (
+          token !== loadToken ||
+          (typeof getSessionId === "function" && getSessionId() !== sessionId)
+        ) {
+          return;
+        }
         bodyEl.innerHTML = `<div class="memory-empty memory-empty-error">${escHtml(
           t("memory.loadFailed", "加载失败") + ": " + (error.message || error)
         )}</div>`;
-      } finally {
-        loading = false;
       }
     }
 

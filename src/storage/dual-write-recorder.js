@@ -261,7 +261,7 @@ function createDualWriteRecorder({ storage, eventStore = null, logger = console 
     if (!storage) return null;
     const invocationId = input.invocationId;
     if (!invocationId) return null;
-    return attempt("finish with assistant message", () =>
+    const finish = () =>
       storage.transaction(() => {
         const existing = storage.invocations.get(invocationId);
         if (!existing || deletedThreads.has(existing.threadId)) {
@@ -333,8 +333,10 @@ function createDualWriteRecorder({ storage, eventStore = null, logger = console 
         }
 
         return { invocation: record, message };
-      })
-    );
+      });
+    return input.failClosed === true
+      ? finish()
+      : attempt("finish with assistant message", finish);
   }
 
   function bindProviderSession(windowId, providerSessionId) {

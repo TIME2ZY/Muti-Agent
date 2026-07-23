@@ -375,8 +375,6 @@ function createChatRoutes({
     const a2aHistory = [];
     let aborted = false;
     let previousInvocationId = null;
-    /** @type {Map<string, string>} agentId → a2a-route message id that enqueued it */
-    const a2aTriggerByAgent = new Map();
     const threadCtx = {
       sessionId,
       res,
@@ -391,6 +389,14 @@ function createChatRoutes({
       useWorktree: Boolean(useWorktree),
       parentInvocationId: null,
       triggerMessageId: userMessageId,
+      a2aCauses: [
+        {
+          agentId: requestedAgent,
+          parentInvocationId: null,
+          triggerMessageId: userMessageId,
+          triggerType: "user-message",
+        },
+      ],
     };
     callbacks.registerThread(sessionId, threadCtx);
 
@@ -419,10 +425,13 @@ function createChatRoutes({
 
         const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
         const startedAt = new Date().toISOString();
-        const parentInvocationId = i === 0 ? null : previousInvocationId;
-        const triggerType = i === 0 ? "user-message" : "a2a-handoff";
+        const queuedCause = threadCtx.a2aCauses[i] || null;
+        const parentInvocationId =
+          i === 0 ? null : queuedCause?.parentInvocationId || previousInvocationId;
+        const triggerType =
+          i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
         const triggerMessageId =
-          i === 0 ? userMessageId : a2aTriggerByAgent.get(agent) || userMessageId;
+          i === 0 ? userMessageId : queuedCause?.triggerMessageId || userMessageId;
         invocationEvents.set(invocationId, {
           invocationId,
           sessionId,
@@ -459,6 +468,9 @@ function createChatRoutes({
           triggerMessageId,
           triggerType,
         });
+        if (sqlitePrimary && !durableRun) {
+          throw new Error(`Failed to persist invocation start for ${invocationId}.`);
+        }
         const healthTracker = contextHealth.makeTracker(agent, {
           capacityTokens: durableRun?.window?.capacityTokens,
           inputChars: durableRun?.window?.inputChars,
@@ -622,7 +634,7 @@ function createChatRoutes({
             promptBytes: promptForAgent.length,
             fillRatioAtStart: healthTracker.getFillRatio(),
             parentInvocationId,
-            triggerMessageId: userMessageId,
+            triggerMessageId,
             triggerType,
           },
           writeSqlite: false,
@@ -810,6 +822,7 @@ function createChatRoutes({
                 session,
                 windowId: durableRun?.window?.id || null,
                 message: assistantMessage,
+                failClosed: sqlitePrimary,
               })
             : null;
 
@@ -839,7 +852,11 @@ function createChatRoutes({
             if (afterAssistant) session = afterAssistant;
           }
         } else {
-          // files mode, or durable atomic path failed open — split writes.
+          if (sqlitePrimary) {
+            throw new Error(`Failed to atomically persist completion for ${invocationId}.`);
+          }
+          // files/dual compatibility path — split writes are not used by
+          // strict SQLite single-write mode.
           durable.finishInvocation(invocationId, code, signal, endPayload);
           events.append({
             threadId: sessionId,
@@ -913,11 +930,6 @@ function createChatRoutes({
         Object.assign(handoffByTarget, finalized.handoffByTarget);
         Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
         threadCtx.a2aCount = finalized.a2aCount;
-        for (const entry of finalized.enqueued || []) {
-          if (entry?.to && entry.routeMessageId) {
-            a2aTriggerByAgent.set(entry.to, entry.routeMessageId);
-          }
-        }
       }
     } finally {
       if (activeInvocations.get(sessionId) === invocationController) {

@@ -191,6 +191,7 @@ function finalizeA2ARoutes(input = {}) {
     const entry = {
       from: fromAgent,
       to: target,
+      parentInvocationId: invocationId || null,
       policy: decision,
       handoffOk: quality.ok,
       handoffDegraded: quality.degraded,
@@ -213,6 +214,14 @@ function finalizeA2ARoutes(input = {}) {
       appendToSession,
       source,
     });
+    if (Array.isArray(input.a2aState?.a2aCauses)) {
+      input.a2aState.a2aCauses.push({
+        agentId: target,
+        parentInvocationId: invocationId || null,
+        triggerMessageId: entry.routeMessageId || null,
+        triggerType: "a2a-handoff",
+      });
+    }
   }
 
   if (typeof input.onA2ACount === "function") {
