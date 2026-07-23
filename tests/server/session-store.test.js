@@ -7,6 +7,25 @@ const test = require("node:test");
 
 const store = require("../../src/server/session-store");
 
+test("buildSessionTitle turns a prompt into a compact conversation topic", () => {
+  assert.equal(
+    store.buildSessionTitle("我觉得还是把 Agent 的消息也做成消息气泡比较好，你认为呢？"),
+    "Agent 的消息也做成消息气泡比较好"
+  );
+  assert.equal(
+    store.buildSessionTitle("请你审查最近改动的 diff，指出风险与可改进处。"),
+    "审查最近改动的 diff，指出风险与可改进处"
+  );
+  assert.equal(store.buildSessionTitle("@Grok   帮我修复登录页面的移动端布局问题"), "修复登录页面的移动端布局问题");
+});
+
+test("buildSessionTitle bounds long titles and replaces fenced code", () => {
+  const title = store.buildSessionTitle("分析这个非常长而且没有任何标点符号的移动端响应式页面布局实现细节");
+  assert.ok(Array.from(title).length <= 24);
+  assert.match(title, /…$/);
+  assert.equal(store.buildSessionTitle("请检查 ```js\nalert(1)\n``` 是否安全"), "检查 代码片段 是否安全");
+});
+
 function withTempFile(fn) {
   return async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-store-test-"));

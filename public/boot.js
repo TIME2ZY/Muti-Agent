@@ -15,6 +15,7 @@
     "/public/ui-store.js",
     "/public/api-client.js",
     "/public/display-helpers.js",
+    "/public/agent-avatar.js",
     "/public/agent-routing.js",
     "/public/session-runtime.js",
     "/public/session-api.js",

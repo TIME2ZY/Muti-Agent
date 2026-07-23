@@ -139,10 +139,16 @@
 .agent-tab {
   position: relative;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 11px 12px 11px 34px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-areas:
+    "avatar name"
+    "avatar model"
+    "usage usage"
+    "role role"
+    "budget budget";
+  gap: 3px 9px;
+  padding: 11px 12px;
   color: var(--text-tertiary);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -156,17 +162,16 @@
   cursor: pointer;
 }
 
-/* Color seat lamp — identity only */
-.agent-tab::before {
-  content: "";
-  position: absolute;
-  left: 14px;
-  top: 16px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--agent-color, var(--border)) 55%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-color, var(--border)) 25%, transparent);
+.agent-tab-avatar-slot { grid-area: avatar; }
+.agent-tab-name { grid-area: name; }
+.agent-tab-model { grid-area: model; }
+.agent-session-usage { grid-area: usage; }
+.agent-tab-role { grid-area: role; }
+.agent-tab-budget { grid-area: budget; }
+
+.agent-avatar-panel {
+  width: 32px;
+  height: 32px;
 }
 
 .agent-tab:hover {
@@ -187,9 +192,9 @@
   box-shadow: var(--shadow-sm);
 }
 
-.agent-tab.is-selected::before {
-  background: var(--agent-color, var(--accent));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent);
+.agent-tab.is-selected .agent-avatar-panel {
+  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 42%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-color, var(--accent)) 10%, transparent);
 }
 
 .agent-tab.is-selected .agent-tab-name {

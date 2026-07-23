@@ -9,8 +9,6 @@
   function createAgentPanelView(deps) {
     const {
       agentTabsEl,
-      currentAgentEl,
-      currentAgentNameEl,
       contextStatusEl,
       state,
       agentLabel,
@@ -114,15 +112,6 @@
           label: state.selectedAgent || "codex",
         };
       const label = agentLabel(agent.id);
-      if (currentAgentNameEl) currentAgentNameEl.textContent = label;
-      if (currentAgentEl) {
-        currentAgentEl.title = `当前默认 Agent：${label}（${agent.id}）。点击打开 Agents；消息行首 @ 可单次覆盖。`;
-        currentAgentEl.dataset.agentColor = colorFor(agent.id);
-        currentAgentEl.dataset.agentId = agent.id;
-        if (typeof currentAgentEl.setAttribute === "function") {
-          currentAgentEl.setAttribute("aria-label", `当前默认 Agent：${label}`);
-        }
-      }
       if (contextStatusEl) {
         const context = usageEntry(agent).context;
         const ratio = Math.max(0, context.budgetFillRatio || 0);
@@ -153,6 +142,7 @@
             : `点击设为默认 Agent · Shift+点击插入 @${agentMention(a)}`;
           // Order: name → model → capability tag
           item.innerHTML = `
+          <span class="agent-tab-avatar-slot"></span>
           <span class="agent-tab-name"></span>
           <span class="agent-tab-model"></span>
           <span class="agent-session-usage"><span>本会话</span><strong></strong></span>
@@ -170,6 +160,14 @@
             </div>
           </div>`;
           item.querySelector(".agent-tab-name").textContent = agentLabel(a.id);
+          if (globalScope.AgentAvatar) {
+            const avatar = globalScope.AgentAvatar.createAgentAvatar(a.id, {
+              label: agentLabel(a.id),
+              className: "agent-avatar-panel",
+            });
+            const slot = item.querySelector(".agent-tab-avatar-slot");
+            if (slot && avatar) slot.appendChild(avatar);
+          }
           item.querySelector(".agent-tab-model").textContent = agentMeta(a);
           item.querySelector(".agent-tab-role").textContent = agentRoleSummary(a);
           renderBudget(item, a);

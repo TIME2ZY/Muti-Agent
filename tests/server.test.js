@@ -843,7 +843,7 @@ test("POST /api/chat with explicit sessionId stores messages there", async () =>
       const got = await fetch(`${baseUrl}/api/sessions/${session.id}`);
       const body = await got.json();
       assert.equal(body.session.messages.length, 2, "should have user + assistant messages");
-      assert.equal(body.session.title, "hello", "title should be first user message");
+      assert.equal(body.session.title, "hello", "title should summarize the first user message");
     }
   );
 });
