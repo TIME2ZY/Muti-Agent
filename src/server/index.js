@@ -137,8 +137,15 @@ function createServer(options = {}) {
   const invocationsFile = options.invocationsFile || DEFAULT_INVOCATIONS_FILE;
   const sessionMapRoot = path.resolve(options.sessionMapRoot || DEFAULT_SESSION_MAP_ROOT);
   const logger = options.logger || console;
-  const storageContext = createServerStorage(options, sessionsFile, logger);
+  const storageContext = createServerStorage(
+    { ...options, transcript },
+    sessionsFile,
+    logger
+  );
   const durableRecorder = storageContext.recorder;
+  const eventStore = storageContext.eventStore;
+  const sqliteSessionService = storageContext.sessionService;
+  const sqlitePrimary = storageContext.mode === "sqlite" && Boolean(sqliteSessionService);
   const memoryService = storageContext.storage?.memory || null;
   const recallService = createRecallService({
     storage: storageContext.storage,
@@ -149,6 +156,7 @@ function createServer(options = {}) {
   const memoryCapture = createMemoryCapture({
     memoryService,
     transcript,
+    eventStore,
     logger,
   });
   const sessionReader = createSessionReadService({
@@ -169,12 +177,14 @@ function createServer(options = {}) {
   _previewManagers.add(worktreeManager);
 
   function createSessionDual(file) {
+    if (sqlitePrimary) return sqliteSessionService.createSession(file);
     const session = createSession(file);
     durableRecorder.mirrorThread(session);
     return session;
   }
 
   function ensureFileShadow(file, sessionId) {
+    if (sqlitePrimary) return sqliteSessionService.getSession(file, sessionId);
     const existing = getSession(file, sessionId);
     if (existing || storageContext.mode !== "sqlite") return existing;
     const recovered = sessionReader.getSession(file, sessionId);
@@ -182,6 +192,7 @@ function createServer(options = {}) {
   }
 
   function updateProjectDirDual(file, sessionId, projectDir) {
+    if (sqlitePrimary) return sqliteSessionService.setSessionProjectDir(file, sessionId, projectDir);
     ensureFileShadow(file, sessionId);
     const session = setSessionProjectDir(file, sessionId, projectDir);
     durableRecorder.mirrorThread(session);
@@ -189,6 +200,7 @@ function createServer(options = {}) {
   }
 
   function updateWorktreeDual(file, sessionId, worktree) {
+    if (sqlitePrimary) return sqliteSessionService.setSessionWorktree(file, sessionId, worktree);
     ensureFileShadow(file, sessionId);
     const session = setSessionWorktree(file, sessionId, worktree);
     durableRecorder.mirrorThread(session);
@@ -196,6 +208,9 @@ function createServer(options = {}) {
   }
 
   function appendToSessionDual(file, sessionId, message, appendOptions = {}) {
+    if (sqlitePrimary) {
+      return sqliteSessionService.appendToSession(file, sessionId, message, appendOptions);
+    }
     if (appendOptions.allowCreate === false) ensureFileShadow(file, sessionId);
     const session = appendToSession(file, sessionId, message, appendOptions);
     durableRecorder.mirrorLastMessage(session, {
@@ -206,10 +221,27 @@ function createServer(options = {}) {
   }
 
   function deleteSessionDual(file, sessionId) {
+    if (sqlitePrimary) {
+      const deleted = sqliteSessionService.deleteSession(file, sessionId);
+      // Keep recorder/event-store process guards in sync even when the row is
+      // already gone (cascade deleted with the thread).
+      durableRecorder.deleteThread(sessionId);
+      return deleted;
+    }
     ensureFileShadow(file, sessionId);
     const deleted = deleteSession(file, sessionId);
     if (deleted) durableRecorder.deleteThread(sessionId);
     return deleted;
+  }
+
+  function getSessionForMode(file, sessionId) {
+    if (sqlitePrimary) return sqliteSessionService.getSession(file, sessionId);
+    return sessionReader.getSession(file, sessionId);
+  }
+
+  function listSessionsForMode(file) {
+    if (sqlitePrimary) return sqliteSessionService.listSessions(file);
+    return sessionReader.listSessions(file);
   }
 
   async function cleanupSessionRuntime(sessionId) {
@@ -242,9 +274,9 @@ function createServer(options = {}) {
     cleanupSessionRuntime,
     sendJson,
     readJsonBody,
-    listSessions: sessionReader.listSessions,
+    listSessions: listSessionsForMode,
     createSession: createSessionDual,
-    getSession: sessionReader.getSession,
+    getSession: getSessionForMode,
     deleteSession: deleteSessionDual,
     setSessionWorktree: updateWorktreeDual,
     validateProjectDir,
@@ -254,8 +286,9 @@ function createServer(options = {}) {
   const handleCallbackRoutes = createCallbackRoutes({
     callbacks,
     transcript,
+    eventStore,
     appendToSession: appendToSessionDual,
-    getSession: sessionReader.getSession,
+    getSession: getSessionForMode,
     sessionsFile,
     sendJson,
     readJsonBody,
@@ -272,6 +305,7 @@ function createServer(options = {}) {
     AGENTS,
     callbacks,
     transcript,
+    eventStore,
     contextHealth,
     sessionSealer,
     sessionBootstrap,
@@ -293,7 +327,7 @@ function createServer(options = {}) {
     filterBenignStderr,
     runChildStream,
     spawnRunner,
-    getSession: sessionReader.getSession,
+    getSession: getSessionForMode,
     createSession: createSessionDual,
     setSessionProjectDir: updateProjectDirDual,
     validateProjectDir,
@@ -306,6 +340,7 @@ function createServer(options = {}) {
     persistInvocations: invocationRegistry.persist,
     durableRecorder,
     memoryCapture,
+    storageMode: storageContext.mode,
     logger,
   });
 

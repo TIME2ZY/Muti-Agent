@@ -37,6 +37,10 @@ test("sqlite storage mode opens the durable database", () => {
     assert.equal(context.mode, "sqlite");
     assert.equal(context.recorder.enabled, true);
     assert.ok(context.storage);
+    assert.ok(context.eventStore);
+    assert.equal(context.eventStore.writeSqlite, true);
+    assert.equal(context.eventStore.writeTranscript, false);
+    assert.ok(context.sessionService);
   } finally {
     context.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -60,4 +64,18 @@ test("dual storage fails open when SQLite initialization fails", () => {
     context.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test("sqlite storage mode fails hard when SQLite initialization fails", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-sqlite-fail-"));
+  assert.throws(
+    () =>
+      createServerStorage(
+        { storageMode: "sqlite", memoryDbFile: tmpDir },
+        path.join(tmpDir, "sessions.json"),
+        { error() {} }
+      ),
+    /SHIFT_STORAGE_MODE=sqlite requires a working database/
+  );
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });

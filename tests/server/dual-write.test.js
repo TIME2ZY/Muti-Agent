@@ -416,12 +416,26 @@ test("sqlite mode restores sessions after file loss and continues the message se
       continued.messages.map((message) => message.content),
       ["durable first prompt", "hello", "continued after restart", "hello"]
     );
-    assert.equal(fs.existsSync(sessionsFile), true);
+    // sqlite mode is true single-write: no sessions.json / transcript resurrection.
+    assert.equal(fs.existsSync(sessionsFile), false);
+    assert.equal(fs.existsSync(transcriptDir), false);
 
     const recall = await apiFetch(
       `${secondUrl}/api/callbacks/session-search?sessionId=${session.id}&query=durable%20first`
     ).then((response) => response.json());
     assert.ok(recall.hits.some((hit) => hit.kind === "message.user"));
+
+    // Causal fields are populated for user-triggered turns.
+    const { createStorage } = require("../../src/storage");
+    const storage = createStorage({ file: memoryDbFile });
+    try {
+      const invocations = storage.invocations.listForThread(session.id);
+      assert.ok(invocations.length >= 2);
+      assert.ok(invocations.every((item) => item.triggerType === "user-message"));
+      assert.ok(invocations.every((item) => typeof item.triggerMessageId === "string"));
+    } finally {
+      storage.close();
+    }
   } finally {
     if (firstServer) await new Promise((resolve) => firstServer.close(resolve));
     if (secondServer) await new Promise((resolve) => secondServer.close(resolve));

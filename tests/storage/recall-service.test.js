@@ -257,45 +257,49 @@ test("recall service uses SQLite when transcript reads fail", async () => {
   }
 });
 
-test("sqlite mode treats SQLite invocation data as primary and files as legacy fallback", async () => {
-  const filePrimaryConflict = {
-    invocationId: "invocation-1",
-    agent: "file-agent",
-    startedAt: "2026-07-12T00:00:00.000Z",
-    endedAt: "2026-07-12T00:01:00.000Z",
-    state: "completed",
-    eventCount: 99,
-  };
-  const legacy = {
-    invocationId: "legacy-invocation",
-    agent: "opencode",
-    startedAt: "2026-07-11T00:00:00.000Z",
-    endedAt: null,
-    state: null,
-    eventCount: 2,
-  };
+test("sqlite mode is strict single-store and ignores transcript listings", async () => {
+  let fileListCalls = 0;
+  let fileReadCalls = 0;
   const { storage } = createFixture();
   const service = createRecallService({
     mode: "sqlite",
     storage,
     transcript: {
-      listInvocationsWithMeta: async () => [filePrimaryConflict, legacy],
+      listInvocationsWithMeta: async () => {
+        fileListCalls += 1;
+        return [
+          {
+            invocationId: "legacy-invocation",
+            agent: "opencode",
+            startedAt: "2026-07-11T00:00:00.000Z",
+            endedAt: null,
+            state: null,
+            eventCount: 2,
+          },
+        ];
+      },
       searchTranscript: async () => [],
-      readInvocationPage: async () => ({
-        events: Array.from({ length: 5 }, () => ({ kind: "file" })),
-        total: 5,
-        from: 0,
-        limit: 200,
-      }),
+      readInvocationPage: async () => {
+        fileReadCalls += 1;
+        return {
+          events: Array.from({ length: 5 }, () => ({ kind: "file" })),
+          total: 5,
+          from: 0,
+          limit: 200,
+        };
+      },
     },
   });
   try {
     const listed = await service.listInvocationsWithMeta("thread-1");
-    assert.equal(listed.length, 2);
-    assert.equal(listed.find((item) => item.invocationId === "invocation-1").agent, "codex");
-    assert.ok(listed.some((item) => item.invocationId === "legacy-invocation"));
+    assert.equal(fileListCalls, 0);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].invocationId, "invocation-1");
+    assert.equal(listed[0].agent, "codex");
+    assert.ok(!listed.some((item) => item.invocationId === "legacy-invocation"));
 
     const page = await service.readInvocationPage("thread-1", "invocation-1");
+    assert.equal(fileReadCalls, 0);
     assert.equal(page.total, 1);
     assert.equal(page.events[0].kind, "text.delta");
   } finally {
