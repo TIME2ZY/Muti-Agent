@@ -84,6 +84,7 @@ function mapThread(row) {
     lastAgentId: row.last_agent_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    nextMessageSequence: row.next_message_sequence,
   };
 }
 

@@ -230,6 +230,93 @@ const MIGRATIONS = Object.freeze([
         );
     `,
   },
+  {
+    version: 5,
+    name: "sqlite_sequence_and_causality",
+    sql: `
+      ALTER TABLE threads
+        ADD COLUMN next_message_sequence INTEGER NOT NULL DEFAULT 0
+        CHECK (next_message_sequence >= 0);
+
+      ALTER TABLE invocations
+        ADD COLUMN parent_invocation_id TEXT
+        REFERENCES invocations(id) ON DELETE SET NULL;
+      ALTER TABLE invocations
+        ADD COLUMN trigger_message_id TEXT
+        REFERENCES messages(id) ON DELETE SET NULL;
+      ALTER TABLE invocations ADD COLUMN trigger_type TEXT;
+      ALTER TABLE invocations
+        ADD COLUMN next_event_sequence INTEGER NOT NULL DEFAULT 0
+        CHECK (next_event_sequence >= 0);
+
+      ALTER TABLE messages
+        ADD COLUMN message_type TEXT NOT NULL DEFAULT 'assistant-final';
+
+      UPDATE threads
+      SET next_message_sequence = COALESCE(
+        (
+          SELECT MAX(messages.sequence_no) + 1
+          FROM messages
+          WHERE messages.thread_id = threads.id
+        ),
+        0
+      );
+
+      UPDATE invocations
+      SET next_event_sequence = COALESCE(
+        (
+          SELECT MAX(invocation_events.sequence_no) + 1
+          FROM invocation_events
+          WHERE invocation_events.invocation_id = invocations.id
+        ),
+        0
+      );
+
+      UPDATE messages
+      SET message_type = CASE
+        WHEN role = 'user' THEN 'user'
+        WHEN role = 'system' AND json_valid(metadata_json)
+          THEN CASE json_extract(metadata_json, '$.kind')
+            WHEN 'a2a-route' THEN 'a2a-route'
+            WHEN 'a2a-skipped' THEN 'a2a-skipped'
+            WHEN 'handoff-repair-needed' THEN 'handoff-repair-needed'
+            WHEN 'memory-notice' THEN 'memory-notice'
+            ELSE 'system-notice'
+          END
+        WHEN role = 'system' THEN 'system-notice'
+        WHEN role = 'assistant'
+             AND json_valid(metadata_json)
+             AND json_extract(metadata_json, '$.source') = 'callback'
+          THEN 'assistant-callback'
+        WHEN role = 'assistant' THEN 'assistant-final'
+        ELSE 'system-notice'
+      END;
+
+      UPDATE messages AS candidate
+      SET message_type = 'assistant-callback'
+      WHERE candidate.message_type = 'assistant-final'
+        AND candidate.invocation_id IS NOT NULL
+        AND candidate.id <> (
+          SELECT keeper.id
+          FROM messages AS keeper
+          WHERE keeper.invocation_id = candidate.invocation_id
+            AND keeper.message_type = 'assistant-final'
+          ORDER BY keeper.sequence_no DESC, keeper.id DESC
+          LIMIT 1
+        );
+
+      CREATE INDEX invocations_parent
+        ON invocations(parent_invocation_id)
+        WHERE parent_invocation_id IS NOT NULL;
+      CREATE INDEX invocations_trigger_message
+        ON invocations(trigger_message_id)
+        WHERE trigger_message_id IS NOT NULL;
+      CREATE UNIQUE INDEX messages_one_final_per_invocation
+        ON messages(invocation_id)
+        WHERE invocation_id IS NOT NULL
+          AND message_type = 'assistant-final';
+    `,
+  },
 ]);
 
 module.exports = { PRAGMAS, MIGRATIONS };
